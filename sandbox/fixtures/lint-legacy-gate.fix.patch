@@ -1,0 +1,38 @@
+diff --git a/internal/legacy/legacy.go b/internal/legacy/legacy.go
+index de492f2..caf2748 100644
+--- a/internal/legacy/legacy.go
++++ b/internal/legacy/legacy.go
+@@ -9,10 +9,16 @@ import (
+ )
+ 
+ // Dump copies a file to stdout.
+-func Dump(path string) {
+-	f, _ := os.Open(path)
+-	io.Copy(os.Stdout, f)
+-	f.Close()
++func Dump(path string) error {
++	f, err := os.Open(path)
++	if err != nil {
++		return err
++	}
++	if _, err := io.Copy(os.Stdout, f); err != nil {
++		_ = f.Close()
++		return err
++	}
++	return f.Close()
+ }
+ 
+ // Join joins words with commas.
+@@ -28,7 +34,9 @@ func Join(words []string) string {
+ }
+ 
+ // Shout upper-cases and prints s.
+-func Shout(s string) {
+-	fmt.Fprintln(os.Stdout, strings.ToUpper(s))
+-	os.Stdout.Sync()
++func Shout(s string) error {
++	if _, err := fmt.Fprintln(os.Stdout, strings.ToUpper(s)); err != nil {
++		return err
++	}
++	return os.Stdout.Sync()
+ }

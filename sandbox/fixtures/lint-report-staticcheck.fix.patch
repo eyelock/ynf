@@ -1,0 +1,33 @@
+diff --git a/internal/report/report.go b/internal/report/report.go
+index 0ec4482..aa4a5bc 100644
+--- a/internal/report/report.go
++++ b/internal/report/report.go
+@@ -7,7 +7,7 @@ import "strings"
+ func CountMatches(lines []string, needle string) int {
+ 	n := 0
+ 	for _, l := range lines {
+-		if strings.Index(l, needle) != -1 {
++		if strings.Contains(l, needle) {
+ 			n++
+ 		}
+ 	}
+@@ -16,16 +16,10 @@ func CountMatches(lines []string, needle string) int {
+ 
+ // Title returns the first non-empty line, or "untitled".
+ func Title(lines []string) string {
+-	title := "untitled"
+-	title = ""
+ 	for _, l := range lines {
+-		if strings.TrimSpace(l) != "" {
+-			title = strings.TrimSpace(l)
+-			break
++		if t := strings.TrimSpace(l); t != "" {
++			return t
+ 		}
+ 	}
+-	if title == "" {
+-		return "untitled"
+-	}
+-	return title
++	return "untitled"
+ }

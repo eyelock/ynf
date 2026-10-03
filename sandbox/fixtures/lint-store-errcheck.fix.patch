@@ -1,0 +1,42 @@
+diff --git a/internal/store/file.go b/internal/store/file.go
+index 4c4b7ad..fbdf69c 100644
+--- a/internal/store/file.go
++++ b/internal/store/file.go
+@@ -1,20 +1,30 @@
+ // Package store keeps small blobs on disk.
+ package store
+ 
+-import "os"
++import (
++	"errors"
++	"os"
++)
+ 
+ // Save writes data to path, replacing any existing file.
+-func Save(path string, data []byte) error {
++func Save(path string, data []byte) (err error) {
+ 	f, err := os.Create(path)
+ 	if err != nil {
+ 		return err
+ 	}
+-	defer f.Close()
+-	f.Write(data)
+-	return nil
++	defer func() {
++		if cerr := f.Close(); cerr != nil && err == nil {
++			err = cerr
++		}
++	}()
++	_, err = f.Write(data)
++	return err
+ }
+ 
+ // Remove deletes path if it exists.
+-func Remove(path string) {
+-	os.Remove(path)
++func Remove(path string) error {
++	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
++		return err
++	}
++	return nil
+ }

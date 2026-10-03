@@ -5,29 +5,55 @@
   "description": "The issues and pull requests the sandbox starts with, and what ynf is expected to do with each. Read by sandbox/terraform.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "fixtures"],
+  "required": [
+    "version",
+    "fixtures"
+  ],
   "properties": {
-    "$schema": { "type": "string" },
-    "version": { "const": 1 },
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "const": 1
+    },
     "fixtures": {
       "type": "array",
       "minItems": 1,
-      "items": { "$ref": "#/$defs/fixture" }
+      "items": {
+        "$ref": "#/$defs/fixture"
+      }
     }
   },
   "$defs": {
     "fixture": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "kind", "title", "body", "labels", "lane", "expect"],
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "body",
+        "labels",
+        "lane",
+        "calibrate",
+        "expect"
+      ],
       "properties": {
         "id": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9-]{0,62}$",
           "description": "Stable name; the Terraform resource key."
         },
-        "kind": { "enum": ["issue", "pull_request"] },
-        "title": { "type": "string", "minLength": 1 },
+        "kind": {
+          "enum": [
+            "issue",
+            "pull_request"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
         "body": {
           "type": "string",
           "pattern": "^fixtures/[a-z0-9-]+\\.md$",
@@ -49,41 +75,193 @@
         "pull_request": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["branch", "files"],
+          "required": [
+            "branch",
+            "files"
+          ],
           "properties": {
-            "branch": { "type": "string", "pattern": "^[A-Za-z0-9._/-]+$" },
+            "branch": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._/-]+$"
+            },
             "files": {
               "type": "string",
               "description": "Directory, relative to sandbox/, whose tree is committed on top of main on the branch."
             }
           }
         },
+        "calibrate": {
+          "$ref": "#/$defs/calibrate"
+        },
         "expect": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["result", "checks"],
+          "required": [
+            "result",
+            "checks"
+          ],
           "properties": {
             "result": {
-              "enum": ["in_review", "escalated", "quarantined", "ignored", "done", "any"],
+              "enum": [
+                "in_review",
+                "escalated",
+                "quarantined",
+                "ignored",
+                "done",
+                "any"
+              ],
               "description": "The work item's state once ynf has nothing more to do without a human."
             },
             "signatures": {
               "type": "array",
-              "items": { "type": "string", "pattern": "^sig/" },
+              "items": {
+                "type": "string",
+                "pattern": "^sig/"
+              },
               "description": "Failure signatures the item's log must contain."
             },
             "checks": {
               "type": "array",
               "minItems": 1,
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "What a reviewer of the run confirms, in words."
             }
           }
         }
       },
-      "if": { "properties": { "kind": { "const": "pull_request" } } },
-      "then": { "required": ["pull_request"] },
-      "else": { "not": { "required": ["pull_request"] } }
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "pull_request"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "pull_request"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "pull_request"
+          ]
+        }
+      }
+    },
+    "calibrate": {
+      "description": "What `make calibrate` checks: the fixture, not the factory. One of three forms: sensors (the lane's scoped sensors before and after a known fix), command (a command-runner lane's diff is non-empty and identical across runs), or disabled (the lane is switched off).",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "before"
+          ],
+          "properties": {
+            "before": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "lint",
+                  "test",
+                  "docs"
+                ]
+              },
+              "uniqueItems": true,
+              "description": "Exactly the sensors that fail before the fix."
+            },
+            "fix": {
+              "type": "string",
+              "pattern": "^fixtures/[a-z0-9-]+\\.fix\\.patch$",
+              "description": "A git patch, relative to sandbox/, applied on top of the fixture's ref."
+            },
+            "after": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "lint",
+                  "test",
+                  "docs"
+                ]
+              },
+              "uniqueItems": true,
+              "description": "Exactly the sensors that still fail after the fix."
+            },
+            "flaky": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sensor",
+                "runs",
+                "min_failures"
+              ],
+              "description": "A sensor excluded from before and after, checked on its own: run it `runs` times on the unfixed ref and expect at least `min_failures` failures.",
+              "properties": {
+                "sensor": {
+                  "enum": [
+                    "lint",
+                    "test",
+                    "docs"
+                  ]
+                },
+                "runs": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50
+                },
+                "min_failures": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          },
+          "dependentRequired": {
+            "fix": [
+              "after"
+            ],
+            "after": [
+              "fix"
+            ]
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command"
+          ],
+          "properties": {
+            "command": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "deterministic"
+              ],
+              "properties": {
+                "deterministic": {
+                  "const": true
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "disabled"
+          ],
+          "properties": {
+            "disabled": {
+              "const": true
+            }
+          }
+        }
+      ]
     }
   }
 }

@@ -2,6 +2,9 @@
 #   make up      create it (or bring it in line with this folder)
 #   make reset   delete it and create it again from scratch
 #   make down    delete it
+#   make calibrate  prove every fixture can still tell a fixed state from an unfixed one (tests
+#                   the fixtures, not the factory; needs ynh with .agents/harness support,
+#                   YNH=/path/to/ynh to choose one)
 # Deleting needs the delete_repo scope: gh auth refresh -s delete_repo
 # State is in s3://ynf-terraform-state.eyelock.net/sandbox/, through the ynf-terraform AWS profile
 # (infra/terraform-state).
@@ -10,7 +13,7 @@ TF := terraform -chdir=terraform
 export GITHUB_TOKEN ?= $(shell gh auth token)
 export AWS_PROFILE ?= ynf-terraform
 
-.PHONY: init validate up down reset plan
+.PHONY: init validate up down reset plan calibrate
 
 init:
 	$(TF) init -upgrade
@@ -31,3 +34,6 @@ down: init
 	$(TF) destroy -auto-approve
 
 reset: down up
+
+calibrate:
+	cd calibrate && go run . -root ..
