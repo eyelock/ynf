@@ -159,3 +159,86 @@ func TestPureAndDeterministic(t *testing.T) {
 		t.Fatalf("retry should carry the failing checks as feedback, got %q", a.Actions[0].Feedback)
 	}
 }
+
+func TestReactions(t *testing.T) {
+	lane := lanes(t).Lanes["lint-paydown"] // changes_requested: resume_with review_comments, max 3
+	poll := decide.Poll{CI: time.Minute, Review: time.Minute}
+	inReview := facts.Facts{Ticket: open(), PR: &facts.PR{Number: 7, State: "open", ChangesRequested: true}}
+
+	d := decide.Decide(decide.Input{Lane: lane, Item: item.Item{State: item.InReview, PR: 7}, Facts: inReview, Event: ev(event.TimerDue, nil), Poll: poll})
+	if d.Item.State != item.Running || d.Actions[0].Kind != decide.Run || !strings.Contains(d.Reason, "resuming with review_comments") {
+		t.Fatalf("resume: %s %v %s", d.Item.State, d.Actions, d.Reason)
+	}
+	d = decide.Decide(decide.Input{Lane: lane, Item: item.Item{State: item.InReview, PR: 7, Counters: map[string]int{"resume/changes_requested": 3}}, Facts: inReview, Event: ev(event.TimerDue, nil), Poll: poll})
+	if d.Item.State != item.Escalated || !strings.Contains(d.Reason, "changes_requested 4 times") {
+		t.Fatalf("resume past max: %s %s", d.Item.State, d.Reason)
+	}
+
+	custom := lane
+	custom.When = map[string]policy.Reaction{
+		"outcome.error":     {Action: "close"},
+		"outcome.stuck":     {Action: "comment"},
+		"outcome.budget":    {Action: "quarantine"},
+		"outcome.tamper":    {Action: "push_commit"},
+		"outcome.aborted":   {Retry: 1}, // no then: escalate
+		"changes_requested": {ResumeWith: "review_comments", Max: 1, Then: "quarantine"},
+	}
+	for outcome, want := range map[string]item.State{"error": item.Closed, "stuck": item.Running, "budget": item.Quarantined, "tamper": item.Escalated} {
+		d := decide.Decide(decide.Input{Lane: custom, Item: item.Item{State: item.Running}, Facts: facts.Facts{Ticket: open()},
+			Event: ev(event.RunFinished, map[string]any{"outcome": outcome}), Poll: poll})
+		if d.Item.State != want {
+			t.Errorf("%s: %s, want %s (%s)", outcome, d.Item.State, want, d.Reason)
+		}
+		if outcome == "tamper" && !strings.Contains(d.Reason, "push_commit is not supported yet") {
+			t.Errorf("unsupported action should say so: %s", d.Reason)
+		}
+	}
+	it := item.Item{State: item.Running, Counters: map[string]int{"retry/outcome.aborted": 1}}
+	if d := decide.Decide(decide.Input{Lane: custom, Item: it, Facts: facts.Facts{Ticket: open()}, Event: ev(event.RunFinished, map[string]any{"outcome": "aborted"}), Poll: poll}); d.Item.State != item.Escalated {
+		t.Errorf("retry without then: %s", d.Item.State)
+	}
+	it = item.Item{State: item.InReview, PR: 7, Counters: map[string]int{"resume/changes_requested": 1}}
+	if d := decide.Decide(decide.Input{Lane: custom, Item: it, Facts: inReview, Event: ev(event.TimerDue, nil), Poll: poll}); d.Item.State != item.Quarantined {
+		t.Errorf("resume then quarantine: %s", d.Item.State)
+	}
+}
+
+func TestEdgeEvents(t *testing.T) {
+	f := lanes(t)
+	gofmt := f.Lanes["gofmt"]
+	poll := decide.Poll{CI: time.Minute, Review: time.Minute}
+
+	bad := gofmt
+	bad.Guards.Eligible = `facts.nope.missing == 1`
+	if d := decide.Decide(decide.Input{Lane: bad, Item: item.Item{}, Facts: facts.Facts{Ticket: open()}, Event: ev(event.TicketMatched, nil), Poll: poll}); d.Item.State != item.Escalated || !strings.Contains(d.Reason, "guard failed") {
+		t.Errorf("guard error: %s %s", d.Item.State, d.Reason)
+	}
+	no := gofmt
+	no.Guards.Eligible = `facts.ticket.state == "closed"`
+	if d := decide.Decide(decide.Input{Lane: no, Item: item.Item{}, Facts: facts.Facts{Ticket: open()}, Event: ev(event.TicketMatched, nil), Poll: poll}); d.Item.State != item.Ignored {
+		t.Errorf("not eligible: %s", d.Item.State)
+	}
+	if d := decide.Decide(decide.Input{Lane: gofmt, Item: item.Item{State: item.Running}, Facts: facts.Facts{Ticket: open()}, Event: ev(event.ActionDone, map[string]any{"action": "comment"}), Poll: poll}); d.Item.State != item.Running {
+		t.Errorf("other action done: %s", d.Item.State)
+	}
+	if d := decide.Decide(decide.Input{Lane: gofmt, Item: item.Item{State: item.Running}, Facts: facts.Facts{Ticket: open()}, Event: ev(event.TicketMatched, nil), Poll: poll}); d.Item.State != item.Running || !strings.Contains(d.Reason, "changes nothing") {
+		t.Errorf("unrelated event while running: %s %s", d.Item.State, d.Reason)
+	}
+	if d := decide.Decide(decide.Input{Lane: gofmt, Item: item.Item{State: item.Proposed, PR: 7}, Facts: facts.Facts{Ticket: open()}, Event: ev(event.TimerDue, nil), Poll: poll}); d.Item.State != item.Escalated || !strings.Contains(d.Reason, "#7 is gone") {
+		t.Errorf("vanished pull request: %s %s", d.Item.State, d.Reason)
+	}
+	due := t0.Add(time.Hour)
+	in := item.Item{State: item.InReview, PR: 7, NextDue: &due, LastRun: &item.Run{ID: "r"}}
+	d := decide.Decide(decide.Input{Lane: gofmt, Item: in, Facts: facts.Facts{Ticket: open(), PR: pr("success")}, Event: ev(event.TimerDue, nil), Poll: poll})
+	if d.Item.State != item.InReview || !strings.Contains(d.Reason, "in review") || in.NextDue != &due || *in.NextDue != due {
+		t.Errorf("in review stays: %s %s", d.Item.State, d.Reason)
+	}
+	if d := decide.Decide(decide.Input{Lane: gofmt, Item: item.Item{State: item.Running}, Facts: facts.Facts{Ticket: open()},
+		Event: ev(event.ActionDone, map[string]any{"action": "open_pr", "ok": true, "pr": 9, "branch": "b"}), Poll: poll}); d.Item.PR != 9 {
+		t.Errorf("int pr number: %d", d.Item.PR)
+	}
+	if d := decide.Decide(decide.Input{Lane: gofmt, Item: item.Item{State: item.Running}, Facts: facts.Facts{Ticket: open()},
+		Event: ev(event.RunFinished, map[string]any{"outcome": "converged", "changed": []string{"a.go"}}), Poll: poll}); len(d.Actions) != 1 || d.Actions[0].Kind != decide.OpenPR {
+		t.Errorf("string list of changes: %v", d.Actions)
+	}
+}

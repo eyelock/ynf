@@ -51,6 +51,26 @@ lanes:
       runner: command
       command: {argv: [sh, -c, "mkdir -p .github/workflows && echo x > .github/workflows/x.yml"]}
     when: {converged: open_pr}
+  agent:
+    kind: originate
+    intake: [{github.search: "label:ynf:agent", every: 5m}, {jira.search: "project = X", every: 5m}]
+    run:
+      runner: command
+      command:
+        argv:
+          - sh
+          - -c
+          - |
+            gofmt -w ./internal/format && echo '{"outcome":"converged","model":"claude/opus","session":"S-42"}' > {run_dir}/result.json
+        result_file: "{run_dir}/result.json"
+    when: {converged: open_pr}
+  adopt:
+    kind: adopt
+    intake: [{github.search: "label:ynf:adopt", every: 5m}]
+    run:
+      runner: command
+      command: {argv: ["true"]}
+    when: {converged: push_commit}
   off:
     kind: originate
     enabled: false
@@ -85,7 +105,7 @@ func (f *fakeForge) Search(_ context.Context, q string) ([]forge.Hit, error) {
 	for n, ls := range f.labels {
 		for _, l := range ls {
 			if strings.Contains(q, "label:"+l) {
-				hits = append(hits, forge.Hit{Repo: "o/r", Number: n})
+				hits = append(hits, forge.Hit{Repo: "o/r", Number: n, IsPR: l == "ynf:adopt"})
 			}
 		}
 	}
@@ -431,5 +451,80 @@ func TestPolicyErrors(t *testing.T) {
 	h.f.lanes = ""
 	if _, err := h.e.Policy(ctx, "o/r"); err != nil {
 		t.Logf("empty lanes file: %v", err)
+	}
+}
+
+func TestRunnerReportedModelAndSessionBecomeTrailers(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:agent"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Proposed {
+		t.Fatalf("%s %s", it.State, it.Reason)
+	}
+	msg := git(t, h.remote, "log", "-1", "--format=%B", "ynf/issue-1")
+	for _, want := range []string{"Co-Authored-By: claude/opus <noreply@anthropic.com>", "YNH-Session: S-42"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("commit lacks %q:\n%s", want, msg)
+		}
+	}
+}
+
+func TestUnsupportedIntakesAndRemovedLanes(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.f.labels[8] = []string{"ynf:adopt"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if items, _ := h.e.Items(ctx); len(items) != 0 {
+		t.Fatalf("adopt lanes should not track anything yet: %+v", items)
+	}
+
+	// An item whose lane was deleted from the policy is treated as switched off.
+	key := item.IssueKey("o/r", 9)
+	h.f.labels[9] = []string{"x"}
+	if err := lease.Create(ctx, h.e.Store, item.Item{Key: key, Lane: "deleted", Repo: "o/r", Number: 9, State: item.Ready}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.e.Store.Schedule(ctx, key, h.e.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := h.e.RunDue(ctx); err != nil || n != 1 {
+		t.Fatalf("%d %v", n, err)
+	}
+	if it := h.item(t, 9); it.State != item.Ignored {
+		t.Fatalf("%s %s", it.State, it.Reason)
+	}
+
+	// Lane filters keep other lanes' items out of RunDue, Items and Settled.
+	h.e.Lanes = []string{"fmt"}
+	_ = h.e.Store.Schedule(ctx, key, h.e.Now())
+	if n, _ := h.e.RunDue(ctx); n != 0 {
+		t.Fatalf("stepped an item outside the lane filter")
+	}
+	if items, _ := h.e.Items(ctx); len(items) != 0 {
+		t.Fatalf("listed an item outside the lane filter")
+	}
+}
+
+func TestClosedTicketAndMissingRepoPolicy(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:fmt", "pkg:internal/format"}
+	h.f.closed[1] = true
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Closed {
+		t.Fatalf("%s", it.State)
+	}
+	h.e.Repos = []string{"o/r", "o/missing"}
+	h.f.lanes = ""
+	h.e.ResetPolicies()
+	if err := h.e.Sweep(ctx); err == nil {
+		t.Fatal("an unreadable lanes file should be reported")
 	}
 }
