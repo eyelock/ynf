@@ -4,6 +4,15 @@
   "version": "0.1.0",
   "description": "The sandbox's own harness: lint, docs and CI-fix focuses with deterministic sensors",
   "default_vendor": "claude",
+  "env_passthrough": [
+    "ANTHROPIC_API_KEY",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "no_proxy"
+  ],
   "focuses": {
     "tidy": {
       "prompt": "Fix the lint findings described in the task, in the package the task names and nowhere else. Fix the cause; do not silence a finding with a nolint comment or by discarding an error with `_ =`. Do not edit linter configuration, sensor scripts or CI workflows. Stop when the change is ready: do not commit, push or open pull requests, because whatever ran you does that."
@@ -25,21 +34,33 @@
       "category": "maintainability",
       "tolerance": "blocking",
       "version_command": "golangci-lint version",
-      "source": { "command": "golangci-lint run ./..." },
-      "output": { "format": "text" }
+      "source": {
+        "command": "golangci-lint run ./..."
+      },
+      "output": {
+        "format": "text"
+      }
     },
     "test": {
       "category": "behaviour",
       "tolerance": "blocking",
       "version_command": "go version",
-      "source": { "command": "go test -count=1 ./..." },
-      "output": { "format": "text" }
+      "source": {
+        "command": "go test -count=1 ./..."
+      },
+      "output": {
+        "format": "text"
+      }
     },
     "docs": {
       "category": "maintainability",
       "tolerance": "blocking",
-      "source": { "command": "sh scripts/check-docs.sh" },
-      "output": { "format": "text" }
+      "source": {
+        "command": "sh scripts/check-docs.sh"
+      },
+      "output": {
+        "format": "text"
+      }
     }
   }
 }
