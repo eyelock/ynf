@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eyelock.github.io/ynf/schema/config.schema.json",
+  "title": "ynf config",
+  "description": "ynf's own configuration: which repositories it watches, where its state lives, and how it runs. Found at config.yaml in the home factory folder (~/.agents/factory/, or a fallback, ADR-009), or passed with --config.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "repos"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "const": 1
+    },
+    "repos": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$"
+      },
+      "description": "Enrolled repositories (owner/name). ynf reads each one's lanes from its default branch."
+    },
+    "store": {
+      "type": "string",
+      "description": "Where state lives: sqlite://<path> (relative to the config file's folder), s3://bucket/prefix or dynamodb://table. Default sqlite://state.db.",
+      "pattern": "^(sqlite|s3|dynamodb)://.+"
+    },
+    "work_dir": {
+      "type": "string",
+      "description": "Where repository mirrors and per-step worktrees live, relative to the config file's folder. Default work."
+    },
+    "owner": {
+      "type": "string",
+      "description": "This instance's name in leases. Default ynf@<hostname>/<pid>."
+    },
+    "github": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "token_env": {
+          "type": "string",
+          "description": "Environment variable holding the GitHub token ynf uses for the forge. Default GITHUB_TOKEN, falling back to `gh auth token`."
+        },
+        "author": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "email"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            }
+          },
+          "description": "The git author of commits ynf writes. Default ynf <ynf@users.noreply.github.com>."
+        }
+      }
+    },
+    "lease": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ttl": {
+          "$ref": "#/$defs/duration",
+          "description": "Default 90s (ADR-005)."
+        },
+        "heartbeat": {
+          "$ref": "#/$defs/duration",
+          "description": "Default 30s."
+        }
+      }
+    },
+    "poll": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ci": {
+          "$ref": "#/$defs/duration",
+          "description": "How often a proposed item's checks are probed. Default 30s."
+        },
+        "review": {
+          "$ref": "#/$defs/duration",
+          "description": "How often an item in review is probed for merge, close or review. Default 5m."
+        }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Memory (ADR-008). Without this block ynf uses ynm when it is on PATH and nothing otherwise (ADR-012).",
+      "properties": {
+        "provider": {
+          "enum": [
+            "ynm",
+            "none"
+          ],
+          "description": "ynm, or none to switch memory off even when ynm is installed."
+        },
+        "namespace": {
+          "type": "string",
+          "description": "The namespace a repository's memories go to; {repo} is owner/name. Default factory/{repo}."
+        },
+        "context_budget_tokens": {
+          "type": "integer",
+          "minimum": 100,
+          "description": "Tokens of memory added to a run's task. Default 1000."
+        },
+        "cwd": {
+          "type": "string",
+          "description": "The directory ynm runs as if from, which picks its store; relative to the config file. Default: where ynf runs."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "duration": {
+      "type": "string",
+      "pattern": "^[0-9]+(ms|s|m|h)$"
+    }
+  }
+}

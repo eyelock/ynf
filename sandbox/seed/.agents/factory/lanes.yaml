@@ -3,6 +3,10 @@
 # The sandbox's factory: five lanes, one per kind of work, so every ynf path has a lane to run in.
 # Every fixture carries a `pkg:<path>` label; lanes use it to scope the harness's sensors to the
 # part of the repository the work is about, so a run is judged on its own debt, not everyone's.
+# The ynh lanes run in an agent image ynf builds from this repository's own harness on
+# ynf-sandbox-agent:latest (sandbox/images/agent, `make agent-image`), which has the Go toolchain
+# and golangci-lint the sensors need. ANTHROPIC_API_KEY is passed in by name; api.anthropic.com is
+# allowed through the egress proxy without being listed.
 # Lint gets a cache inside the worktree: golangci-lint's shared cache attributes findings to
 # whichever copy of identical code it saw first, and --new-from-merge-base then drops them.
 version: 1
@@ -22,8 +26,10 @@ lanes:
         every: 5m
     run:
       runner: ynh
+      env: [ANTHROPIC_API_KEY]
       ynh:
         harness: .
+        base: ynf-sandbox-agent:latest
         focus: tidy
         sensor_scope:
           lint: 'GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run ./{label.pkg}/...'
@@ -48,8 +54,10 @@ lanes:
         every: 5m
     run:
       runner: ynh
+      env: [ANTHROPIC_API_KEY]
       ynh:
         harness: .
+        base: ynf-sandbox-agent:latest
         focus: docs
         sensor_scope:
           lint: 'GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run ./{label.pkg}/...'
@@ -70,6 +78,7 @@ lanes:
         every: 5m
     run:
       runner: command
+      image: golang:1.26-alpine
       command:
         argv: ['gofmt', '-w', './{label.pkg}']
       egress:
@@ -89,8 +98,10 @@ lanes:
       eligible: 'facts.pr.checks.exists(c, c.required && c.conclusion == "failure") && !facts.pr.draft && !facts.pr.fork'
     run:
       runner: ynh
+      env: [ANTHROPIC_API_KEY]
       ynh:
         harness: .
+        base: ynf-sandbox-agent:latest
         focus: fix-ci
         sensor_scope:
           lint: 'GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run --config .golangci.ci.yml --new-from-merge-base=origin/main ./{label.pkg}/...'

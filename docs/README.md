@@ -5,8 +5,9 @@ it watches tickets, pull requests and message topics, decides deterministically 
 turn should be, runs it in a container (with `ynh agent run` when ynh is installed), and remembers
 what keeps going wrong (in [ynm](https://github.com/eyelock/ynm) when it is installed).
 
-> ynf is at the design stage. What is here is the design: the decisions and the reasoning behind
-> them. Tutorials, how-to guides and reference pages arrive with the code.
+> ynf is early. Slice 1a runs: the whole outer loop on lanes that need no agent, from a ticket to a
+> draft pull request with green CI, tested end to end against the sandbox. The ynh runner in a
+> container, the egress proxy, adoption and the hosted service come next.
 
 ynh manages how an agent is guided and runs one bounded, resumable loop against your sensors. ynm
 manages what agents remember. Neither owns what happens *between* runs: noticing a ticket is
@@ -17,14 +18,15 @@ leaves it to the operator. ynf is that operator.
 ## What is here
 
 This documentation follows [Diátaxis](https://diataxis.fr), as ynm's does: four kinds of page,
-each with one job. Two exist so far.
+each with one job.
 
 | | |
 |---|---|
+| [How-to guides](how-to/README.md) | Run ynf locally; test it against the sandbox. |
+| [Reference](reference/README.md) | The CLI, the configuration, and the lanes file. |
 | [Explanation](explanation/README.md) | Why ynf is shaped the way it is, starting with the outer loop. |
 | [Architecture decisions](adr/README.md) | Each decision, its alternatives and its consequences, with the requirements they cite. |
-| Tutorials | Ordered lessons that double as acceptance tests. With the code. |
-| How-to guides and reference | Recipes and facts. With the code. |
+| Tutorials | Ordered lessons that double as acceptance tests. Later. |
 
 ## The shape of it
 

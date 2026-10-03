@@ -61,7 +61,8 @@ repository is disposable.
 | `seed/.agents/factory/lanes.yaml` | The sandbox's factory: five lanes ([schema](../docs/schema/lanes.schema.json)) |
 | `seed/.agents/harness/plugin.json` | The sandbox's own ynh harness: `tidy`, `docs` and `fix-ci` focuses; `lint`, `test` and `docs` sensors |
 | `fixtures.yaml` | Every issue and pull request, its lane, and what ynf should do with it ([schema](fixtures.schema.json)) |
-| `fixtures/` | Issue and pull request bodies, the files committed on fixture branches, and each fixture's known fix (`<id>.fix.patch`) |
+| `fixtures/` | Issue and pull request bodies, the files committed on fixture branches (in `<id>/testdata/`, so Go tooling in this repository ignores their planted problems), and each fixture's known fix (`<id>.fix.patch`) |
+| `images/agent/` | The agent base image the ynh lanes build on: ynh's image plus Go and golangci-lint (`make agent-image`) |
 | `calibrate/` | `make calibrate`: a small Go program that proves each fixture still fails before its known fix and passes after |
 | `terraform/` | The repository, labels, issues, fixture pull request and branch protection |
 | `scripts/` | The two git steps Terraform calls: the seed commit and the fixture branch |

@@ -5,10 +5,18 @@
   "description": "Lane policy for ynf: when to run, with which runner, and what to do with each outcome. Found at .agents/factory/lanes.yaml (or a fallback, ADR-009). See ADR-006.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "lanes"],
+  "required": [
+    "version",
+    "lanes"
+  ],
   "properties": {
-    "$schema": { "type": "string" },
-    "version": { "const": 1, "description": "Lane file format version." },
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "const": 1,
+      "description": "Lane file format version."
+    },
     "defaults": {
       "$ref": "#/$defs/laneDefaults",
       "description": "Values every lane in this file inherits unless it sets its own."
@@ -16,8 +24,12 @@
     "lanes": {
       "type": "object",
       "description": "Lanes by name. A target repository's lane with the same name as a config repository's lane overrides it key by key.",
-      "propertyNames": { "$ref": "#/$defs/name" },
-      "additionalProperties": { "$ref": "#/$defs/lane" },
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/lane"
+      },
       "minProperties": 1
     }
   },
@@ -29,18 +41,30 @@
     "duration": {
       "type": "string",
       "pattern": "^[0-9]+(s|m|h|d)$",
-      "examples": ["30s", "5m", "1h", "90d"]
+      "examples": [
+        "30s",
+        "5m",
+        "1h",
+        "90d"
+      ]
     },
     "glob": {
       "type": "string",
       "minLength": 1,
-      "examples": ["internal/**", "README.md", "**/*.go"]
+      "examples": [
+        "internal/**",
+        "README.md",
+        "**/*.go"
+      ]
     },
     "host": {
       "type": "string",
       "pattern": "^(\\*\\.)?[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+$",
       "description": "A hostname, optionally with a leading wildcard label.",
-      "examples": ["proxy.golang.org", "*.githubusercontent.com"]
+      "examples": [
+        "proxy.golang.org",
+        "*.githubusercontent.com"
+      ]
     },
     "template": {
       "type": "string",
@@ -51,16 +75,34 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "executor": { "$ref": "#/$defs/executor" },
-        "attempts": { "$ref": "#/$defs/attempts" },
-        "retention": { "$ref": "#/$defs/duration" },
-        "egress": { "$ref": "#/$defs/egress" },
-        "stop": { "$ref": "#/$defs/stop" },
-        "pr": { "$ref": "#/$defs/pr" }
+        "executor": {
+          "$ref": "#/$defs/executor"
+        },
+        "attempts": {
+          "$ref": "#/$defs/attempts"
+        },
+        "retention": {
+          "$ref": "#/$defs/duration"
+        },
+        "egress": {
+          "$ref": "#/$defs/egress"
+        },
+        "stop": {
+          "$ref": "#/$defs/stop"
+        },
+        "pr": {
+          "$ref": "#/$defs/pr"
+        }
       }
     },
     "executor": {
-      "enum": ["docker", "ecs", "k8s-job", "ci-inline", "process"],
+      "enum": [
+        "docker",
+        "ecs",
+        "k8s-job",
+        "ci-inline",
+        "process"
+      ],
       "description": "How the runner is contained. 'process' is accepted only for interactive steps and shadow mode (ADR-007)."
     },
     "attempts": {
@@ -72,33 +114,63 @@
     "lane": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "intake", "run", "when"],
+      "required": [
+        "kind",
+        "intake",
+        "run",
+        "when"
+      ],
       "properties": {
         "kind": {
-          "enum": ["originate", "adopt"],
+          "enum": [
+            "originate",
+            "adopt"
+          ],
           "description": "originate: ynf creates the branch and pull request. adopt: ynf works on a pull request someone else opened (ADR-002)."
         },
-        "enabled": { "type": "boolean", "default": true },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
         "intake": {
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/intake" }
+          "items": {
+            "$ref": "#/$defs/intake"
+          }
         },
         "guards": {
           "type": "object",
           "description": "CEL expressions over structured facts. Free text is not in the CEL environment (ADR-006).",
           "additionalProperties": false,
           "properties": {
-            "eligible": { "type": "string", "minLength": 1 }
+            "eligible": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         },
-        "run": { "$ref": "#/$defs/run" },
-        "when": { "$ref": "#/$defs/when" },
-        "pr": { "$ref": "#/$defs/pr" },
-        "stop": { "$ref": "#/$defs/stop" },
-        "executor": { "$ref": "#/$defs/executor" },
-        "attempts": { "$ref": "#/$defs/attempts" },
-        "retention": { "$ref": "#/$defs/duration" }
+        "run": {
+          "$ref": "#/$defs/run"
+        },
+        "when": {
+          "$ref": "#/$defs/when"
+        },
+        "pr": {
+          "$ref": "#/$defs/pr"
+        },
+        "stop": {
+          "$ref": "#/$defs/stop"
+        },
+        "executor": {
+          "$ref": "#/$defs/executor"
+        },
+        "attempts": {
+          "$ref": "#/$defs/attempts"
+        },
+        "retention": {
+          "$ref": "#/$defs/duration"
+        }
       }
     },
     "intake": {
@@ -106,32 +178,60 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["github.search", "every"],
+          "required": [
+            "github.search",
+            "every"
+          ],
           "properties": {
-            "github.search": { "type": "string", "description": "A GitHub search query for issues or pull requests." },
-            "every": { "$ref": "#/$defs/duration" }
+            "github.search": {
+              "type": "string",
+              "description": "A GitHub search query for issues or pull requests."
+            },
+            "every": {
+              "$ref": "#/$defs/duration"
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["jira.search", "every"],
+          "required": [
+            "jira.search",
+            "every"
+          ],
           "properties": {
-            "jira.search": { "type": "string", "description": "A JQL query." },
-            "every": { "$ref": "#/$defs/duration" }
+            "jira.search": {
+              "type": "string",
+              "description": "A JQL query."
+            },
+            "every": {
+              "$ref": "#/$defs/duration"
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["github.webhook"],
+          "required": [
+            "github.webhook"
+          ],
           "properties": {
             "github.webhook": {
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "labels": { "type": "array", "items": { "type": "string" } },
-                "repos": { "type": "array", "items": { "type": "string" } }
+                "labels": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "repos": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
               }
             }
           }
@@ -139,28 +239,49 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["jira.webhook"],
+          "required": [
+            "jira.webhook"
+          ],
           "properties": {
             "jira.webhook": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["jql"],
-              "properties": { "jql": { "type": "string" } }
+              "required": [
+                "jql"
+              ],
+              "properties": {
+                "jql": {
+                  "type": "string"
+                }
+              }
             }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["topic"],
+          "required": [
+            "topic"
+          ],
           "properties": {
             "topic": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["url"],
+              "required": [
+                "url"
+              ],
               "properties": {
-                "url": { "type": "string", "description": "sqs://, sns://, nats://, pubsub://, kafka:// or eventbridge:// URL." },
-                "types": { "type": "array", "items": { "type": "string" }, "description": "ynf event types to accept from the topic." }
+                "url": {
+                  "type": "string",
+                  "description": "sqs://, sns://, nats://, pubsub://, kafka:// or eventbridge:// URL."
+                },
+                "types": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "ynf event types to accept from the topic."
+                }
               }
             }
           }
@@ -172,55 +293,151 @@
       "additionalProperties": false,
       "properties": {
         "runner": {
-          "enum": ["ynh", "command"],
+          "enum": [
+            "ynh",
+            "command"
+          ],
           "description": "Omit to use the detected runner (ADR-012). Naming a runner the host cannot provide fails the lane at load."
         },
-        "executor": { "$ref": "#/$defs/executor" },
-        "egress": { "$ref": "#/$defs/egress" },
+        "executor": {
+          "$ref": "#/$defs/executor"
+        },
+        "image": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The container image a docker, ecs or k8s-job executor runs the command runner in, pinned by tag or digest. The ynh runner builds its own with `ynh image`."
+        },
+        "egress": {
+          "$ref": "#/$defs/egress"
+        },
+        "env": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z_][A-Z0-9_]*$"
+          },
+          "description": "Names of variables passed from ynf's environment into the run, such as the model provider's key. Values are never logged or recorded. Nothing else from ynf's environment reaches a contained run."
+        },
         "ynh": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["harness"],
+          "required": [
+            "harness"
+          ],
           "properties": {
-            "harness": { "type": "string", "description": "A harness id (org/name@version) or '.' for the repository's own harness." },
-            "focus": { "type": "string" },
-            "profile": { "type": "string" },
-            "sandbox": { "enum": ["srt"] },
+            "harness": {
+              "type": "string",
+              "description": "A path to a harness folder in the repository ('.' for its own .agents/harness), from which ynf builds the run's image with `ynh image --entrypoint agent`; or an installed id, with run.image naming a prebuilt agent image."
+            },
+            "focus": {
+              "type": "string"
+            },
+            "profile": {
+              "type": "string"
+            },
+            "sandbox": {
+              "enum": [
+                "srt"
+              ]
+            },
             "budgets": {
               "type": "object",
               "additionalProperties": false,
               "description": "May only tighten the harness's own budgets (ADR-006).",
               "properties": {
-                "max_turns": { "type": "integer", "minimum": 1 },
-                "max_tokens": { "type": "integer", "minimum": 1 },
-                "max_wall": { "$ref": "#/$defs/duration" }
+                "max_turns": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "max_tokens": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "max_wall": {
+                  "$ref": "#/$defs/duration"
+                }
               }
             },
             "sensor_scope": {
               "type": "object",
               "description": "Narrow a sensor the harness declares to the item, through ynh's --sensor-overlay. Cannot add, remove or relax a sensor.",
-              "additionalProperties": { "$ref": "#/$defs/template" }
+              "additionalProperties": {
+                "$ref": "#/$defs/template"
+              }
+            },
+            "vendor": {
+              "enum": [
+                "claude",
+                "codex",
+                "cursor",
+                "copilot"
+              ],
+              "description": "The vendor the harness runs. Its API host is allowed through the egress proxy without being listed (ADR-007). Default: the harness's default_vendor, treated as claude for egress."
+            },
+            "base": {
+              "type": "string",
+              "description": "The base image `ynh image --base` builds the harness image on, for lanes whose sensors need tools the default ynh image lacks."
             }
           }
         },
         "command": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["argv"],
+          "required": [
+            "argv"
+          ],
           "properties": {
             "argv": {
               "type": "array",
               "minItems": 1,
-              "items": { "$ref": "#/$defs/template" },
+              "items": {
+                "$ref": "#/$defs/template"
+              },
               "description": "Run without a shell. Exit 0 is 'converged', anything else 'error', unless result_file says more."
             },
-            "result_file": { "type": "string", "description": "Where the command writes a ynf RunResult, if it does." }
+            "result_file": {
+              "type": "string",
+              "description": "Where the command writes a ynf RunResult, if it does."
+            }
           }
         }
       },
       "allOf": [
-        { "if": { "properties": { "runner": { "const": "ynh" } }, "required": ["runner"] }, "then": { "required": ["ynh"] } },
-        { "if": { "properties": { "runner": { "const": "command" } }, "required": ["runner"] }, "then": { "required": ["command"] } }
+        {
+          "if": {
+            "properties": {
+              "runner": {
+                "const": "ynh"
+              }
+            },
+            "required": [
+              "runner"
+            ]
+          },
+          "then": {
+            "required": [
+              "ynh"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "runner": {
+                "const": "command"
+              }
+            },
+            "required": [
+              "runner"
+            ]
+          },
+          "then": {
+            "required": [
+              "command"
+            ]
+          }
+        }
       ]
     },
     "egress": {
@@ -229,7 +446,9 @@
       "properties": {
         "allow": {
           "type": "array",
-          "items": { "$ref": "#/$defs/host" },
+          "items": {
+            "$ref": "#/$defs/host"
+          },
           "description": "Hosts a run may reach besides the model provider. Everything else is denied and logged (ADR-007)."
         }
       }
@@ -243,7 +462,9 @@
           "$ref": "#/$defs/reaction"
         }
       },
-      "required": ["converged"]
+      "required": [
+        "converged"
+      ]
     },
     "action": {
       "enum": [
@@ -258,24 +479,48 @@
     },
     "reaction": {
       "oneOf": [
-        { "$ref": "#/$defs/action" },
+        {
+          "$ref": "#/$defs/action"
+        },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["retry", "then"],
+          "required": [
+            "retry",
+            "then"
+          ],
           "properties": {
-            "retry": { "type": "integer", "minimum": 1, "maximum": 5 },
-            "then": { "$ref": "#/$defs/action" }
+            "retry": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5
+            },
+            "then": {
+              "$ref": "#/$defs/action"
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["resume_with"],
+          "required": [
+            "resume_with"
+          ],
           "properties": {
-            "resume_with": { "enum": ["review_comments", "ci_output"] },
-            "max": { "type": "integer", "minimum": 1, "maximum": 10 },
-            "then": { "$ref": "#/$defs/action" }
+            "resume_with": {
+              "enum": [
+                "review_comments",
+                "ci_output"
+              ]
+            },
+            "max": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10
+            },
+            "then": {
+              "$ref": "#/$defs/action"
+            }
           }
         }
       ]
@@ -286,10 +531,22 @@
       "properties": {
         "allowed_paths": {
           "type": "array",
-          "items": { "$ref": "#/$defs/glob" },
+          "items": {
+            "$ref": "#/$defs/glob"
+          },
           "description": "The diff gate refuses a change outside these paths (ADR-007). Protected paths are refused regardless."
         },
-        "draft": { "type": "boolean", "default": true }
+        "draft": {
+          "type": "boolean",
+          "default": true
+        },
+        "protected_paths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/glob"
+          },
+          "description": "Paths the diff gate refuses in addition to ynf's built-in protected paths (CI workflows, CODEOWNERS, .agents/, .ynh/, .ynm/, .ynf/), for example a linter's configuration."
+        }
       }
     },
     "stop": {
@@ -297,11 +554,27 @@
       "additionalProperties": false,
       "description": "Stop conditions that pause the lane (ADR-010).",
       "properties": {
-        "yield_floor": { "type": "number", "minimum": 0, "maximum": 1 },
-        "review_time_ceiling": { "$ref": "#/$defs/duration" },
-        "escaped_defects": { "type": "integer", "minimum": 0 },
-        "max_open_proposals": { "type": "integer", "minimum": 1 },
-        "min_sample": { "type": "integer", "minimum": 1, "default": 20 }
+        "yield_floor": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "review_time_ceiling": {
+          "$ref": "#/$defs/duration"
+        },
+        "escaped_defects": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_open_proposals": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "min_sample": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 20
+        }
       }
     }
   }

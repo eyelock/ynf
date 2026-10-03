@@ -1,6 +1,17 @@
 * **Start**
   * [Overview](/README.md)
 
+* **How-to guides**
+  * [How-to overview](/how-to/README.md)
+  * [Run ynf locally](/how-to/run-ynf-locally.md)
+  * [Test against the sandbox](/how-to/test-against-the-sandbox.md)
+
+* **Reference**
+  * [Reference overview](/reference/README.md)
+  * [CLI](/reference/cli.md)
+  * [Configuration](/reference/configuration.md)
+  * [Lanes](/reference/lanes.md)
+
 * **Explanation**
   * [Explanation overview](/explanation/README.md)
   * [The outer loop](/explanation/the-outer-loop.md)

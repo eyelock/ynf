@@ -4,3 +4,6 @@
 sandbox/terraform/.terraform/
 sandbox/terraform/*.tfstate
 sandbox/terraform/*.tfstate.*
+
+# Built binaries
+bin/
