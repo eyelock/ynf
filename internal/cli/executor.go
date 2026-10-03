@@ -31,7 +31,8 @@ func (a *app) executor(name string) (executor.Executor, error) {
 }
 
 // linuxBinary finds a static linux ynf for docker's architecture: YNF_LINUX_BINARY, this binary
-// when it already is one, or ynf-linux-<arch> beside it (make build puts it there).
+// when it already is one, or ynf-linux-<arch> beside it or in ../libexec (where the Homebrew
+// formula installs it, off PATH).
 func linuxBinary() string {
 	if p := os.Getenv("YNF_LINUX_BINARY"); p != "" {
 		return p
@@ -47,9 +48,21 @@ func linuxBinary() string {
 	if runtime.GOOS == "linux" && runtime.GOARCH == arch {
 		return self
 	}
-	p := filepath.Join(filepath.Dir(self), "ynf-linux-"+arch)
-	if _, err := os.Stat(p); err == nil {
-		return p
+	return findBeside(self, "ynf-linux-"+arch)
+}
+
+// findBeside looks for name next to exe, then in ../libexec, following exe's symlink first (a
+// Homebrew bin entry is a link into the Cellar).
+func findBeside(exe, name string) string {
+	dirs := []string{filepath.Dir(exe)}
+	if real, err := filepath.EvalSymlinks(exe); err == nil {
+		dirs = append(dirs, filepath.Dir(real), filepath.Join(filepath.Dir(real), "..", "libexec"))
+	}
+	for _, d := range dirs {
+		p := filepath.Join(d, name)
+		if _, err := os.Stat(p); err == nil {
+			return filepath.Clean(p)
+		}
 	}
 	return ""
 }
