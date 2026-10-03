@@ -10,6 +10,10 @@ make reset    # delete it and build it again from scratch
 make down     # delete it
 ```
 
+State is kept in `s3://ynf-terraform-state.eyelock.net/sandbox/terraform.tfstate` through the
+`ynf-terraform` AWS profile ([`infra/terraform-state`](../infra/terraform-state/README.md)), so
+any machine with that profile can reset the sandbox.
+
 Deleting needs a token with the `delete_repo` scope, which `gh` does not ask for by default:
 
 ```bash
@@ -29,7 +33,7 @@ repository is disposable.
 |---|---|
 | `seed/` | The repository's contents, pushed as one commit on `main` |
 | `seed/.agents/factory/lanes.yaml` | The sandbox's factory: five lanes ([schema](../docs/schema/lanes.schema.json)) |
-| `seed/.ynh-plugin/plugin.json` | The sandbox's own ynh harness: `tidy`, `docs` and `fix-ci` focuses; `lint`, `test` and `docs` sensors |
+| `seed/.agents/harness/plugin.json` | The sandbox's own ynh harness: `tidy`, `docs` and `fix-ci` focuses; `lint`, `test` and `docs` sensors |
 | `fixtures.yaml` | Every issue and pull request, its lane, and what ynf should do with it ([schema](fixtures.schema.json)) |
 | `fixtures/` | Issue and pull request bodies, and the files committed on fixture branches |
 | `terraform/` | The repository, labels, issues, fixture pull request and branch protection |
@@ -76,5 +80,5 @@ Edit `seed/`, `fixtures.yaml` or `fixtures/`, then `make reset`. `main` is prote
 changed seed cannot be pushed over an existing repository; rebuilding is the only path, on
 purpose.
 
-The harness manifest is in `.ynh-plugin/` because released ynh reads it there. When ynh's
-`.agents/harness/` layout ships (ynh PR #394), it moves.
+The harness manifest is at `.agents/harness/plugin.json`, beside the lanes in `.agents/factory/`.
+Running it needs a ynh build that reads `.agents/harness/` (ynh `develop` from `027dc19` on).

@@ -3,9 +3,12 @@
 #   make reset   delete it and create it again from scratch
 #   make down    delete it
 # Deleting needs the delete_repo scope: gh auth refresh -s delete_repo
+# State is in s3://ynf-terraform-state.eyelock.net/sandbox/, through the ynf-terraform AWS profile
+# (infra/terraform-state).
 
 TF := terraform -chdir=terraform
 export GITHUB_TOKEN ?= $(shell gh auth token)
+export AWS_PROFILE ?= ynf-terraform
 
 .PHONY: init validate up down reset plan
 
