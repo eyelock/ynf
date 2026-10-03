@@ -1,0 +1,119 @@
+# yaml-language-server: $schema=https://eyelock.github.io/ynf/schema/lanes.schema.json
+#
+# The sandbox's factory: five lanes, one per kind of work, so every ynf path has a lane to run in.
+# Every fixture carries a `pkg:<path>` label; lanes use it to scope the harness's sensors to the
+# part of the repository the work is about, so a run is judged on its own debt, not everyone's.
+# Lint gets a cache inside the worktree: golangci-lint's shared cache attributes findings to
+# whichever copy of identical code it saw first, and --new-from-merge-base then drops them.
+version: 1
+
+defaults:
+  executor: docker
+  attempts: 3
+  retention: 30d
+  egress:
+    allow: [proxy.golang.org, sum.golang.org, storage.googleapis.com]
+
+lanes:
+  lint-paydown:
+    kind: originate
+    intake:
+      - github.search: 'repo:eyelock/ynf-sandbox is:issue is:open label:"ynf:lint"'
+        every: 5m
+    run:
+      runner: ynh
+      ynh:
+        harness: .
+        focus: tidy
+        sensor_scope:
+          lint: 'GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run ./{label.pkg}/...'
+          test: 'go test -count=1 ./{label.pkg}/...'
+          docs: 'sh scripts/check-docs.sh {label.pkg}'
+    when:
+      converged: open_pr
+      ci_failed: { retry: 2, then: escalate }
+      changes_requested: { resume_with: review_comments, max: 3 }
+      outcome.budget: { retry: 1, then: escalate }
+      outcome.stuck: escalate
+      outcome.tamper: escalate
+    pr:
+      allowed_paths: ['internal/**']
+    stop:
+      max_open_proposals: 5
+
+  doc-drift:
+    kind: originate
+    intake:
+      - github.search: 'repo:eyelock/ynf-sandbox is:issue is:open label:"ynf:docs"'
+        every: 5m
+    run:
+      runner: ynh
+      ynh:
+        harness: .
+        focus: docs
+        sensor_scope:
+          lint: 'GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run ./{label.pkg}/...'
+          test: 'go test -count=1 ./{label.pkg}/...'
+          docs: 'sh scripts/check-docs.sh {label.pkg}'
+    when:
+      converged: open_pr
+      ci_failed: { retry: 1, then: escalate }
+      outcome.stuck: escalate
+      outcome.tamper: escalate
+    pr:
+      allowed_paths: ['README.md', 'docs/**', 'internal/status/**']
+
+  gofmt:
+    kind: originate
+    intake:
+      - github.search: 'repo:eyelock/ynf-sandbox is:issue is:open label:"ynf:fmt"'
+        every: 5m
+    run:
+      runner: command
+      command:
+        argv: ['gofmt', '-w', './{label.pkg}']
+      egress:
+        allow: []
+    when:
+      converged: open_pr
+      ci_failed: escalate
+    pr:
+      allowed_paths: ['**/*.go']
+
+  fix-ci:
+    kind: adopt
+    intake:
+      - github.search: 'repo:eyelock/ynf-sandbox is:pr is:open label:"ynf:fix-ci"'
+        every: 5m
+    guards:
+      eligible: 'facts.pr.checks.exists(c, c.required && c.conclusion == "failure") && !facts.pr.draft && !facts.pr.fork'
+    run:
+      runner: ynh
+      ynh:
+        harness: .
+        focus: fix-ci
+        sensor_scope:
+          lint: 'GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run --config .golangci.ci.yml --new-from-merge-base=origin/main ./{label.pkg}/...'
+          test: 'go test -count=1 ./{label.pkg}/...'
+          docs: 'sh scripts/check-docs.sh {label.pkg}'
+    when:
+      converged: push_commit
+      ci_failed: { retry: 1, then: escalate }
+      outcome.stuck: escalate
+      outcome.tamper: escalate
+    pr:
+      allowed_paths: ['internal/**']
+
+  deps:
+    # Dependency bumps fail ynh's factory-pattern test on blast radius. The lane exists to show a
+    # lane switched off: issues labelled ynf:deps are recorded and ignored.
+    kind: originate
+    enabled: false
+    intake:
+      - github.search: 'repo:eyelock/ynf-sandbox is:issue is:open label:"ynf:deps"'
+        every: 1h
+    run:
+      runner: ynh
+      ynh: { harness: ., focus: tidy }
+    when:
+      converged: open_pr

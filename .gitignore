@@ -1,0 +1,6 @@
+.worktrees/
+
+# Sandbox Terraform state (the lock file is committed)
+sandbox/terraform/.terraform/
+sandbox/terraform/*.tfstate
+sandbox/terraform/*.tfstate.*

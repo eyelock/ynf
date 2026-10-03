@@ -1,0 +1,10 @@
+# The CI gate. Stricter than the harness's sensor on purpose: it also rejects errors discarded with
+# `_ =`, which the harness's errcheck allows. Only new code is checked (--new-from-merge-base), so
+# the seeded debt does not fail every pull request. A change that passes the sensor and fails here
+# is the "converged in the loop, failed in CI" case ynf has to notice.
+version: "2"
+linters:
+  default: standard
+  settings:
+    errcheck:
+      check-blank: true
