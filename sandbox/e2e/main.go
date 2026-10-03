@@ -9,6 +9,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -34,13 +35,19 @@ type fixture struct {
 }
 
 type item struct {
-	Repo   string `json:"repo"`
-	Number int    `json:"number"`
-	Lane   string `json:"lane"`
-	State  string `json:"state"`
-	Reason string `json:"reason"`
-	PR     int    `json:"pr"`
-	Branch string `json:"branch"`
+	LastRun *struct {
+		ID      string `json:"id"`
+		Outcome string `json:"outcome"`
+		Detail  string `json:"detail"`
+	} `json:"last_run"`
+	Counters map[string]int `json:"counters"`
+	Repo     string         `json:"repo"`
+	Number   int            `json:"number"`
+	Lane     string         `json:"lane"`
+	State    string         `json:"state"`
+	Reason   string         `json:"reason"`
+	PR       int            `json:"pr"`
+	Branch   string         `json:"branch"`
 }
 
 func main() {
@@ -75,7 +82,17 @@ func run(root, repo string, lanes []string, timeout time.Duration) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = os.RemoveAll(tmp) }()
+	// A failed acceptance run keeps its evidence: the store with every decision, and each run's
+	// task, stdout, stderr and trajectory under work/steps. Only a passing run is cleaned up.
+	passed := false
+	defer func() {
+		if passed {
+			_ = os.RemoveAll(tmp)
+			return
+		}
+		fmt.Printf("\nevidence kept in %s\n  ynf --config %s items log <owner/name#n>\n  runs: %s\n",
+			tmp, filepath.Join(tmp, "config.yaml"), filepath.Join(tmp, "work", "steps"))
+	}()
 	if tmp, err = filepath.EvalSymlinks(tmp); err != nil {
 		return err
 	}
@@ -136,6 +153,7 @@ func run(root, repo string, lanes []string, timeout time.Duration) error {
 	if failed > 0 {
 		return fmt.Errorf("%d fixture(s) did not end as expected", failed)
 	}
+	passed = true
 	return nil
 }
 
@@ -150,7 +168,21 @@ func check(f fixture, numbers map[string]int, items []item, repo, ynf, cfg strin
 	}
 	it := items[i]
 	if f.Expect.Result != "any" && it.State != f.Expect.Result {
-		return "", fmt.Errorf("#%d ended %s (%s), expected %s", n, it.State, it.Reason, f.Expect.Result)
+		msg := fmt.Sprintf("#%d ended %s (%s), expected %s", n, it.State, it.Reason, f.Expect.Result)
+		if r := it.LastRun; r != nil && r.Detail != "" {
+			msg += fmt.Sprintf("\n      last run %s: %s", r.ID, oneLine(r.Detail, 300))
+		}
+		var denied []string
+		for k := range it.Counters {
+			if h, ok := strings.CutPrefix(k, "sig/egress/denied/"); ok {
+				denied = append(denied, h)
+			}
+		}
+		if len(denied) > 0 {
+			slices.Sort(denied)
+			msg += "\n      egress denied: " + strings.Join(denied, ", ")
+		}
+		return "", errors.New(msg)
 	}
 	detail := fmt.Sprintf("#%d %s", n, it.State)
 
@@ -193,6 +225,14 @@ func check(f fixture, numbers map[string]int, items []item, repo, ynf, cfg strin
 		return "", err
 	}
 	return detail + fmt.Sprintf(", %d decisions replay the same", len(r.Decisions)), nil
+}
+
+func oneLine(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > max {
+		s = s[:max] + "…"
+	}
+	return s
 }
 
 func issueNumbers(repo string) (map[string]int, error) {
