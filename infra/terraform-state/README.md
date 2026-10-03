@@ -14,6 +14,7 @@ when done, so Terraform 1.10 or later is needed.
 |---|---|
 | State bucket (versioned, encrypted, no public access; old versions expire after 90 days) | `ynf-terraform-state.eyelock.net` |
 | IAM group, policy and user: read and write state and its lock objects, nothing else | `ynf-terraform` |
+| Scratch bucket for the S3 store's conformance suite (objects expire after a day), and a policy giving `ynf-terraform` that bucket and nothing more | `ynf-conformance.eyelock.net` |
 
 Each configuration has its own key in the bucket:
 
@@ -22,6 +23,14 @@ Each configuration has its own key in the bucket:
 | `infra/terraform-state` (this one) | `terraform-state/terraform.tfstate` |
 | [`infra/github`](../github/README.md) | `github/terraform.tfstate` |
 | [`sandbox/terraform`](../../sandbox/README.md) | `sandbox/terraform.tfstate` |
+
+The conformance bucket holds the S3 store to real S3's conditional writes, which leases need to be
+atomic and MinIO's are not:
+
+```bash
+AWS_PROFILE=ynf-terraform YNF_S3_BUCKET=ynf-conformance.eyelock.net \
+  go test -run TestConformanceOnS3 ./internal/store/s3store/
+```
 
 A run that dies can leave a lock behind; `terraform force-unlock <id>` (the id is in the error)
 removes it.
