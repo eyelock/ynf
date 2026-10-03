@@ -42,7 +42,9 @@ attributes a finding to whichever copy of identical code it saw first, so a sens
 test's one pass forever, so the run can never look stuck. Contained executors start each run with
 empty caches; the `process` executor points `XDG_CACHE_HOME` and the common tool cache variables
 into the step directory. Separately, a sensor that judges a run should not read results from a
-cache at all (`go test -count=1`).
+cache at all (`go test -count=1`). Worktree paths are resolved to their real path before use: on
+macOS the temp directory is under `/var`, a symlink to `/private/var`, and when git and a linter
+disagree about a file's path, `--new-from-merge-base` matches nothing and the sensor passes.
 
 With the ynh runner, ynf passes `--emit-jsonl <step dir>/trajectory.jsonl`, so ynh writes a
 checkpoint (ynh only checkpoints when given a real emit path).

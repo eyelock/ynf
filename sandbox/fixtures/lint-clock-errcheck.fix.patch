@@ -1,0 +1,15 @@
+diff --git a/internal/clock/clock.go b/internal/clock/clock.go
+index ffcb354..8176ebf 100644
+--- a/internal/clock/clock.go
++++ b/internal/clock/clock.go
+@@ -7,8 +7,8 @@ import (
+ )
+ 
+ // Stamp writes the current time to path in RFC 3339 format.
+-func Stamp(path string) {
+-	os.WriteFile(path, []byte(time.Now().Format(time.RFC3339)), 0o644)
++func Stamp(path string) error {
++	return os.WriteFile(path, []byte(time.Now().Format(time.RFC3339)), 0o644)
+ }
+ 
+ // Since returns the whole milliseconds elapsed since t.

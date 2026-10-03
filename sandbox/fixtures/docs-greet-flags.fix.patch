@@ -1,0 +1,10 @@
+diff --git a/README.md b/README.md
+index 22db216..09e51de 100644
+--- a/README.md
++++ b/README.md
+@@ -13,4 +13,4 @@ go run ./cmd/greet --name ynf
+ | Flag | Meaning |
+ |---|---|
+ | `--name` | who to greet (default `world`) |
+-| `--loud` | print the greeting in capitals |
++| `--shout` | print the greeting in capitals |

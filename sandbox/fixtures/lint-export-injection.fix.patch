@@ -1,0 +1,21 @@
+diff --git a/internal/export/export.go b/internal/export/export.go
+index a63e424..f437f97 100644
+--- a/internal/export/export.go
++++ b/internal/export/export.go
+@@ -12,10 +12,13 @@ type Record struct {
+ 	Name string `json:"name"`
+ }
+ 
+-// Write encodes each record on its own line.
+-func Write(w io.Writer, recs []Record) {
++// Write encodes each record on its own line, stopping at the first error.
++func Write(w io.Writer, recs []Record) error {
+ 	enc := json.NewEncoder(w)
+ 	for _, r := range recs {
+-		enc.Encode(r)
++		if err := enc.Encode(r); err != nil {
++			return err
++		}
+ 	}
++	return nil
+ }

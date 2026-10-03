@@ -1,0 +1,15 @@
+diff --git a/internal/retry/retry.go b/internal/retry/retry.go
+index 646c6e3..0c1387c 100644
+--- a/internal/retry/retry.go
++++ b/internal/retry/retry.go
+@@ -15,7 +15,7 @@ func Do(n int, wait time.Duration, fn func() error) error {
+ 	return err
+ }
+ 
+-// Cleanup runs fn for best-effort teardown.
+-func Cleanup(fn func() error) {
+-	_ = fn()
++// Cleanup runs fn for best-effort teardown and returns its error for the caller to report.
++func Cleanup(fn func() error) error {
++	return fn()
+ }

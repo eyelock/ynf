@@ -20,6 +20,23 @@ Deleting needs a token with the `delete_repo` scope, which `gh` does not ask for
 gh auth refresh -s delete_repo
 ```
 
+## Verifying the fixtures
+
+```bash
+make verify                     # or: YNH=/path/to/ynh make verify
+```
+
+Clones the live sandbox and, for every fixture, runs the lane's scoped sensors through
+`ynh check` with the same `--sensor-overlay` the lane would use. Each fixture's `verify` block in
+`fixtures.yaml` says which sensors must fail before its known fix (`fixtures/<id>.fix.patch`) and
+which may still fail after. A fixture that cannot fail before and pass after cannot tell a good
+agent run from a bad one, so run this after every change to `seed/`, the lanes or the fixtures,
+following `make reset`. It also checks that the flaky test is still flaky, that the command
+runner's diff is the same twice, and that the disabled lane is still off.
+
+It needs a ynh that reads `.agents/harness/` (ynh `develop` from `027dc19` on) and stops with a
+clear message when the one on `PATH` does not.
+
 ## Why rebuild instead of reset
 
 A rebuilt repository is clean in ways a reset script would have to chase one by one: issue and
@@ -35,7 +52,8 @@ repository is disposable.
 | `seed/.agents/factory/lanes.yaml` | The sandbox's factory: five lanes ([schema](../docs/schema/lanes.schema.json)) |
 | `seed/.agents/harness/plugin.json` | The sandbox's own ynh harness: `tidy`, `docs` and `fix-ci` focuses; `lint`, `test` and `docs` sensors |
 | `fixtures.yaml` | Every issue and pull request, its lane, and what ynf should do with it ([schema](fixtures.schema.json)) |
-| `fixtures/` | Issue and pull request bodies, and the files committed on fixture branches |
+| `fixtures/` | Issue and pull request bodies, the files committed on fixture branches, and each fixture's known fix (`<id>.fix.patch`) |
+| `verify/` | `make verify`: a small Go program that proves each fixture still fails before its fix and passes after |
 | `terraform/` | The repository, labels, issues, fixture pull request and branch protection |
 | `scripts/` | The two git steps Terraform calls: the seed commit and the fixture branch |
 
@@ -76,7 +94,7 @@ rejects errors discarded with `_ =`, and it only checks new code. That gap is wh
 
 ## Changing it
 
-Edit `seed/`, `fixtures.yaml` or `fixtures/`, then `make reset`. `main` is protected, so a
+Edit `seed/`, `fixtures.yaml` or `fixtures/`, then `make reset` and `make verify`. `main` is protected, so a
 changed seed cannot be pushed over an existing repository; rebuilding is the only path, on
 purpose.
 

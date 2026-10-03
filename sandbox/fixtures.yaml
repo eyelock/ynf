@@ -2,7 +2,9 @@
 #
 # Every issue and pull request the sandbox starts with, and what ynf is expected to do with it.
 # Expectations live here, in ynf, never in the sandbox, so the agent cannot read what it is being
-# tested on. Terraform reads this file to create the issues, branches and pull requests.
+# tested on. Terraform reads this file to create the issues, branches and pull requests, and
+# `make verify` reads each fixture's verify block to prove the fixture still behaves as designed:
+# the lane's scoped sensors fail before the known fix and pass after it.
 version: 1
 
 fixtures:
@@ -12,6 +14,10 @@ fixtures:
     body: fixtures/lint-store-errcheck.md
     labels: ["ynf:lint", "pkg:internal/store"]
     lane: lint-paydown
+    verify:
+      before: [lint]
+      fix: fixtures/lint-store-errcheck.fix.patch
+      after: []
     expect:
       result: in_review
       checks:
@@ -24,6 +30,10 @@ fixtures:
     body: fixtures/lint-report-staticcheck.md
     labels: ["ynf:lint", "pkg:internal/report"]
     lane: lint-paydown
+    verify:
+      before: [lint]
+      fix: fixtures/lint-report-staticcheck.fix.patch
+      after: []
     expect:
       result: in_review
       checks:
@@ -35,6 +45,11 @@ fixtures:
     body: fixtures/lint-clock-errcheck.md
     labels: ["ynf:lint", "pkg:internal/clock"]
     lane: lint-paydown
+    verify:
+      before: [lint]
+      fix: fixtures/lint-clock-errcheck.fix.patch
+      after: []
+      flaky: { sensor: test, runs: 10, min_failures: 5 }
     expect:
       result: escalated
       signatures: ["sig/stuck/sensor:test/test:TestSince"]
@@ -49,6 +64,10 @@ fixtures:
     body: fixtures/lint-legacy-gate.md
     labels: ["ynf:lint", "pkg:internal/legacy"]
     lane: lint-paydown
+    verify:
+      before: [lint]
+      fix: fixtures/lint-legacy-gate.fix.patch
+      after: []
     expect:
       result: in_review
       checks:
@@ -61,6 +80,10 @@ fixtures:
     body: fixtures/lint-export-injection.md
     labels: ["ynf:lint", "pkg:internal/export"]
     lane: lint-paydown
+    verify:
+      before: [lint]
+      fix: fixtures/lint-export-injection.fix.patch
+      after: []
     expect:
       result: in_review
       checks:
@@ -74,6 +97,10 @@ fixtures:
     body: fixtures/docs-greet-flags.md
     labels: ["ynf:docs", "pkg:cmd/greet"]
     lane: doc-drift
+    verify:
+      before: [docs]
+      fix: fixtures/docs-greet-flags.fix.patch
+      after: []
     expect:
       result: in_review
       checks:
@@ -85,6 +112,8 @@ fixtures:
     body: fixtures/docs-status-iana.md
     labels: ["ynf:docs", "pkg:internal/status"]
     lane: doc-drift
+    verify:
+      before: []    # nothing to fail: this fixture is about egress, not a sensor
     expect:
       result: any
       signatures: ["sig/egress/denied/www.iana.org"]
@@ -98,6 +127,8 @@ fixtures:
     body: fixtures/fmt-format.md
     labels: ["ynf:fmt", "pkg:internal/format"]
     lane: gofmt
+    verify:
+      command: { deterministic: true }
     expect:
       result: in_review
       checks:
@@ -110,6 +141,8 @@ fixtures:
     body: fixtures/deps-bump.md
     labels: ["ynf:deps"]
     lane: deps
+    verify:
+      disabled: true
     expect:
       result: ignored
       checks:
@@ -124,6 +157,10 @@ fixtures:
     pull_request:
       branch: human/retry-helper
       files: fixtures/fix-ci-retry/files
+    verify:
+      before: [lint]
+      fix: fixtures/fix-ci-retry.fix.patch
+      after: []
     expect:
       result: in_review
       checks:
