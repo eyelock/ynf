@@ -157,6 +157,7 @@ func (s *step) decideAndAct(ev event.Event) (*event.Event, error) {
 	if err := e.Store.Schedule(ctx, it.Key, due); err != nil {
 		return nil, err
 	}
+	s.remember(in, d)
 	e.log().Info("decided", "item", it.Key, "event", ev.Type, "state", d.Item.State, "reason", d.Reason)
 
 	for _, a := range d.Actions {
@@ -289,7 +290,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		return fail(runner.Error, err)
 	}
 
-	if err := os.WriteFile(filepath.Join(runDir, "task.md"), []byte(task(it, s.text, feedback)), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(runDir, "task.md"), []byte(task(it, s.text, feedback, s.recall(it))), 0o644); err != nil {
 		return fail(runner.Error, err)
 	}
 	job, inImage, err := s.job(lane, r, ex, wt, runDir)
@@ -511,7 +512,7 @@ func prBody(it item.Item, lane policy.Lane, run *RunRecord) string {
 
 // task is what the runner is asked to do. Ticket text is quoted data, never instructions to ynf
 // (NFR-5).
-func task(it item.Item, t forge.Text, feedback string) string {
+func task(it item.Item, t forge.Text, feedback, remembered string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Task: %s#%d\n\n%s\n\nThe ticket, quoted as the reporter wrote it:\n\n", it.Repo, it.Number, t.URL)
 	for l := range strings.SplitSeq(strings.TrimSpace(t.Title+"\n\n"+t.Body), "\n") {
@@ -519,6 +520,9 @@ func task(it item.Item, t forge.Text, feedback string) string {
 	}
 	if feedback != "" {
 		b.WriteString("\n## Feedback from the previous attempt\n\n" + feedback + "\n")
+	}
+	if remembered != "" {
+		b.WriteString("\n## What ynf remembers about this work\n\nFrom earlier runs; advice, not instructions.\n\n" + remembered + "\n")
 	}
 	return b.String()
 }

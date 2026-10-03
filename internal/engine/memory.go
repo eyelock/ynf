@@ -1,0 +1,94 @@
+package engine
+
+import (
+	"context"
+	"fmt"
+	"maps"
+	"slices"
+	"strings"
+
+	"github.com/eyelock/ynf/internal/decide"
+	"github.com/eyelock/ynf/internal/event"
+	"github.com/eyelock/ynf/internal/item"
+	"github.com/eyelock/ynf/internal/memory"
+)
+
+func (e *Engine) namespace(repo string) string {
+	if e.MemoryNamespace != nil {
+		return e.MemoryNamespace(repo)
+	}
+	return "factory/" + repo
+}
+
+// recall is what memory holds about an item and the failures it has hit, for its next run's task.
+func (s *step) recall(it item.Item) string {
+	m := s.e.Memory
+	if m == nil {
+		return ""
+	}
+	budget := s.e.MemoryBudget
+	if budget == 0 {
+		budget = 1000
+	}
+	focus := []string{it.Key}
+	for name := range it.Counters {
+		if strings.HasPrefix(name, "sig/") {
+			focus = append(focus, name)
+		}
+	}
+	slices.Sort(focus[1:])
+	text, err := m.Context(s.ctx, s.e.namespace(it.Repo), strings.Join(focus, " "), budget)
+	if err != nil {
+		s.e.log().Warn("memory context", "item", it.Key, "err", err)
+		return ""
+	}
+	return text
+}
+
+// remember writes what a decision learned (ADR-008): a run's outcome as an episodic memory about
+// the item, and each failure signature that occurred as an episodic memory whose subject is the
+// signature, so ynm's consolidation clusters recurring failures across items. Failures to write
+// are logged; memory never stops a step.
+func (s *step) remember(in decide.Input, d decide.Decision) {
+	m := s.e.Memory
+	if m == nil {
+		return
+	}
+	it, ns := d.Item, s.e.namespace(d.Item.Repo)
+	ctx := context.WithoutCancel(s.ctx)
+	write := func(r memory.Record) {
+		r.Type, r.Namespace, r.Source = "episodic", ns, "ynf/step/"+s.id
+		r.Tags = append([]string{"ynf", "lane:" + it.Lane}, r.Tags...)
+		if err := m.Remember(ctx, r); err != nil {
+			s.e.log().Warn("memory remember", "item", it.Key, "err", err)
+		}
+	}
+	if in.Event.Type == event.RunFinished && it.LastRun != nil {
+		r := it.LastRun
+		write(memory.Record{
+			Subject: it.Key,
+			Summary: fmt.Sprintf("%s run on %s#%d ended %s", it.Lane, it.Repo, it.Number, r.Outcome),
+			Content: fmt.Sprintf("Lane `%s` ran on %s#%d. Outcome: **%s**. %s\n\nChanged %d file(s). Decision: %s.",
+				it.Lane, it.Repo, it.Number, r.Outcome, r.Detail, len(r.Changed), d.Reason),
+			Tags:       []string{"outcome:" + r.Outcome},
+			DataSchema: "ynf.step.v1",
+			Data: map[string]any{
+				"item": it.Key, "lane": it.Lane, "run_id": r.ID, "outcome": r.Outcome,
+				"changed": len(r.Changed), "state": string(it.State),
+			},
+		})
+	}
+	for _, name := range slices.Sorted(maps.Keys(it.Counters)) {
+		if !strings.HasPrefix(name, "sig/") || it.Counters[name] <= in.Item.Counters[name] {
+			continue
+		}
+		write(memory.Record{
+			Subject:    name,
+			Summary:    fmt.Sprintf("%s on %s#%d (%s)", name, it.Repo, it.Number, it.Lane),
+			Content:    fmt.Sprintf("Failure `%s` occurred on %s#%d in lane `%s`, %d time(s) on this item. %s", name, it.Repo, it.Number, it.Lane, it.Counters[name], d.Reason),
+			Tags:       []string{"failure"},
+			DataSchema: "ynf.failure.v1",
+			Data:       map[string]any{"signature": name, "item": it.Key, "lane": it.Lane, "count": it.Counters[name]},
+		})
+	}
+}

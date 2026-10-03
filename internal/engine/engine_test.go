@@ -2,10 +2,12 @@ package engine_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,6 +22,7 @@ import (
 	"github.com/eyelock/ynf/internal/forge"
 	"github.com/eyelock/ynf/internal/item"
 	"github.com/eyelock/ynf/internal/lease"
+	"github.com/eyelock/ynf/internal/memory"
 	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/store/sqlite"
 	"github.com/eyelock/ynf/internal/workspace"
@@ -873,5 +876,95 @@ func TestYieldFloorPausesTheLane(t *testing.T) {
 	}
 	if stats, _ := h.e.Stats(ctx); !fmtStats(stats).Paused {
 		t.Fatal("stats should show the pause")
+	}
+}
+
+type fakeMemory struct {
+	mu      sync.Mutex
+	records []memory.Record
+	asked   []string
+	fail    bool
+}
+
+func (m *fakeMemory) Remember(_ context.Context, r memory.Record) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.fail {
+		return fmt.Errorf("ynm is down")
+	}
+	m.records = append(m.records, r)
+	return nil
+}
+
+func (m *fakeMemory) Context(_ context.Context, ns, text string, _ int) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.asked = append(m.asked, ns+" | "+text)
+	if m.fail {
+		return "", fmt.Errorf("ynm is down")
+	}
+	return "Last time on this item, CI's lint check failed.", nil
+}
+
+func TestMemoryIsWrittenAndRecalled(t *testing.T) {
+	h := newHarness(t)
+	mem := &fakeMemory{}
+	h.e.Memory = mem
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:fmt", "pkg:internal/format"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.f.setChecks(101, "failure")
+	h.advance(time.Minute)
+	if _, err := h.e.RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Escalated {
+		t.Fatalf("%s %s", it.State, it.Reason)
+	}
+	var outcome, failure *memory.Record
+	for i, r := range mem.records {
+		switch r.DataSchema {
+		case "ynf.step.v1":
+			outcome = &mem.records[i]
+		case "ynf.failure.v1":
+			failure = &mem.records[i]
+		}
+	}
+	if outcome == nil || outcome.Subject != item.IssueKey("o/r", 1) || outcome.Namespace != "factory/o/r" || outcome.Data["outcome"] != "converged" {
+		t.Fatalf("outcome memory: %+v", outcome)
+	}
+	if failure == nil || failure.Subject != "sig/ci/lint" || failure.Type != "episodic" || !slices.Contains(failure.Tags, "failure") {
+		t.Fatalf("failure memory: %+v", failure)
+	}
+	if len(mem.asked) == 0 || !strings.HasPrefix(mem.asked[0], "factory/o/r | item/github/o/r/issues/1") {
+		t.Fatalf("recall: %v", mem.asked)
+	}
+	entries, _ := h.e.Store.Log(ctx, item.IssueKey("o/r", 1))
+	for _, en := range entries {
+		if en.Kind != "run" {
+			continue
+		}
+		var rec engine.RunRecord
+		_ = json.Unmarshal(en.Body, &rec)
+		b, err := os.ReadFile(filepath.Join(rec.StepDir, "run", "task.md"))
+		if err != nil || !strings.Contains(string(b), "## What ynf remembers about this work") || !strings.Contains(string(b), "CI's lint check failed") {
+			t.Fatalf("task.md: %s %v", b, err)
+		}
+	}
+}
+
+func TestMemoryOutageNeverStopsAStep(t *testing.T) {
+	h := newHarness(t)
+	h.e.Memory = &fakeMemory{fail: true}
+	h.e.MemoryNamespace = func(repo string) string { return "custom/" + repo }
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:fmt", "pkg:internal/format"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Proposed {
+		t.Fatalf("a memory outage stopped the step: %s %s", it.State, it.Reason)
 	}
 }

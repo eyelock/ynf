@@ -18,6 +18,7 @@ import (
 	"github.com/eyelock/ynf/internal/forge"
 	"github.com/eyelock/ynf/internal/item"
 	"github.com/eyelock/ynf/internal/lease"
+	"github.com/eyelock/ynf/internal/memory"
 	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/store"
 )
@@ -58,6 +59,14 @@ type Engine struct {
 	BuildImage func(ctx context.Context, worktree string, cfg policy.Ynh) (string, error)
 	// Getenv reads the variables a lane passes into its runs (run.env). Default os.Getenv.
 	Getenv func(string) string
+
+	// Memory is ynm when it is configured or detected, else nil (ADR-008). It is advisory: what it
+	// holds goes into a run's task and to people, never into a decision.
+	Memory memory.Memory
+	// MemoryNamespace is the namespace for a repository; default factory/<owner>/<name>.
+	MemoryNamespace func(repo string) string
+	// MemoryBudget is the token budget for what memory adds to a task; default 1000.
+	MemoryBudget int
 
 	Now   func() time.Time
 	NewID func() string

@@ -96,3 +96,23 @@ github: {author: {name: bot, email: bot@x}}
 		t.Fatal("s3 accepted before it exists")
 	}
 }
+
+func TestMemorySettings(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "c.yaml")
+	write(t, p, "version: 1\nrepos: [o/r]\n")
+	c, _ := config.Load(p)
+	if on, ns, budget, cwd := c.MemorySettings(); on != nil || ns != "factory/{repo}" || budget != 1000 || cwd != "" {
+		t.Fatalf("defaults: %v %s %d %s", on, ns, budget, cwd)
+	}
+	write(t, p, "version: 1\nrepos: [o/r]\nmemory: {provider: none}\n")
+	c, _ = config.Load(p)
+	if on, _, _, _ := c.MemorySettings(); on == nil || *on {
+		t.Fatal("provider none")
+	}
+	write(t, p, "version: 1\nrepos: [o/r]\nmemory: {provider: ynm, namespace: \"team/{repo}\", context_budget_tokens: 500, cwd: mem}\n")
+	c, _ = config.Load(p)
+	if on, ns, budget, cwd := c.MemorySettings(); on == nil || !*on || ns != "team/{repo}" || budget != 500 || cwd != filepath.Join(dir, "mem") {
+		t.Fatalf("explicit: %v %s %d %s", on, ns, budget, cwd)
+	}
+}

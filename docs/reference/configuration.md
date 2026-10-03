@@ -17,6 +17,15 @@ the folder the file is in.
 | `lease.heartbeat` | `30s` | How often a holder renews. Must be shorter than `ttl`. |
 | `poll.ci` | `30s` | How often a proposed item's checks are probed. |
 | `poll.review` | `5m` | How often an item in review is probed for merge, close or review. |
+| `memory.provider` | detected | `ynm`, or `none` to switch memory off. Without a `memory` block, ynf uses ynm when it is on PATH (ADR-012). |
+| `memory.namespace` | `factory/{repo}` | Where a repository's memories go; `{repo}` is `owner/name`. |
+| `memory.context_budget_tokens` | `1000` | How much remembered context is added to a run's task. |
+| `memory.cwd` | where ynf runs | The directory ynm runs as if from, which decides its store. |
+
+What ynf writes to memory, and why it never decides anything with it, is in
+[Learning from failure](../explanation/learning-from-failure.md); the data shapes are
+[`ynf.step.v1`](../schema/memory/ynf.step.v1.schema.json) and
+[`ynf.failure.v1`](../schema/memory/ynf.failure.v1.schema.json).
 
 ## Where the file is found
 

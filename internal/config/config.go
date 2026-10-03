@@ -41,6 +41,12 @@ type Config struct {
 		CI     string `yaml:"ci"`
 		Review string `yaml:"review"`
 	} `yaml:"poll"`
+	Memory *struct {
+		Provider            string `yaml:"provider"`
+		Namespace           string `yaml:"namespace"`
+		ContextBudgetTokens int    `yaml:"context_budget_tokens"`
+		Cwd                 string `yaml:"cwd"`
+	} `yaml:"memory"`
 
 	Path     string   `yaml:"-"` // the file it was loaded from
 	Shadowed []string `yaml:"-"` // other candidates found at the same level
@@ -157,4 +163,28 @@ func (c *Config) Author() (name, email string) {
 		return a.Name, a.Email
 	}
 	return "ynf", "ynf@users.noreply.github.com"
+}
+
+// MemorySettings returns whether memory is wanted (nil means detect), the namespace template, the
+// budget and ynm's working directory.
+func (c *Config) MemorySettings() (enabled *bool, namespace string, budget int, cwd string) {
+	namespace, budget = "factory/{repo}", 1000
+	m := c.Memory
+	if m == nil {
+		return nil, namespace, budget, ""
+	}
+	if m.Provider != "" {
+		on := m.Provider == "ynm"
+		enabled = &on
+	}
+	if m.Namespace != "" {
+		namespace = m.Namespace
+	}
+	if m.ContextBudgetTokens > 0 {
+		budget = m.ContextBudgetTokens
+	}
+	if m.Cwd != "" {
+		cwd = c.rel(m.Cwd)
+	}
+	return enabled, namespace, budget, cwd
 }

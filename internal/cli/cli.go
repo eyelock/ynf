@@ -242,8 +242,12 @@ func (a *app) engine() (*engine.Engine, error) {
 	}
 	var mu sync.Mutex
 	entropy := ulid.Monotonic(cryptoReader{}, 0)
+	mem, ns, budget := memoryFor(c)
 	a.eng = &engine.Engine{
-		Store: st, Forge: fg,
+		Memory:          mem,
+		MemoryNamespace: ns,
+		MemoryBudget:    budget,
+		Store:           st, Forge: fg,
 		Git:         workspace.Workspace{Root: c.WorkPath(), Token: token, Author: workspace.Author{Name: name, Email: email}},
 		Executor:    a.executor,
 		BuildImage:  imageBuilder(),
