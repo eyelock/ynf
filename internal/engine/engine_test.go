@@ -229,6 +229,12 @@ func newHarness(t *testing.T) *harness {
 	if err := os.WriteFile(filepath.Join(src, "internal/format/f.go"), []byte("package format\nfunc F( ) int { return 1 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(src, ".agents/harness"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, ".agents/harness/plugin.json"), []byte(`{"name":"h","focuses":{"tidy":{"prompt":"TIDY FOCUS PROMPT","profile":"careful"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	git(t, src, "add", "-A")
 	git(t, src, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "seed")
 	git(t, src, "push", "-q", remote, "main")
@@ -547,14 +553,19 @@ func TestClosedTicketAndMissingRepoPolicy(t *testing.T) {
 }
 
 // fakeYnh puts a stand-in for `ynh agent run` first on PATH: it formats the code, as an agent
-// would fix it, and prints the run result ynh prints with --format json.
+// would fix it, and prints the run result ynh prints with --format json. Like ynh, it refuses a
+// focus together with a task.
 func fakeYnh(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	calls := filepath.Join(dir, "calls")
 	script := `#!/bin/sh
+case " $* " in *" --focus "*" --task "*|*" --task "*" --focus "*)
+  echo "Error: cannot use --focus and --task together (focus includes a prompt)" >&2; exit 2 ;;
+esac
 echo "$*" >> "` + calls + `"
 echo "key=${ANTHROPIC_API_KEY}" >> "` + calls + `"
+while [ $# -gt 0 ]; do [ "$1" = --task ] && cat "${2#@}" >> "` + calls + `"; shift; done
 gofmt -w ./internal/format
 echo '{"exit_code":0,"reason":"converged","session_id":"S-ynh-7","backend":"claude","model":"opus"}'
 `
@@ -578,8 +589,11 @@ func TestYnhRunnerOnTheHost(t *testing.T) {
 		t.Fatalf("%s %s", it.State, it.Reason)
 	}
 	b, _ := os.ReadFile(calls)
-	if !strings.Contains(string(b), "agent run --harness . --task @") || !strings.Contains(string(b), "--focus tidy") || !strings.Contains(string(b), "key=sk-test") {
+	if !strings.Contains(string(b), "agent run --harness . --task @") || strings.Contains(string(b), "--focus") || !strings.Contains(string(b), "--profile careful") || !strings.Contains(string(b), "key=sk-test") {
 		t.Fatalf("ynh was called as %s", b)
+	}
+	if !strings.Contains(string(b), "TIDY FOCUS PROMPT") || !strings.Contains(string(b), "> Issue 1") {
+		t.Fatalf("the task should be the focus's prompt and then the quoted ticket: %s", b)
 	}
 	msg := git(t, h.remote, "log", "-1", "--format=%B", "ynf/issue-1")
 	for _, want := range []string{"Co-Authored-By: claude/opus <noreply@anthropic.com>", "YNH-Session: S-ynh-7"} {
@@ -643,7 +657,7 @@ func TestYnhRunnerInAnAgentImage(t *testing.T) {
 	}
 	b, _ := os.ReadFile(calls)
 	log := string(b)
-	for _, want := range []string{"ynf-harness:abc --task @/run/ynf/task.md", "--allow api.anthropic.com", "-e ANTHROPIC_API_KEY ", "key=sk-secret"} {
+	for _, want := range []string{"ynf-harness:abc --task @/run/ynf/task.md", "--profile careful", "--allow api.anthropic.com", "-e ANTHROPIC_API_KEY ", "key=sk-secret"} {
 		if !strings.Contains(log, want) {
 			t.Errorf("docker calls lack %q:\n%s", want, log)
 		}

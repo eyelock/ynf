@@ -41,12 +41,18 @@ func TestYnhRunner(t *testing.T) {
 		Harness: ".", Focus: "tidy", Budgets: &policy.Budgets{MaxTurns: 20},
 		SensorScope: map[string]string{"lint": "golangci-lint run ./{label.pkg}/..."},
 	}}
-	argv, err := y.Command(runner.Spec{Labels: []string{"pkg:internal/store"}, TaskFile: "/r/task.md", RunDir: "/r"})
+	if _, err := y.Command(runner.Spec{Labels: []string{"pkg:internal/store"}}); err == nil {
+		t.Fatal("a focus that was not resolved from the harness should be an error")
+	}
+	argv, err := y.Command(runner.Spec{Labels: []string{"pkg:internal/store"}, TaskFile: "/r/task.md", RunDir: "/r", Focus: &runner.Focus{Prompt: "Tidy.", Profile: "careful"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	joined := strings.Join(argv, " ")
-	for _, want := range []string{"agent run", "--focus tidy", "--max-turns 20", "--task @/r/task.md", "--emit-jsonl /r/trajectory.jsonl", `golangci-lint run ./internal/store/...`} {
+	if strings.Contains(joined, "--focus") {
+		t.Errorf("ynh agent run takes a focus or a task, never both: %s", joined)
+	}
+	for _, want := range []string{"agent run", "--profile careful", "--max-turns 20", "--task @/r/task.md", "--emit-jsonl /r/trajectory.jsonl", `golangci-lint run ./internal/store/...`} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("argv lacks %q: %s", want, joined)
 		}
@@ -107,7 +113,7 @@ func TestCommandRunnerEdges(t *testing.T) {
 
 func TestYnhInImage(t *testing.T) {
 	y := runner.YnhRunner{Cfg: policy.Ynh{Harness: ".", Focus: "tidy"}}
-	argv, err := y.Command(runner.Spec{InImage: true, TaskFile: "/run/ynf/task.md", RunDir: "/run/ynf"})
+	argv, err := y.Command(runner.Spec{InImage: true, TaskFile: "/run/ynf/task.md", RunDir: "/run/ynf", Focus: &runner.Focus{Prompt: "Tidy."}})
 	if err != nil || argv[0] != "--task" || slices.Contains(argv, "agent") || slices.Contains(argv, "--harness") {
 		t.Fatalf("in an agent image only flags are passed: %v %v", argv, err)
 	}
@@ -116,5 +122,35 @@ func TestYnhInImage(t *testing.T) {
 	}
 	if !slices.Contains(runner.ModelHosts["claude"], "api.anthropic.com") {
 		t.Fatal("claude's model host")
+	}
+}
+
+func TestResolveFocus(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := runner.ResolveFocus(dir, "tidy"); err == nil {
+		t.Fatal("no manifest")
+	}
+	_ = os.MkdirAll(filepath.Join(dir, ".agents/harness"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, ".agents/harness/plugin.json"), []byte(`{"name":"h","focuses":{"tidy":{"prompt":"Fix lint.","profile":"p"},"empty":{"prompt":""}}}`), 0o644)
+	f, err := runner.ResolveFocus(dir, "tidy")
+	if err != nil || f.Prompt != "Fix lint." || f.Profile != "p" {
+		t.Fatalf("%+v %v", f, err)
+	}
+	for _, name := range []string{"nope", "empty"} {
+		if _, err := runner.ResolveFocus(dir, name); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+	}
+	legacy := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(legacy, ".ynh-plugin"), 0o755)
+	_ = os.WriteFile(filepath.Join(legacy, ".ynh-plugin/plugin.json"), []byte(`{"focuses":{"t":{"prompt":"x"}}}`), 0o644)
+	if f, err := runner.ResolveFocus(legacy, "t"); err != nil || f.Prompt != "x" {
+		t.Fatalf("a harness not yet on .agents/harness is still read: %+v %v", f, err)
+	}
+	bad := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(bad, ".agents/harness"), 0o755)
+	_ = os.WriteFile(filepath.Join(bad, ".agents/harness/plugin.json"), []byte(`not json`), 0o644)
+	if _, err := runner.ResolveFocus(bad, "t"); err == nil {
+		t.Fatal("bad json")
 	}
 }

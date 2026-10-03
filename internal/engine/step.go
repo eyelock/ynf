@@ -290,7 +290,19 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		return fail(runner.Error, err)
 	}
 
-	if err := os.WriteFile(filepath.Join(runDir, "task.md"), []byte(task(it, s.text, feedback, s.recall(it))), 0o644); err != nil {
+	var focus *runner.Focus
+	if y, ok := r.(runner.YnhRunner); ok && y.Cfg.Focus != "" {
+		f, err := runner.ResolveFocus(filepath.Join(wt, filepath.FromSlash(y.Cfg.Harness)), y.Cfg.Focus)
+		if err != nil {
+			return fail(runner.OperatorError, err)
+		}
+		focus = &f
+	}
+	body := task(it, s.text, feedback, s.recall(it))
+	if focus != nil {
+		body = focus.Prompt + "\n\n" + body
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "task.md"), []byte(body), 0o644); err != nil {
 		return fail(runner.Error, err)
 	}
 	job, inImage, err := s.job(lane, r, ex, wt, runDir)
@@ -302,7 +314,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	if t, _, err := e.Forge.Ticket(s.ctx, it.Repo, it.Number); err == nil {
 		labels = t.Labels
 	}
-	argv, err := r.Command(runner.Spec{Lane: lane, Labels: labels, TaskFile: cr + "/task.md", RunDir: cr, Feedback: feedback, InImage: inImage})
+	argv, err := r.Command(runner.Spec{Lane: lane, Labels: labels, TaskFile: cr + "/task.md", RunDir: cr, Feedback: feedback, InImage: inImage, Focus: focus})
 	if err != nil {
 		return fail(runner.OperatorError, err)
 	}

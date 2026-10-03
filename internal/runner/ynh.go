@@ -55,11 +55,17 @@ func (y YnhRunner) Command(s Spec) ([]string, error) {
 		"--format", "json",
 		"--emit-jsonl", s.RunDir+"/trajectory.jsonl",
 	)
-	if y.Cfg.Focus != "" {
-		argv = append(argv, "--focus", y.Cfg.Focus)
+	// ynh takes a focus or a task, not both: the focus's prompt is in the task, and its profile is
+	// passed unless the lane names one.
+	if y.Cfg.Focus != "" && s.Focus == nil {
+		return nil, fmt.Errorf("focus %q was not resolved from the harness", y.Cfg.Focus)
 	}
-	if y.Cfg.Profile != "" {
-		argv = append(argv, "--profile", y.Cfg.Profile)
+	profile := y.Cfg.Profile
+	if profile == "" && s.Focus != nil {
+		profile = s.Focus.Profile
+	}
+	if profile != "" {
+		argv = append(argv, "--profile", profile)
 	}
 	if y.Cfg.Sandbox != "" {
 		argv = append(argv, "--sandbox", y.Cfg.Sandbox)
