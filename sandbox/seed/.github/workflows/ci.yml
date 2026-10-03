@@ -1,0 +1,49 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.12.2
+          args: --config .golangci.ci.yml --new-from-merge-base=origin/${{ github.base_ref || 'main' }}
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # Like lint, a pull request is judged on the drift it introduces: the check runs only when
+      # the change touches what README.md documents. Pushes to main check everything.
+      - name: check-docs
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
+          if [ -n "$BASE" ] && ! git diff --name-only "origin/$BASE...HEAD" | grep -qE '^(README\.md|cmd/greet/)'; then
+            echo "no documented surface changed"
+            exit 0
+          fi
+          sh scripts/check-docs.sh
