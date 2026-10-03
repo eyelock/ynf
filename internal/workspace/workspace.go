@@ -1,0 +1,156 @@
+// Package workspace is ynf's git: a mirror per repository, a worktree per step, and the commit and
+// push that only ynf (never the agent) performs (ADR-007). The token reaches git through
+// environment configuration, so it never appears in a process listing.
+package workspace
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+)
+
+// Author is the git identity of ynf's commits.
+type Author struct{ Name, Email string }
+
+// Workspace manages mirrors and worktrees under Root.
+type Workspace struct {
+	Root   string
+	Token  string
+	Author Author
+	// RemoteURL maps owner/name to a clone URL. Default https://github.com/<repo>.git.
+	RemoteURL func(repo string) string
+}
+
+// Mirror clones the repository, or fetches it if already cloned, and returns its real path.
+func (w Workspace) Mirror(ctx context.Context, repo string) (string, error) {
+	dir := filepath.Join(w.Root, "repos", filepath.FromSlash(repo))
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+		if _, err := w.git(ctx, dir, "fetch", "-q", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
+			return "", err
+		}
+		return filepath.EvalSymlinks(dir)
+	}
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		return "", err
+	}
+	if _, err := w.git(ctx, "", "clone", "-q", "--no-checkout", w.url(repo), dir); err != nil {
+		return "", err
+	}
+	if _, err := w.git(ctx, dir, "fetch", "-q", "origin", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(dir)
+}
+
+// Worktree adds a detached worktree at origin/<ref> and returns its real path. Real, because a
+// symlinked path makes git and linters disagree about which files changed (ADR-007).
+func (w Workspace) Worktree(ctx context.Context, mirror, ref, dir string) (string, error) {
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		return "", err
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(dir))
+	if err != nil {
+		return "", err
+	}
+	dir = filepath.Join(parent, filepath.Base(dir))
+	if _, err := w.git(ctx, mirror, "worktree", "add", "-q", "--detach", dir, "origin/"+ref); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// RemoveWorktree removes a worktree and its registration.
+func (w Workspace) RemoveWorktree(ctx context.Context, mirror, dir string) error {
+	_, err := w.git(ctx, mirror, "worktree", "remove", "--force", dir)
+	return err
+}
+
+// RemoteHas reports whether origin has the branch (after the last fetch).
+func (w Workspace) RemoteHas(ctx context.Context, mirror, branch string) bool {
+	_, err := w.git(ctx, mirror, "rev-parse", "-q", "--verify", "refs/remotes/origin/"+branch)
+	return err == nil
+}
+
+// Changed stages everything and lists the changed paths.
+func (w Workspace) Changed(ctx context.Context, wt string) ([]string, error) {
+	if _, err := w.git(ctx, wt, "add", "-A"); err != nil {
+		return nil, err
+	}
+	out, err := w.git(ctx, wt, "diff", "--cached", "--name-only", "--no-renames")
+	if err != nil {
+		return nil, err
+	}
+	return lines(out), nil
+}
+
+// Commit commits the staged change with message and returns the commit SHA.
+func (w Workspace) Commit(ctx context.Context, wt, message string) (string, error) {
+	name, email := w.Author.Name, w.Author.Email
+	if name == "" {
+		name, email = "ynf", "ynf@users.noreply.github.com"
+	}
+	_, err := w.gitIn(ctx, wt, strings.NewReader(message),
+		"-c", "user.name="+name, "-c", "user.email="+email, "-c", "commit.gpgsign=false",
+		"commit", "-q", "-F", "-")
+	if err != nil {
+		return "", err
+	}
+	out, err := w.git(ctx, wt, "rev-parse", "HEAD")
+	return strings.TrimSpace(out), err
+}
+
+// Push force-pushes HEAD to branch. ynf only force-pushes branches it originated; adopted
+// branches are never force-pushed (ADR-007).
+func (w Workspace) Push(ctx context.Context, wt, repo, branch string) error {
+	_, err := w.git(ctx, wt, "push", "-q", "--force", w.url(repo), "HEAD:refs/heads/"+branch)
+	return err
+}
+
+func (w Workspace) url(repo string) string {
+	if w.RemoteURL != nil {
+		return w.RemoteURL(repo)
+	}
+	return "https://github.com/" + repo + ".git"
+}
+
+func (w Workspace) git(ctx context.Context, dir string, args ...string) (string, error) {
+	return w.gitIn(ctx, dir, nil, args...)
+}
+
+func (w Workspace) gitIn(ctx context.Context, dir string, stdin *strings.Reader, args ...string) (string, error) {
+	c := exec.CommandContext(ctx, "git", args...)
+	c.Dir = dir
+	c.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if w.Token != "" {
+		auth := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + w.Token))
+		c.Env = append(c.Env,
+			"GIT_CONFIG_COUNT=2",
+			"GIT_CONFIG_KEY_0=credential.helper", "GIT_CONFIG_VALUE_0=",
+			"GIT_CONFIG_KEY_1=http.https://github.com/.extraheader", "GIT_CONFIG_VALUE_1=AUTHORIZATION: basic "+auth,
+		)
+	}
+	if stdin != nil {
+		c.Stdin = stdin
+	}
+	var stdout, stderr bytes.Buffer
+	c.Stdout, c.Stderr = &stdout, &stderr
+	if err := c.Run(); err != nil {
+		return stdout.String(), fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.String(), nil
+}
+
+func lines(s string) []string {
+	var out []string
+	for l := range strings.SplitSeq(strings.TrimSpace(s), "\n") {
+		if l != "" {
+			out = append(out, l)
+		}
+	}
+	return out
+}

@@ -1,0 +1,293 @@
+// Package policy loads lane policy (ADR-006): .agents/factory/lanes.yaml, validated against the
+// published schema, with defaults applied, a hash per lane for the decision record, CEL guards
+// over structured facts, and placeholders filled only from labels.
+package policy
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"maps"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/eyelock/ynf"
+	"gopkg.in/yaml.v3"
+)
+
+// FactoryDirs is where a repository keeps ynf's files, in lookup order (ADR-009). The first found
+// wins; the others are shadowed and reported, never merged.
+var FactoryDirs = []string{".agents/factory", ".ynh/ynf", ".ynm/ynf", ".ynf"}
+
+// LanesFile is the name of the lane policy file in a factory folder.
+const LanesFile = "lanes.yaml"
+
+// File is a parsed lanes.yaml.
+type File struct {
+	Version  int             `yaml:"version" json:"version"`
+	Defaults Defaults        `yaml:"defaults" json:"defaults"`
+	Lanes    map[string]Lane `yaml:"lanes" json:"lanes"`
+}
+
+// Defaults are what every lane inherits unless it sets its own.
+type Defaults struct {
+	Executor  string  `yaml:"executor" json:"executor,omitempty"`
+	Attempts  int     `yaml:"attempts" json:"attempts,omitempty"`
+	Retention string  `yaml:"retention" json:"retention,omitempty"`
+	Egress    *Egress `yaml:"egress" json:"egress,omitempty"`
+	Stop      *Stop   `yaml:"stop" json:"stop,omitempty"`
+	PR        *PR     `yaml:"pr" json:"pr,omitempty"`
+}
+
+// Lane is one lane, with defaults applied after Load.
+type Lane struct {
+	Name      string              `yaml:"-" json:"name"`
+	Kind      string              `yaml:"kind" json:"kind"`
+	Enabled   *bool               `yaml:"enabled" json:"enabled,omitempty"`
+	Intake    []Intake            `yaml:"intake" json:"intake"`
+	Guards    Guards              `yaml:"guards" json:"guards"`
+	Run       Run                 `yaml:"run" json:"run"`
+	When      map[string]Reaction `yaml:"when" json:"when"`
+	PR        PR                  `yaml:"pr" json:"pr"`
+	Stop      Stop                `yaml:"stop" json:"stop"`
+	Executor  string              `yaml:"executor" json:"executor,omitempty"`
+	Attempts  int                 `yaml:"attempts" json:"attempts,omitempty"`
+	Retention string              `yaml:"retention" json:"retention,omitempty"`
+}
+
+// On reports whether the lane is enabled.
+func (l Lane) On() bool { return l.Enabled == nil || *l.Enabled }
+
+// Intake is one source of work for a lane.
+type Intake struct {
+	GitHubSearch string `yaml:"github.search" json:"github.search,omitempty"`
+	JiraSearch   string `yaml:"jira.search" json:"jira.search,omitempty"`
+	Every        string `yaml:"every" json:"every,omitempty"`
+}
+
+// Interval parses Every.
+func (i Intake) Interval() time.Duration { d, _ := ParseDuration(i.Every); return d }
+
+// Guards are CEL expressions over structured facts.
+type Guards struct {
+	Eligible string `yaml:"eligible" json:"eligible,omitempty"`
+}
+
+// Run is how a lane's runs are made.
+type Run struct {
+	Runner   string   `yaml:"runner" json:"runner,omitempty"`
+	Executor string   `yaml:"executor" json:"executor,omitempty"`
+	Image    string   `yaml:"image" json:"image,omitempty"`
+	Egress   *Egress  `yaml:"egress" json:"egress,omitempty"`
+	Ynh      *Ynh     `yaml:"ynh" json:"ynh,omitempty"`
+	Command  *Command `yaml:"command" json:"command,omitempty"`
+}
+
+// Egress is what a run may reach (ADR-007).
+type Egress struct {
+	Allow []string `yaml:"allow" json:"allow"`
+}
+
+// Ynh is the ynh runner's settings.
+type Ynh struct {
+	Harness     string            `yaml:"harness" json:"harness"`
+	Focus       string            `yaml:"focus" json:"focus,omitempty"`
+	Profile     string            `yaml:"profile" json:"profile,omitempty"`
+	Sandbox     string            `yaml:"sandbox" json:"sandbox,omitempty"`
+	Budgets     *Budgets          `yaml:"budgets" json:"budgets,omitempty"`
+	SensorScope map[string]string `yaml:"sensor_scope" json:"sensor_scope,omitempty"`
+}
+
+// Budgets may only tighten the harness's own.
+type Budgets struct {
+	MaxTurns  int    `yaml:"max_turns" json:"max_turns,omitempty"`
+	MaxTokens int    `yaml:"max_tokens" json:"max_tokens,omitempty"`
+	MaxWall   string `yaml:"max_wall" json:"max_wall,omitempty"`
+}
+
+// Command is the command runner's settings.
+type Command struct {
+	Argv       []string `yaml:"argv" json:"argv"`
+	ResultFile string   `yaml:"result_file" json:"result_file,omitempty"`
+}
+
+// PR is how changes are proposed.
+type PR struct {
+	AllowedPaths   []string `yaml:"allowed_paths" json:"allowed_paths,omitempty"`
+	ProtectedPaths []string `yaml:"protected_paths" json:"protected_paths,omitempty"`
+	Draft          *bool    `yaml:"draft" json:"draft,omitempty"`
+}
+
+// IsDraft reports whether pull requests open as drafts (the default).
+func (p PR) IsDraft() bool { return p.Draft == nil || *p.Draft }
+
+// Stop holds stop conditions (ADR-010).
+type Stop struct {
+	YieldFloor        float64 `yaml:"yield_floor" json:"yield_floor,omitempty"`
+	ReviewTimeCeiling string  `yaml:"review_time_ceiling" json:"review_time_ceiling,omitempty"`
+	EscapedDefects    int     `yaml:"escaped_defects" json:"escaped_defects,omitempty"`
+	MaxOpenProposals  int     `yaml:"max_open_proposals" json:"max_open_proposals,omitempty"`
+	MinSample         int     `yaml:"min_sample" json:"min_sample,omitempty"`
+}
+
+// Reaction is what to do for an outcome: an action, a retry then an action, or a resume.
+type Reaction struct {
+	Action     string `json:"action,omitempty"`
+	Retry      int    `json:"retry,omitempty"`
+	Then       string `json:"then,omitempty"`
+	ResumeWith string `json:"resume_with,omitempty"`
+	Max        int    `json:"max,omitempty"`
+}
+
+// UnmarshalYAML accepts the schema's three shapes.
+func (r *Reaction) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode {
+		r.Action = n.Value
+		return nil
+	}
+	var m struct {
+		Retry      int    `yaml:"retry"`
+		Then       string `yaml:"then"`
+		ResumeWith string `yaml:"resume_with"`
+		Max        int    `yaml:"max"`
+	}
+	if err := n.Decode(&m); err != nil {
+		return err
+	}
+	*r = Reaction{Retry: m.Retry, Then: m.Then, ResumeWith: m.ResumeWith, Max: m.Max}
+	return nil
+}
+
+// Load validates lanes.yaml against the published schema and returns it with defaults applied.
+func Load(doc []byte) (*File, error) {
+	if err := ValidateYAML(ynf.LanesSchema, "https://eyelock.github.io/ynf/schema/lanes.schema.json", doc); err != nil {
+		return nil, fmt.Errorf("lanes.yaml does not match the schema:\n%w", err)
+	}
+	var f File
+	if err := yaml.Unmarshal(doc, &f); err != nil {
+		return nil, fmt.Errorf("lanes.yaml: %w", err)
+	}
+	for name, l := range f.Lanes {
+		l.Name = name
+		f.Lanes[name] = f.Defaults.apply(l)
+	}
+	return &f, nil
+}
+
+func (d Defaults) apply(l Lane) Lane {
+	if l.Executor == "" {
+		l.Executor = d.Executor
+	}
+	if l.Run.Executor == "" {
+		l.Run.Executor = l.Executor
+	}
+	if l.Run.Executor == "" {
+		l.Run.Executor = "docker"
+	}
+	if l.Attempts == 0 {
+		l.Attempts = d.Attempts
+	}
+	if l.Attempts == 0 {
+		l.Attempts = 3
+	}
+	if l.Retention == "" {
+		l.Retention = d.Retention
+	}
+	if l.Run.Egress == nil {
+		l.Run.Egress = d.Egress
+	}
+	if l.Run.Egress == nil {
+		l.Run.Egress = &Egress{}
+	}
+	if d.Stop != nil && l.Stop == (Stop{}) {
+		l.Stop = *d.Stop
+	}
+	if d.PR != nil {
+		if l.PR.AllowedPaths == nil {
+			l.PR.AllowedPaths = d.PR.AllowedPaths
+		}
+		if l.PR.ProtectedPaths == nil {
+			l.PR.ProtectedPaths = d.PR.ProtectedPaths
+		}
+		if l.PR.Draft == nil {
+			l.PR.Draft = d.PR.Draft
+		}
+	}
+	if l.When == nil {
+		l.When = map[string]Reaction{}
+	}
+	return l
+}
+
+// Hash is the SHA-256 of the lane's normalised form, recorded with every decision (ADR-006).
+func (l Lane) Hash() string {
+	b, _ := json.Marshal(l) // maps marshal with sorted keys, so this is stable
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// Names returns lane names, sorted.
+func (f *File) Names() []string { return slices.Sorted(maps.Keys(f.Lanes)) }
+
+var placeholder = regexp.MustCompile(`\{label\.([a-z0-9-]+)\}`)
+
+// SafeValue is what a substituted value must match, so ticket data never reaches a shell
+// as anything but a plain path-like token (ADR-006).
+var SafeValue = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
+
+// Expand fills {label.<prefix>} placeholders from '<prefix>:<value>' labels.
+func Expand(tmpl string, labels []string) (string, error) {
+	var bad error
+	out := placeholder.ReplaceAllStringFunc(tmpl, func(m string) string {
+		prefix := placeholder.FindStringSubmatch(m)[1]
+		v, ok := LabelValue(labels, prefix)
+		switch {
+		case !ok:
+			bad = fmt.Errorf("no %s: label for %s", prefix, m)
+		case !SafeValue.MatchString(v):
+			bad = fmt.Errorf("label %s:%s is not a safe value", prefix, v)
+		}
+		return v
+	})
+	return out, bad
+}
+
+// LabelValue returns the value of the first '<prefix>:<value>' label.
+func LabelValue(labels []string, prefix string) (string, bool) {
+	for _, l := range labels {
+		if v, ok := strings.CutPrefix(l, prefix+":"); ok {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+// ParseDuration accepts the schema's durations, including days.
+func ParseDuration(s string) (time.Duration, error) {
+	if d, ok := strings.CutSuffix(s, "d"); ok {
+		var n int
+		if _, err := fmt.Sscanf(d, "%d", &n); err != nil {
+			return 0, fmt.Errorf("bad duration %q", s)
+		}
+		return time.Duration(n) * 24 * time.Hour, nil
+	}
+	return time.ParseDuration(s)
+}
+
+// Resolve picks the factory folder from those that exist, and lists the shadowed ones.
+func Resolve(exists func(dir string) bool) (dir string, shadowed []string) {
+	for _, d := range FactoryDirs {
+		if !exists(d) {
+			continue
+		}
+		if dir == "" {
+			dir = d
+		} else {
+			shadowed = append(shadowed, d)
+		}
+	}
+	return dir, shadowed
+}
