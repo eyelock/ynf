@@ -35,9 +35,17 @@ type Run interface {
 | `ecs`, `k8s-job` | a remote task; ynf tails its event stream and relays control messages | hosted |
 | `ci-inline` | the current CI job | CI-native |
 
-Every run gets its own worktree and step directory. With the ynh runner, ynf passes
-`--emit-jsonl <step dir>/trajectory.jsonl`, so ynh writes a checkpoint (ynh only checkpoints when
-given a real emit path).
+Every run gets its own worktree, step directory and **tool caches**. A cache shared between
+worktrees is a correctness problem, not only a containment one. golangci-lint's analysis cache
+attributes a finding to whichever copy of identical code it saw first, so a sensor scoped with
+`--new-from-merge-base` in a second worktree silently drops it. Go's test cache replays a flaky
+test's one pass forever, so the run can never look stuck. Contained executors start each run with
+empty caches; the `process` executor points `XDG_CACHE_HOME` and the common tool cache variables
+into the step directory. Separately, a sensor that judges a run should not read results from a
+cache at all (`go test -count=1`).
+
+With the ynh runner, ynf passes `--emit-jsonl <step dir>/trajectory.jsonl`, so ynh writes a
+checkpoint (ynh only checkpoints when given a real emit path).
 
 **The agent never holds forge write credentials.** The worker receives only what the harness's
 `env_passthrough` declares: model credentials and, where needed, read-only tokens. When the run
