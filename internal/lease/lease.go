@@ -140,9 +140,10 @@ func (h *Holder) Release(ctx context.Context) error {
 	return h.put(ctx, it)
 }
 
-// Heartbeat renews every interval until ctx ends. If a renewal fails, it calls onLost once and
-// returns: the holder must stop the work it is doing.
-func (h *Holder) Heartbeat(ctx context.Context, interval time.Duration, onLost func(error)) {
+// Heartbeat renews every interval until ctx ends, calling onRenewed (if set) with the item after
+// each renewal. If a renewal fails, it calls onLost once and returns: the holder must stop the
+// work it is doing.
+func (h *Holder) Heartbeat(ctx context.Context, interval time.Duration, onRenewed func(item.Item), onLost func(error)) {
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	for {
@@ -155,6 +156,9 @@ func (h *Holder) Heartbeat(ctx context.Context, interval time.Duration, onLost f
 					onLost(err)
 				}
 				return
+			}
+			if onRenewed != nil {
+				onRenewed(h.Item())
 			}
 		}
 	}

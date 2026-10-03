@@ -112,6 +112,10 @@
               ],
               "description": "The work item's state once ynf has nothing more to do without a human."
             },
+            "crash": {
+              "type": "boolean",
+              "description": "make e2e kills ynf (SIGKILL) as this fixture's run starts, starts a fresh ynf, and checks the item was restarted."
+            },
             "signatures": {
               "type": "array",
               "items": {

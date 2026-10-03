@@ -3,7 +3,8 @@
 // the draft pull request, its trailers and its green CI — and replays every recorded decision.
 //
 // Unlike `make calibrate`, this tests ynf itself. Only fixtures in the lanes given with -lanes are
-// checked; slice 1a covers the lanes that need no agent and no egress.
+// checked. A fixture with expect.crash is the crash test: ynf is killed (SIGKILL) as that
+// fixture's run starts, and a fresh ynf must restart it once its lease runs out.
 package main
 
 import (
@@ -33,6 +34,7 @@ type fixture struct {
 	Expect struct {
 		Result     string   `yaml:"result"`
 		Signatures []string `yaml:"signatures"`
+		Crash      bool     `yaml:"crash"`
 	} `yaml:"expect"`
 }
 
@@ -113,7 +115,12 @@ func run(root, repo string, lanes []string, timeout time.Duration) error {
 		return fmt.Errorf("build linux ynf: %w\n%s", err, out)
 	}
 	cfg := filepath.Join(tmp, "config.yaml")
-	if err := os.WriteFile(cfg, fmt.Appendf(nil, "version: 1\nrepos: [%s]\npoll: {ci: 15s, review: 1m}\n", repo), 0o644); err != nil {
+	// A short lease so the crash test's restart comes about half a minute after the kill.
+	if err := os.WriteFile(cfg, fmt.Appendf(nil, "version: 1\nrepos: [%s]\npoll: {ci: 15s, review: 1m}\nlease: {ttl: 30s, heartbeat: 10s}\n", repo), 0o644); err != nil {
+		return err
+	}
+	numbers, err := issueNumbers(repo)
+	if err != nil {
 		return err
 	}
 
@@ -124,6 +131,26 @@ func run(root, repo string, lanes []string, timeout time.Duration) error {
 	}
 	fmt.Printf("running ynf %s\nynf log (also below as it happens): %s\n\n", strings.Join(lanes, ", "), logPath)
 	start := time.Now()
+	for _, f := range ff.Fixtures {
+		if !f.Expect.Crash || !slices.Contains(lanes, f.Lane) {
+			continue
+		}
+		n, ok := numbers[f.Title]
+		if !ok {
+			return fmt.Errorf("no issue titled %q in the sandbox", f.Title)
+		}
+		key := fmt.Sprintf("item=item/github/%s/issues/%d ", repo, n)
+		killed, err := streamUntil(func(line string) bool {
+			return strings.Contains(line, `msg="run started"`) && strings.Contains(line, key)
+		}, ynf, args...)
+		if err != nil {
+			return fmt.Errorf("ynf sweep before the crash: %w", err)
+		}
+		if !killed {
+			return fmt.Errorf("%s: its run never started, so there was nothing to kill", f.ID)
+		}
+		fmt.Printf("\nkilled ynf (SIGKILL) as #%d's run started (%s); a fresh ynf takes over\n\n", n, f.ID)
+	}
 	out, err := stream(ynf, args...)
 	if err != nil {
 		return fmt.Errorf("ynf sweep: %w\n%s", err, out)
@@ -136,10 +163,6 @@ func run(root, repo string, lanes []string, timeout time.Duration) error {
 	}
 	fmt.Printf("settled in %s\n\n", time.Since(start).Round(time.Second))
 
-	numbers, err := issueNumbers(repo)
-	if err != nil {
-		return err
-	}
 	failed := 0
 	for _, f := range ff.Fixtures {
 		if !slices.Contains(lanes, f.Lane) {
@@ -227,7 +250,18 @@ func check(f fixture, numbers map[string]int, items []item, repo, ynf, cfg strin
 	if err := json.Unmarshal([]byte(rp), &r); err != nil {
 		return "", err
 	}
-	return detail + fmt.Sprintf(", %d decisions replay the same", len(r.Decisions)), nil
+	detail += fmt.Sprintf(", %d decisions replay the same", len(r.Decisions))
+	if f.Expect.Crash {
+		log, err := sh("", ynf, "--config", cfg, "items", "log", fmt.Sprintf("%s#%d", repo, n))
+		if err != nil {
+			return "", fmt.Errorf("items log: %w", err)
+		}
+		if !strings.Contains(log, "did not finish") {
+			return "", fmt.Errorf("#%d: no restart after the crash in its log", n)
+		}
+		detail += ", restarted after the crash"
+	}
+	return detail, nil
 }
 
 func oneLine(s string, max int) string {
@@ -280,6 +314,39 @@ func stream(name string, args ...string) (string, error) {
 	_ = pw.Close()
 	<-done
 	return stdout.String(), err
+}
+
+// streamUntil streams a command like stream, and kills it (SIGKILL: no clean-up, no lease
+// release) at the first log line kill matches. It reports whether it killed it.
+func streamUntil(kill func(string) bool, name string, args ...string) (bool, error) {
+	c := exec.Command(name, args...)
+	c.Stdout = io.Discard
+	pr, pw := io.Pipe()
+	c.Stderr = pw
+	if err := c.Start(); err != nil {
+		return false, err
+	}
+	killed := make(chan bool, 1)
+	go func() {
+		k := false
+		sc := bufio.NewScanner(pr)
+		sc.Buffer(make([]byte, 64*1024), 1024*1024)
+		for sc.Scan() {
+			fmt.Println("  │ " + sc.Text())
+			if !k && kill(sc.Text()) {
+				k = true
+				_ = c.Process.Kill()
+			}
+		}
+		killed <- k
+	}()
+	err := c.Wait()
+	_ = pw.Close()
+	k := <-killed
+	if k {
+		return true, nil
+	}
+	return false, err
 }
 
 func shEnv(dir string, env []string, name string, args ...string) (string, error) {
