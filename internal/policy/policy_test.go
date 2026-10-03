@@ -18,7 +18,7 @@ func TestSandboxLanesLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(f.Names(), ",")
-	if got != "deps,doc-drift,fix-ci,gofmt,lint-paydown" {
+	if got != "deps,doc-drift,fix-ci,gofmt,lint-paydown,reclaim" {
 		t.Fatalf("lanes %s", got)
 	}
 	g := f.Lanes["gofmt"]
