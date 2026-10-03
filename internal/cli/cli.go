@@ -20,6 +20,8 @@ import (
 	"github.com/eyelock/ynf/internal/decide"
 	"github.com/eyelock/ynf/internal/engine"
 	"github.com/eyelock/ynf/internal/forge"
+	"github.com/eyelock/ynf/internal/store"
+	"github.com/eyelock/ynf/internal/store/s3store"
 	"github.com/eyelock/ynf/internal/store/sqlite"
 	"github.com/eyelock/ynf/internal/workspace"
 	"github.com/oklog/ulid/v2"
@@ -207,6 +209,21 @@ func (a *app) loadConfig() error {
 	return nil
 }
 
+// openStore opens the configured store (ADR-004).
+func openStore(ctx context.Context, c *config.Config) (store.Store, error) {
+	switch c.StoreKind() {
+	case "sqlite":
+		db, err := c.SQLitePath()
+		if err != nil {
+			return nil, withCode(ExitPolicy, err)
+		}
+		return sqlite.Open(db)
+	case "s3":
+		return s3store.Open(ctx, c.Store)
+	}
+	return nil, withCode(ExitPolicy, fmt.Errorf("store %s: dynamodb:// is not built yet", c.Store))
+}
+
 // engine builds the engine from config.
 func (a *app) engine() (*engine.Engine, error) {
 	if a.eng != nil {
@@ -220,11 +237,7 @@ func (a *app) engine() (*engine.Engine, error) {
 	if err != nil {
 		return nil, withCode(ExitPolicy, err)
 	}
-	db, err := c.SQLitePath()
-	if err != nil {
-		return nil, withCode(ExitPolicy, err)
-	}
-	st, err := sqlite.Open(db)
+	st, err := openStore(context.Background(), c)
 	if err != nil {
 		return nil, err
 	}

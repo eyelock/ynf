@@ -8,7 +8,7 @@ the folder the file is in.
 |---|---|---|
 | `version` | required | `1`. |
 | `repos` | required | Enrolled repositories, `owner/name`. ynf reads each one's lanes from its default branch. |
-| `store` | `sqlite://state.db` | Where state lives. `s3://` and `dynamodb://` come with the hosted service (ADR-004). |
+| `store` | `sqlite://state.db` | Where state lives (ADR-004): `sqlite://<path>`, or `s3://bucket/prefix?region=…` for state that outlives the process (CI, the hosted service), with credentials from the AWS chain; `endpoint=` and `path_style=true` point it at MinIO or another S3. `dynamodb://` is not built yet. |
 | `work_dir` | `work` | Repository mirrors and per-step worktrees and run folders. |
 | `owner` | `ynf@<host>/<pid>` | This instance's name in leases. |
 | `github.token_env` | `GITHUB_TOKEN` | The variable holding the forge token; `gh auth token` if unset. |

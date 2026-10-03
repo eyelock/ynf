@@ -119,9 +119,15 @@ func (c *Config) rel(p string) string {
 func (c *Config) SQLitePath() (string, error) {
 	p, ok := strings.CutPrefix(c.Store, "sqlite://")
 	if !ok {
-		return "", fmt.Errorf("store %s: only sqlite:// is built yet (s3:// and dynamodb:// come with the hosted service)", c.Store)
+		return "", fmt.Errorf("store %s is not sqlite://", c.Store)
 	}
 	return c.rel(p), nil
+}
+
+// StoreKind is the store's scheme: sqlite, s3 or dynamodb.
+func (c *Config) StoreKind() string {
+	kind, _, _ := strings.Cut(c.Store, "://")
+	return kind
 }
 
 // WorkPath is the absolute work folder.

@@ -314,3 +314,17 @@ func TestServeListenNeedsASecret(t *testing.T) {
 		t.Fatalf("--listen on sweep: %d", code)
 	}
 }
+
+func TestStoreSchemes(t *testing.T) {
+	e := setup(t)
+	_ = os.WriteFile(e.cfg, []byte("version: 1\nrepos: [o/r]\nstore: dynamodb://table\n"), 0o644)
+	if code, _, stderr := e.run("items", "ls"); code != cli.ExitPolicy || !strings.Contains(stderr, "dynamodb:// is not built yet") {
+		t.Fatalf("%d %s", code, stderr)
+	}
+	_ = os.WriteFile(e.cfg, []byte("version: 1\nrepos: [o/r]\nstore: s3://bucket/ynf?region=us-east-1\n"), 0o644)
+	t.Setenv("AWS_ACCESS_KEY_ID", "x")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "y")
+	if code, _, _ := e.run("version"); code != 0 {
+		t.Fatal("version needs no store")
+	}
+}

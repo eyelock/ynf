@@ -92,8 +92,8 @@ github: {author: {name: bot, email: bot@x}}
 		t.Fatal(n)
 	}
 	c.Store = "s3://bucket/x"
-	if _, err := c.SQLitePath(); err == nil {
-		t.Fatal("s3 accepted before it exists")
+	if _, err := c.SQLitePath(); err == nil || c.StoreKind() != "s3" {
+		t.Fatal("an s3 store has no sqlite path")
 	}
 }
 
