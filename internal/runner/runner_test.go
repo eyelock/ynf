@@ -154,3 +154,16 @@ func TestResolveFocus(t *testing.T) {
 		t.Fatal("bad json")
 	}
 }
+
+func TestReadHarnessPassthrough(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, ".agents/harness"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, ".agents/harness/plugin.json"), []byte(`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY"]}`), 0o644)
+	h, err := runner.ReadHarness(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := h.NotPassed([]string{"ANTHROPIC_API_KEY", "HTTPS_PROXY", "NO_PROXY", "NO_PROXY"}); len(got) != 1 || got[0] != "NO_PROXY" {
+		t.Fatalf("%v", got)
+	}
+}

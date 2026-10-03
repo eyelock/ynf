@@ -232,7 +232,7 @@ func newHarness(t *testing.T) *harness {
 	if err := os.MkdirAll(filepath.Join(src, ".agents/harness"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(src, ".agents/harness/plugin.json"), []byte(`{"name":"h","focuses":{"tidy":{"prompt":"TIDY FOCUS PROMPT","profile":"careful"}}}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(src, ".agents/harness/plugin.json"), []byte(`{"name":"h","env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"TIDY FOCUS PROMPT","profile":"careful"}}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	git(t, src, "add", "-A")
@@ -985,4 +985,33 @@ func TestMemoryOutageNeverStopsAStep(t *testing.T) {
 
 func leaseCreate(ctx context.Context, h *harness, it item.Item) error {
 	return lease.Create(ctx, h.e.Store, it)
+}
+
+// TestAHarnessThatStripsTheKeyIsRefused: ynh passes its worker only what env_passthrough lists, so
+// a harness that does not list the lane's key, or the egress proxy's variables, would run an agent
+// that cannot log in or reach out. ynf refuses that run up front, saying what is missing, rather
+// than letting it look like the agent is stuck.
+func TestAHarnessThatStripsTheKeyIsRefused(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	src := filepath.Join(t.TempDir(), "src")
+	git(t, "", "clone", "-q", h.remote, src)
+	if err := os.WriteFile(filepath.Join(src, ".agents/harness/plugin.json"), []byte(`{"name":"h","env_passthrough":["HTTPS_PROXY"],"focuses":{"tidy":{"prompt":"p"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, src, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-am", "a harness that forgets the key")
+	git(t, src, "push", "-q", "origin", "main")
+	calls := fakeYnh(t)
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	it := h.item(t, 1)
+	if it.State != item.Escalated || it.LastRun.Outcome != "operator_error" ||
+		!strings.Contains(it.LastRun.Detail, "does not pass ANTHROPIC_API_KEY to its agent worker") {
+		t.Fatalf("%s %+v", it.State, it.LastRun)
+	}
+	if b, _ := os.ReadFile(calls); len(b) > 0 {
+		t.Fatalf("the agent was started anyway: %s", b)
+	}
 }

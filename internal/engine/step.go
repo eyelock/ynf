@@ -363,7 +363,13 @@ func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, wt, 
 		}
 	}
 	y, isYnh := r.(runner.YnhRunner)
-	if !isYnh || !ex.Contained() {
+	if !isYnh {
+		return job, false, nil
+	}
+	if err := s.checkPassthrough(lane, y, wt, ex.Contained() && len(job.Egress)+len(runner.ModelHosts[y.Vendor()]) > 0); err != nil {
+		return job, false, err
+	}
+	if !ex.Contained() {
 		return job, false, nil
 	}
 	if job.Image == "" {
@@ -382,6 +388,29 @@ func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, wt, 
 		job.Env["YNH_VENDOR"] = y.Cfg.Vendor
 	}
 	return job, true, nil
+}
+
+// proxyVars are what a worker behind the egress proxy needs to reach it.
+var proxyVars = []string{"HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"}
+
+// checkPassthrough refuses a ynh run whose worker could not use what ynf gives it. ynh passes its
+// worker only the variables the harness lists in env_passthrough, deliberately, so a lane's
+// run.env (the model key) or the egress proxy's variables that the harness does not list never
+// arrive, and the run fails in a way that looks like the agent being stuck.
+func (s *step) checkPassthrough(lane policy.Lane, y runner.YnhRunner, wt string, behindProxy bool) error {
+	h, err := runner.ReadHarness(filepath.Join(wt, filepath.FromSlash(y.Cfg.Harness)))
+	if err != nil {
+		return nil // an installed harness id: ynh reports its own manifest problems
+	}
+	need := append([]string(nil), lane.Run.Env...)
+	if behindProxy {
+		need = append(need, proxyVars...)
+	}
+	if missing := h.NotPassed(need); len(missing) > 0 {
+		return fmt.Errorf("harness %s does not pass %s to its agent worker: ynh gives the worker only what env_passthrough lists, so without them the agent cannot log in or reach the egress proxy; add them to env_passthrough in the harness manifest",
+			y.Cfg.Harness, strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 // openPR gates, commits, pushes and opens (or reuses) the pull request for this step's change.
