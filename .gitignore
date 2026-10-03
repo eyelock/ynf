@@ -7,3 +7,6 @@ sandbox/terraform/*.tfstate.*
 
 # Built binaries
 bin/
+
+# GoReleaser output
+dist/

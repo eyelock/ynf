@@ -8,9 +8,12 @@ ynf is the runtime layer of [ynh](https://github.com/eyelock/ynh)'s factory patt
 with ynh and [ynm](https://github.com/eyelock/ynm) when they are installed, without needing either.
 
 ```bash
-make build
-bin/ynf --config config.yaml sweep --until-settled
+export HOMEBREW_GITHUB_API_TOKEN="$(gh auth token)"   # while the repository is private
+brew install eyelock/tap/ynf
+ynf --config config.yaml sweep --until-settled
 ```
+
+Or from source: `make build`, then `bin/ynf`.
 
 - [Run ynf locally](docs/how-to/run-ynf-locally.md)
 - [The design](docs/README.md): architecture decisions and explanation

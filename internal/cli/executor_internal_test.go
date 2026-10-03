@@ -45,3 +45,31 @@ func TestExecutorGivesDockerItsProxy(t *testing.T) {
 		t.Fatal("unknown executor accepted")
 	}
 }
+
+// TestFindBesideFollowsHomebrewLayout: Homebrew links bin/ynf into the Cellar and the formula puts
+// the linux proxies in the Cellar's libexec.
+func TestFindBesideFollowsHomebrewLayout(t *testing.T) {
+	root := t.TempDir()
+	cellar := filepath.Join(root, "Cellar", "ynf", "0.1.0")
+	_ = os.MkdirAll(filepath.Join(cellar, "bin"), 0o755)
+	_ = os.MkdirAll(filepath.Join(cellar, "libexec"), 0o755)
+	_ = os.WriteFile(filepath.Join(cellar, "bin", "ynf"), []byte("x"), 0o755)
+	_ = os.WriteFile(filepath.Join(cellar, "libexec", "ynf-linux-arm64"), []byte("x"), 0o755)
+	_ = os.MkdirAll(filepath.Join(root, "bin"), 0o755)
+	link := filepath.Join(root, "bin", "ynf")
+	if err := os.Symlink(filepath.Join(cellar, "bin", "ynf"), link); err != nil {
+		t.Fatal(err)
+	}
+	got := findBeside(link, "ynf-linux-arm64")
+	want, _ := filepath.EvalSymlinks(filepath.Join(cellar, "libexec", "ynf-linux-arm64"))
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	_ = os.WriteFile(filepath.Join(root, "bin", "ynf-linux-amd64"), []byte("x"), 0o755)
+	if got := findBeside(link, "ynf-linux-amd64"); got != filepath.Join(root, "bin", "ynf-linux-amd64") {
+		t.Fatalf("beside the link first: %q", got)
+	}
+	if findBeside(link, "nope") != "" {
+		t.Fatal("missing binary found")
+	}
+}

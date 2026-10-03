@@ -1,0 +1,91 @@
+version: 2
+
+project_name: ynf
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  # ynf for each platform.
+  - id: ynf
+    main: ./cmd/ynf
+    binary: ynf
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/eyelock/ynf.Version={{.Version}}
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+
+  # Static linux builds the docker executor runs as its egress proxy, shipped beside ynf on every
+  # platform: a Mac's docker runs linux containers.
+  - id: proxy
+    main: ./cmd/ynf
+    binary: ynf-linux-{{ .Arch }}
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/eyelock/ynf.Version={{.Version}}
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: ynf
+    ids: [ynf]
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - src: "dist/proxy_linux_amd64*/ynf-linux-amd64"
+        dst: libexec
+        strip_parent: true
+      - src: "dist/proxy_linux_arm64*/ynf-linux-arm64"
+        dst: libexec
+        strip_parent: true
+
+checksum:
+  name_template: "checksums.txt"
+
+# Keyless signing of the checksum file, as ynh does: the signature is bound to the workflow
+# identity through OIDC, so there is no key to store or rotate.
+signs:
+  - cmd: cosign
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
+sboms:
+  - artifacts: archive
+
+changelog:
+  sort: asc
+  filters:
+    exclude: ["^docs:", "^test:", "^ci:"]
+
+brews:
+  - repository:
+      owner: eyelock
+      name: homebrew-tap
+      token: "{{ .Env.GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/eyelock/ynf"
+    description: "Your named factory: the event-driven outer loop around agent runs"
+    license: "MIT"
+    # ynf's repository is private for now: the release assets need a token. Homebrew sends this
+    # header with the download; export HOMEBREW_GITHUB_API_TOKEN before installing.
+    url_headers:
+      - "Accept: application/octet-stream"
+      - 'Authorization: bearer #{ENV["HOMEBREW_GITHUB_API_TOKEN"]}'
+    test: |
+      system "#{bin}/ynf", "version"
+    install: |
+      bin.install "ynf"
+      libexec.install Dir["libexec/*"]

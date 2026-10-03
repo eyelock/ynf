@@ -11,11 +11,22 @@ without a human is done.
 - A repository with `.agents/factory/lanes.yaml` on its default branch. The sandbox has one
   ([Test the factory against the sandbox](test-against-the-sandbox.md)).
 
-## Build
+## Install
 
 ```bash
-make build            # bin/ynf
-make install          # or copy it to ~/.local/bin
+export HOMEBREW_GITHUB_API_TOKEN="$(gh auth token)"   # the repository is private for now
+brew install eyelock/tap/ynf
+```
+
+The formula installs `ynf`, and keeps the static linux builds the docker executor runs as its
+egress proxy in its `libexec`, off your PATH. The token is only needed while ynf's repository is
+private: its release downloads need one, and the formula sends it.
+
+Or build from source:
+
+```bash
+make build            # bin/ynf, and bin/ynf-linux-{amd64,arm64} for the egress proxy
+make install          # or copy them to ~/.local/bin
 ```
 
 ## Configure
