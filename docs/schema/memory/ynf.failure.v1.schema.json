@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eyelock.github.io/ynf/schema/memory/ynf.failure.v1.schema.json",
+  "title": "ynf.failure.v1",
+  "description": "The data of an episodic memory ynf writes when a failure signature occurs (ADR-008). Its subject is the signature, so ynm's consolidation clusters the same failure across items.",
+  "type": "object",
+  "required": ["signature", "item", "lane", "count"],
+  "properties": {
+    "signature": { "type": "string", "pattern": "^sig/", "examples": ["sig/ci/lint", "sig/egress/denied/www.iana.org", "sig/outcome/stuck"] },
+    "item": { "type": "string" },
+    "lane": { "type": "string" },
+    "count": { "type": "integer", "minimum": 1, "description": "Times this signature has occurred on this item." }
+  }
+}

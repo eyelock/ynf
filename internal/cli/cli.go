@@ -19,8 +19,9 @@ import (
 	"github.com/eyelock/ynf/internal/config"
 	"github.com/eyelock/ynf/internal/decide"
 	"github.com/eyelock/ynf/internal/engine"
-	"github.com/eyelock/ynf/internal/executor"
 	"github.com/eyelock/ynf/internal/forge"
+	"github.com/eyelock/ynf/internal/store"
+	"github.com/eyelock/ynf/internal/store/s3store"
 	"github.com/eyelock/ynf/internal/store/sqlite"
 	"github.com/eyelock/ynf/internal/workspace"
 	"github.com/oklog/ulid/v2"
@@ -44,10 +45,14 @@ Usage:
   ynf lanes validate [--file lanes.yaml]
   ynf lanes show --repo owner/name [lane]
   ynf sweep [--until-settled] [--timeout 20m] [--interval 15s] [--lane name]...
-  ynf serve [--interval 1m] [--lane name]...
+  ynf serve [--interval 1m] [--listen :8080 [--webhook-secret-env YNF_WEBHOOK_SECRET]] [--lane name]...
+  ynf step --github-event <file> --github-event-name <name>      (CI: GITHUB_EVENT_PATH, GITHUB_EVENT_NAME)
   ynf items ls
   ynf items show|log|retry|release <owner/name#number | key>
   ynf replay <owner/name#number | key> [--policy lanes.yaml]
+  ynf pause|resume <lane> --reason <text> [--repo owner/name]
+  ynf stats [--lane name]...
+  ynf egress-proxy --allow host,*.domain [--listen :3128] [--log file]   (run inside a container)
 
 Global flags (before the command):
   --config <path>   config file (default: config.yaml in ~/.agents/factory/ or a fallback)
@@ -108,6 +113,14 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = a.items(ctx, rest)
 	case "replay":
 		err = a.replay(ctx, rest)
+	case "step":
+		err = a.step(ctx, rest)
+	case "pause", "resume":
+		err = a.pause(ctx, cmd, rest)
+	case "stats":
+		err = a.stats(ctx, rest)
+	case "egress-proxy":
+		err = a.egressProxy(ctx, rest)
 	case "help", "-h", "--help":
 		_, _ = fmt.Fprint(stdout, usage)
 		return ExitOK
@@ -196,6 +209,21 @@ func (a *app) loadConfig() error {
 	return nil
 }
 
+// openStore opens the configured store (ADR-004).
+func openStore(ctx context.Context, c *config.Config) (store.Store, error) {
+	switch c.StoreKind() {
+	case "sqlite":
+		db, err := c.SQLitePath()
+		if err != nil {
+			return nil, withCode(ExitPolicy, err)
+		}
+		return sqlite.Open(db)
+	case "s3":
+		return s3store.Open(ctx, c.Store)
+	}
+	return nil, withCode(ExitPolicy, fmt.Errorf("store %s: dynamodb:// is not built yet", c.Store))
+}
+
 // engine builds the engine from config.
 func (a *app) engine() (*engine.Engine, error) {
 	if a.eng != nil {
@@ -209,11 +237,7 @@ func (a *app) engine() (*engine.Engine, error) {
 	if err != nil {
 		return nil, withCode(ExitPolicy, err)
 	}
-	db, err := c.SQLitePath()
-	if err != nil {
-		return nil, withCode(ExitPolicy, err)
-	}
-	st, err := sqlite.Open(db)
+	st, err := openStore(context.Background(), c)
 	if err != nil {
 		return nil, err
 	}
@@ -234,10 +258,15 @@ func (a *app) engine() (*engine.Engine, error) {
 	}
 	var mu sync.Mutex
 	entropy := ulid.Monotonic(cryptoReader{}, 0)
+	mem, ns, budget := memoryFor(c)
 	a.eng = &engine.Engine{
-		Store: st, Forge: fg,
+		Memory:          mem,
+		MemoryNamespace: ns,
+		MemoryBudget:    budget,
+		Store:           st, Forge: fg,
 		Git:         workspace.Workspace{Root: c.WorkPath(), Token: token, Author: workspace.Author{Name: name, Email: email}},
-		Executor:    executor.For,
+		Executor:    a.executor,
+		BuildImage:  imageBuilder(),
 		Repos:       c.Repos,
 		Lanes:       a.lanes,
 		WorkDir:     c.WorkPath(),

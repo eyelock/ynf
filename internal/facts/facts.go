@@ -7,6 +7,15 @@ package facts
 type Facts struct {
 	Ticket *Ticket `json:"ticket,omitempty"`
 	PR     *PR     `json:"pr,omitempty"`
+	Lane   *Lane   `json:"lane,omitempty"`
+}
+
+// Lane is the lane's own state: whether a human or a stop condition paused it, and how many of its
+// proposals are waiting on review (ADR-010).
+type Lane struct {
+	Paused        bool   `json:"paused"`
+	PausedReason  string `json:"paused_reason,omitempty"`
+	OpenProposals int    `json:"open_proposals"`
 }
 
 // Ticket is an issue's structured state.
@@ -24,6 +33,7 @@ type PR struct {
 	Draft            bool    `json:"draft"`
 	Fork             bool    `json:"fork"`
 	HeadSHA          string  `json:"head_sha"`
+	HeadRef          string  `json:"head_ref"`
 	Checks           []Check `json:"checks"`
 	ChangesRequested bool    `json:"changes_requested"`
 	Approved         bool    `json:"approved"`
@@ -91,6 +101,9 @@ func (f Facts) CEL() map[string]any {
 			"number": p.Number, "state": p.State, "merged": p.Merged, "draft": p.Draft, "fork": p.Fork,
 			"checks": checks, "changes_requested": p.ChangesRequested, "approved": p.Approved, "ci": p.CIState(),
 		}
+	}
+	if l := f.Lane; l != nil {
+		m["lane"] = map[string]any{"paused": l.Paused, "open_proposals": l.OpenProposals}
 	}
 	return m
 }

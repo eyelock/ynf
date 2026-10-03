@@ -4,6 +4,9 @@
 # package only embeds the schemas.
 set -eu
 MIN=${1:-80}
+# The docker-backed tests (real containers, the egress proxy, MinIO for the S3 store) count when
+# docker is available, which includes CI.
+if docker info >/dev/null 2>&1; then export YNF_DOCKER_TESTS=1; fi
 out=$(go test -race -count=1 -cover ./... 2>&1) || { printf '%s\n' "$out"; exit 1; }
 printf '%s\n' "$out" | awk -v min="$MIN" '
   /coverage: / {

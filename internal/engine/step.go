@@ -54,6 +54,7 @@ type RunRecord struct {
 	Outcome  string   `json:"outcome"`
 	Detail   string   `json:"detail,omitempty"`
 	Changed  []string `json:"changed,omitempty"`
+	Denied   []string `json:"denied,omitempty"` // hosts the egress proxy refused
 	StepDir  string   `json:"step_dir"`
 	Duration string   `json:"duration"`
 }
@@ -115,6 +116,7 @@ type step struct {
 
 	mirror string
 	wt     string
+	base   string // the commit the run started from
 	run    *RunRecord
 	result runner.Result
 	text   forge.Text
@@ -155,6 +157,7 @@ func (s *step) decideAndAct(ev event.Event) (*event.Event, error) {
 	if err := e.Store.Schedule(ctx, it.Key, due); err != nil {
 		return nil, err
 	}
+	s.remember(in, d)
 	e.log().Info("decided", "item", it.Key, "event", ev.Type, "state", d.Item.State, "reason", d.Reason)
 
 	for _, a := range d.Actions {
@@ -174,7 +177,7 @@ func (s *step) decideAndAct(ev event.Event) (*event.Event, error) {
 }
 
 func (s *step) event(typ string, it item.Item, data map[string]any) event.Event {
-	return event.New(s.e.NewID(), "ynf/step/"+s.id, typ, item.IssueSubject(it.Repo, it.Number), s.e.Now(), data)
+	return event.New(s.e.NewID(), "ynf/step/"+s.id, typ, it.Subject(), s.e.Now(), data)
 }
 
 func (s *step) probe(it item.Item) (facts.Facts, error) {
@@ -187,6 +190,9 @@ func (s *step) probe(it item.Item) (facts.Facts, error) {
 		return f, err
 	}
 	f.Ticket, s.text = &t, text
+	if f.Lane, err = s.e.laneFacts(s.ctx, it.Repo, it.Lane); err != nil {
+		return f, err
+	}
 	if it.PR > 0 {
 		p, err := s.e.Forge.PullRequest(s.ctx, it.Repo, it.PR)
 		if err != nil && !errors.Is(err, forge.ErrNotFound) {
@@ -204,6 +210,9 @@ func (s *step) act(a decide.Action, it item.Item, rp *RepoPolicy, lane policy.La
 		return &ev, nil
 	case decide.OpenPR:
 		ev := s.openPR(it, rp, lane)
+		return &ev, nil
+	case decide.PushCommit:
+		ev := s.pushCommit(it, lane)
 		return &ev, nil
 	case decide.Escalate, decide.Quarantine, decide.Comment, decide.Close:
 		verb := map[string]string{decide.Escalate: "escalated this", decide.Quarantine: "quarantined this", decide.Comment: "notes", decide.Close: "closed this"}[a.Kind]
@@ -227,7 +236,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		s.run = &rec
 		s.recordRun(it.Key, rec)
 		return s.event(event.RunFinished, it, map[string]any{
-			"run_id": runID, "outcome": rec.Outcome, "detail": rec.Detail, "changed": anyList(rec.Changed),
+			"run_id": runID, "outcome": rec.Outcome, "detail": rec.Detail, "changed": anyList(rec.Changed), "denied": anyList(rec.Denied),
 		})
 	}
 	fail := func(outcome string, err error) event.Event {
@@ -251,7 +260,13 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		return fail(runner.Error, err)
 	}
 	base := rp.Base
-	if feedback != "" && it.Branch != "" && e.Git.RemoteHas(s.ctx, mirror, it.Branch) {
+	switch {
+	case it.Kind == "adopt":
+		base = it.Branch // the author's branch, as it is now
+		if !e.Git.RemoteHas(s.ctx, mirror, base) {
+			return fail(runner.Error, fmt.Errorf("the pull request's branch %s is gone", base))
+		}
+	case feedback != "" && it.Branch != "" && e.Git.RemoteHas(s.ctx, mirror, it.Branch):
 		base = it.Branch // resume from what was proposed, with the feedback
 	}
 	if s.wt != "" {
@@ -271,20 +286,35 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		return fail(runner.Error, err)
 	}
 	s.mirror, s.wt = mirror, wt
-
-	if err := os.WriteFile(filepath.Join(runDir, "task.md"), []byte(task(it, s.text, feedback)), 0o644); err != nil {
+	if s.base, err = e.Git.Head(s.ctx, wt); err != nil {
 		return fail(runner.Error, err)
 	}
-	job := executor.Job{Worktree: wt, RunDir: runDir, Image: lane.Run.Image, Timeout: e.RunTimeout}
-	if lane.Run.Egress != nil {
-		job.Egress = lane.Run.Egress.Allow
+
+	var focus *runner.Focus
+	if y, ok := r.(runner.YnhRunner); ok && y.Cfg.Focus != "" {
+		f, err := runner.ResolveFocus(filepath.Join(wt, filepath.FromSlash(y.Cfg.Harness)), y.Cfg.Focus)
+		if err != nil {
+			return fail(runner.OperatorError, err)
+		}
+		focus = &f
+	}
+	body := task(it, s.text, feedback, s.recall(it))
+	if focus != nil {
+		body = focus.Prompt + "\n\n" + body
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "task.md"), []byte(body), 0o644); err != nil {
+		return fail(runner.Error, err)
+	}
+	job, inImage, err := s.job(lane, r, ex, wt, runDir)
+	if err != nil {
+		return fail(runner.OperatorError, err)
 	}
 	_, cr := ex.Paths(job)
 	labels := []string(nil)
 	if t, _, err := e.Forge.Ticket(s.ctx, it.Repo, it.Number); err == nil {
 		labels = t.Labels
 	}
-	argv, err := r.Command(runner.Spec{Lane: lane, Labels: labels, TaskFile: cr + "/task.md", RunDir: cr, Feedback: feedback})
+	argv, err := r.Command(runner.Spec{Lane: lane, Labels: labels, TaskFile: cr + "/task.md", RunDir: cr, Feedback: feedback, InImage: inImage, Focus: focus})
 	if err != nil {
 		return fail(runner.OperatorError, err)
 	}
@@ -292,7 +322,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 
 	start := e.Now()
 	out, err := ex.Run(s.ctx, job)
-	rec := RunRecord{Runner: r.Name(), Executor: ex.Name(), Argv: argv, Base: base, StepDir: stepDir}
+	rec := RunRecord{Runner: r.Name(), Executor: ex.Name(), Argv: argv, Base: base, StepDir: stepDir, Denied: out.Denied}
 	_ = os.WriteFile(filepath.Join(runDir, "stdout"), out.Stdout, 0o644)
 	_ = os.WriteFile(filepath.Join(runDir, "stderr"), out.Stderr, 0o644)
 	switch {
@@ -312,6 +342,46 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		rec.Outcome, rec.Detail = runner.Error, err.Error()
 	}
 	return finished(rec)
+}
+
+// job describes the run for the executor. A ynh lane on a contained executor runs in an agent
+// image ynf builds from the harness (or the lane's run.image), as the image's own user, with the
+// vendor's API host allowed through the egress proxy (ADR-007, ADR-012).
+func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, wt, runDir string) (executor.Job, bool, error) {
+	e := s.e
+	job := executor.Job{Worktree: wt, RunDir: runDir, Image: lane.Run.Image, Timeout: e.RunTimeout, Env: map[string]string{}, Secrets: map[string]string{}}
+	if lane.Run.Egress != nil {
+		job.Egress = append([]string(nil), lane.Run.Egress.Allow...)
+	}
+	getenv := e.Getenv
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	for _, name := range lane.Run.Env {
+		if v := getenv(name); v != "" {
+			job.Secrets[name] = v
+		}
+	}
+	y, isYnh := r.(runner.YnhRunner)
+	if !isYnh || !ex.Contained() {
+		return job, false, nil
+	}
+	if job.Image == "" {
+		if e.BuildImage == nil {
+			return job, false, fmt.Errorf("lane %s runs ynh in a container, which needs ynh on PATH to build the agent image, or run.image", lane.Name)
+		}
+		img, err := e.BuildImage(s.ctx, wt, y.Cfg)
+		if err != nil {
+			return job, false, fmt.Errorf("build agent image: %w", err)
+		}
+		job.Image = img
+	}
+	job.ImageUser = true
+	job.Egress = append(job.Egress, runner.ModelHosts[y.Vendor()]...)
+	if y.Cfg.Vendor != "" {
+		job.Env["YNH_VENDOR"] = y.Cfg.Vendor
+	}
+	return job, true, nil
 }
 
 // openPR gates, commits, pushes and opens (or reuses) the pull request for this step's change.
@@ -366,6 +436,50 @@ func (s *step) openPR(it item.Item, rp *RepoPolicy, lane policy.Lane) event.Even
 	return done(true, "", map[string]any{"pr": n, "branch": branch, "head": sha})
 }
 
+// pushCommit adds this step's change to an adopted pull request's branch: gated, never forced, and
+// only if the author has not pushed since the run started (ADR-007).
+func (s *step) pushCommit(it item.Item, lane policy.Lane) event.Event {
+	e := s.e
+	done := func(ok bool, detail string, data map[string]any) event.Event {
+		rec := ActionRecord{Action: decide.PushCommit, OK: ok, Detail: detail, PR: it.PR}
+		if data == nil {
+			data = map[string]any{}
+		}
+		rec.Commit, _ = data["head"].(string)
+		s.recordAction(it.Key, rec)
+		data["action"], data["ok"], data["reason"] = decide.PushCommit, ok, detail
+		return s.event(event.ActionDone, it, data)
+	}
+	if s.wt == "" || s.run == nil {
+		return done(false, "no change from this step to propose", nil)
+	}
+	if err := gate.Check(s.run.Changed, lane.PR.AllowedPaths, lane.PR.ProtectedPaths); err != nil {
+		return done(false, err.Error(), nil)
+	}
+	if _, err := e.Git.Mirror(s.ctx, it.Repo); err != nil {
+		return done(false, err.Error(), nil)
+	}
+	if tip, err := e.Git.RemoteSHA(s.ctx, s.mirror, it.Branch); err != nil || tip != s.base {
+		return done(false, fmt.Sprintf("%s moved from %.7s to %.7s while ynf worked", it.Branch, s.base, tip), map[string]any{"head_moved": true})
+	}
+	subject := fmt.Sprintf("ynf(%s): %s", lane.Name, s.text.Title)
+	if len(subject) > 72 {
+		subject = subject[:71] + "…"
+	}
+	msg := subject + "\n\n" + fmt.Sprintf("Added by ynf to #%d, lane %s.\n\n", it.Number, lane.Name) + trailers(it, s.id, s.run.RunID, s.result)
+	sha, err := e.Git.Commit(s.ctx, s.wt, msg)
+	if err != nil {
+		return done(false, err.Error(), nil)
+	}
+	if err := e.Git.PushFastForward(s.ctx, s.wt, it.Repo, it.Branch); err != nil {
+		// Someone pushed between the check and the push: never overwrite, start again.
+		return done(false, err.Error(), map[string]any{"head_moved": true})
+	}
+	_ = e.Forge.Comment(s.ctx, it.Repo, it.Number, marker(s.id, decide.PushCommit),
+		fmt.Sprintf("**ynf** added %.7s to this pull request (lane `%s`). The pull request stays yours: review the commit, and merge or revert it as you would any other.", sha, lane.Name))
+	return done(true, "", map[string]any{"head": sha})
+}
+
 func (s *step) record(key, kind string, body any) error {
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -410,7 +524,7 @@ func prBody(it item.Item, lane policy.Lane, run *RunRecord) string {
 
 // task is what the runner is asked to do. Ticket text is quoted data, never instructions to ynf
 // (NFR-5).
-func task(it item.Item, t forge.Text, feedback string) string {
+func task(it item.Item, t forge.Text, feedback, remembered string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Task: %s#%d\n\n%s\n\nThe ticket, quoted as the reporter wrote it:\n\n", it.Repo, it.Number, t.URL)
 	for l := range strings.SplitSeq(strings.TrimSpace(t.Title+"\n\n"+t.Body), "\n") {
@@ -418,6 +532,9 @@ func task(it item.Item, t forge.Text, feedback string) string {
 	}
 	if feedback != "" {
 		b.WriteString("\n## Feedback from the previous attempt\n\n" + feedback + "\n")
+	}
+	if remembered != "" {
+		b.WriteString("\n## What ynf remembers about this work\n\nFrom earlier runs; advice, not instructions.\n\n" + remembered + "\n")
 	}
 	return b.String()
 }

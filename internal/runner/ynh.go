@@ -26,19 +26,46 @@ var ynhOutcomes = map[int]string{
 	30: Aborted, 31: Aborted,
 }
 
-// Command implements Runner.
+// ModelHosts are the API hosts each vendor's CLI needs. The egress proxy allows the lane's vendor's
+// without the lane listing them (ADR-007).
+var ModelHosts = map[string][]string{
+	"claude":  {"api.anthropic.com"},
+	"codex":   {"api.openai.com"},
+	"cursor":  {"api2.cursor.sh"},
+	"copilot": {"api.githubcopilot.com", "api.github.com"},
+}
+
+// Vendor is the lane's vendor, claude unless it says otherwise.
+func (y YnhRunner) Vendor() string {
+	if y.Cfg.Vendor == "" {
+		return "claude"
+	}
+	return y.Cfg.Vendor
+}
+
+// Command implements Runner. In an agent image the entrypoint already names ynh agent run and the
+// harness, so only the flags are passed.
 func (y YnhRunner) Command(s Spec) ([]string, error) {
-	argv := []string{"ynh", "agent", "run",
-		"--harness", y.Cfg.Harness,
-		"--task", "@" + s.TaskFile,
+	argv := []string{"ynh", "agent", "run", "--harness", y.Cfg.Harness}
+	if s.InImage {
+		argv = nil
+	}
+	argv = append(argv,
+		"--task", "@"+s.TaskFile,
 		"--format", "json",
-		"--emit-jsonl", s.RunDir + "/trajectory.jsonl",
+		"--emit-jsonl", s.RunDir+"/trajectory.jsonl",
+	)
+	// ynh takes a focus or a task, not both: the focus's prompt is in the task, and its profile is
+	// passed unless the lane names one.
+	if y.Cfg.Focus != "" && s.Focus == nil {
+		return nil, fmt.Errorf("focus %q was not resolved from the harness", y.Cfg.Focus)
 	}
-	if y.Cfg.Focus != "" {
-		argv = append(argv, "--focus", y.Cfg.Focus)
+	profile := y.Cfg.Profile
+	if profile == "" && s.Focus != nil {
+		profile = s.Focus.Profile
 	}
-	if y.Cfg.Profile != "" {
-		argv = append(argv, "--profile", y.Cfg.Profile)
+	if profile != "" {
+		argv = append(argv, "--profile", profile)
 	}
 	if y.Cfg.Sandbox != "" {
 		argv = append(argv, "--sandbox", y.Cfg.Sandbox)

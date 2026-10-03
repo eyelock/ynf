@@ -247,3 +247,84 @@ func TestRetryRefusesALiveLease(t *testing.T) {
 		t.Fatalf("%d %s", code, stderr)
 	}
 }
+
+func TestPauseResumeStats(t *testing.T) {
+	e := setup(t)
+	if code, _, _ := e.run("sweep"); code != 0 {
+		t.Fatal("sweep")
+	}
+	for _, args := range [][]string{{"pause"}, {"pause", "fmt"}, {"pause", "--reason", "x"}} {
+		if code, _, _ := e.run(args...); code != cli.ExitUsage {
+			t.Errorf("%v: %d", args, code)
+		}
+	}
+	if code, _, _ := e.run("pause", "nope", "--reason", "x"); code != cli.ExitPolicy {
+		t.Fatalf("unknown lane: %d", code)
+	}
+	if code, out, stderr := e.run("pause", "fmt", "--reason", "release freeze"); code != 0 || !strings.Contains(out, "o/r/fmt: paused (release freeze)") {
+		t.Fatalf("pause: %d %s %s", code, out, stderr)
+	}
+	code, out, _ := e.run("stats")
+	if code != 0 || !strings.Contains(out, "paused: release freeze") || !strings.Contains(out, "off") {
+		t.Fatalf("stats: %d\n%s", code, out)
+	}
+	if code, out, _ := e.run("--format", "json", "resume", "fmt", "--reason", "freeze over"); code != 0 || !strings.Contains(out, `"paused": false`) {
+		t.Fatalf("resume: %d %s", code, out)
+	}
+	if code, out, _ := e.run("--format", "json", "stats", "--lane", "off"); code != 0 || !strings.Contains(out, `"lane": "off"`) || strings.Contains(out, `"lane": "fmt"`) {
+		t.Fatalf("stats --lane: %d %s", code, out)
+	}
+}
+
+func TestStepFromAGitHubEvent(t *testing.T) {
+	e := setup(t)
+	ev := filepath.Join(e.dir, "event.json")
+	_ = os.WriteFile(ev, []byte(`{"repository":{"full_name":"o/r"},"issue":{"number":5}}`), 0o644)
+	if code, out, stderr := e.run("step", "--github-event", ev, "--github-event-name", "issues"); code != 0 || !strings.Contains(out, "issues on o/r: issues [5]") {
+		t.Fatalf("%d %s %s", code, out, stderr)
+	}
+	if code, out, _ := e.run("items", "ls"); code != 0 || !strings.Contains(out, "ignored") {
+		t.Fatalf("the issue should be tracked by the step: %s", out)
+	}
+	t.Setenv("GITHUB_EVENT_PATH", ev)
+	t.Setenv("GITHUB_EVENT_NAME", "schedule")
+	if code, out, _ := e.run("step"); code != 0 || !strings.Contains(out, "o/r#5") {
+		t.Fatalf("a scheduled step sweeps: %d %s", code, out)
+	}
+	t.Setenv("GITHUB_EVENT_NAME", "")
+	if code, _, _ := e.run("step"); code != cli.ExitUsage {
+		t.Fatalf("no event name: %d", code)
+	}
+	if code, _, _ := e.run("step", "--github-event", "/no/such", "--github-event-name", "issues"); code != cli.ExitUsage {
+		t.Fatalf("missing file: %d", code)
+	}
+	_ = os.WriteFile(ev, []byte(`{"repository":{"full_name":"x/y"},"issue":{"number":1}}`), 0o644)
+	if code, _, _ := e.run("step", "--github-event", ev, "--github-event-name", "issues"); code == 0 {
+		t.Fatal("an unenrolled repository's event was handled")
+	}
+}
+
+func TestServeListenNeedsASecret(t *testing.T) {
+	e := setup(t)
+	t.Setenv("YNF_WEBHOOK_SECRET", "")
+	if code, _, stderr := e.run("serve", "--listen", "127.0.0.1:0"); code != cli.ExitPolicy || !strings.Contains(stderr, "needs a webhook secret") {
+		t.Fatalf("%d %s", code, stderr)
+	}
+	if code, _, _ := e.run("sweep", "--listen", "127.0.0.1:0"); code != cli.ExitUsage {
+		t.Fatalf("--listen on sweep: %d", code)
+	}
+}
+
+func TestStoreSchemes(t *testing.T) {
+	e := setup(t)
+	_ = os.WriteFile(e.cfg, []byte("version: 1\nrepos: [o/r]\nstore: dynamodb://table\n"), 0o644)
+	if code, _, stderr := e.run("items", "ls"); code != cli.ExitPolicy || !strings.Contains(stderr, "dynamodb:// is not built yet") {
+		t.Fatalf("%d %s", code, stderr)
+	}
+	_ = os.WriteFile(e.cfg, []byte("version: 1\nrepos: [o/r]\nstore: s3://bucket/ynf?region=us-east-1\n"), 0o644)
+	t.Setenv("AWS_ACCESS_KEY_ID", "x")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "y")
+	if code, _, _ := e.run("version"); code != 0 {
+		t.Fatal("version needs no store")
+	}
+}

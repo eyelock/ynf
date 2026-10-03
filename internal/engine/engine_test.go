@@ -2,10 +2,12 @@ package engine_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,6 +22,7 @@ import (
 	"github.com/eyelock/ynf/internal/forge"
 	"github.com/eyelock/ynf/internal/item"
 	"github.com/eyelock/ynf/internal/lease"
+	"github.com/eyelock/ynf/internal/memory"
 	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/store/sqlite"
 	"github.com/eyelock/ynf/internal/workspace"
@@ -37,6 +40,7 @@ lanes:
       command: {argv: [gofmt, -w, "./{label.pkg}"]}
     when: {converged: open_pr}
     pr: {allowed_paths: ["**/*.go"]}
+    stop: {max_open_proposals: 1, yield_floor: 0.5, min_sample: 2}
   noop:
     kind: originate
     intake: [{github.search: "label:ynf:noop", every: 5m}]
@@ -64,12 +68,32 @@ lanes:
             gofmt -w ./internal/format && echo '{"outcome":"converged","model":"claude/opus","session":"S-42"}' > {run_dir}/result.json
         result_file: "{run_dir}/result.json"
     when: {converged: open_pr}
+  agentic:
+    kind: originate
+    intake: [{github.search: "label:ynf:agentic", every: 5m}]
+    run:
+      runner: ynh
+      env: [ANTHROPIC_API_KEY]
+      ynh: {harness: ".", focus: tidy}
+    when: {converged: open_pr}
   adopt:
     kind: adopt
     intake: [{github.search: "label:ynf:adopt", every: 5m}]
+    guards: {eligible: 'facts.pr.ci == "failure"'}
     run:
       runner: command
-      command: {argv: ["true"]}
+      command:
+        argv:
+          - sh
+          - -c
+          - |
+            if [ -n "$RACE_REMOTE" ] && [ ! -f "$RACE_REMOTE.moved" ]; then
+              touch "$RACE_REMOTE.moved"
+              git -c user.name=author -c user.email=a@a commit -q --allow-empty -m "the author pushes meanwhile"
+              git push -q "$RACE_REMOTE" HEAD:refs/heads/human/x
+              git reset -q --hard HEAD~1
+            fi
+            gofmt -w ./internal/format
     when: {converged: push_commit}
   off:
     kind: originate
@@ -203,6 +227,12 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(src, "internal/format/f.go"), []byte("package format\nfunc F( ) int { return 1 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(src, ".agents/harness"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, ".agents/harness/plugin.json"), []byte(`{"name":"h","focuses":{"tidy":{"prompt":"TIDY FOCUS PROMPT","profile":"careful"}}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	git(t, src, "add", "-A")
@@ -475,13 +505,6 @@ func TestRunnerReportedModelAndSessionBecomeTrailers(t *testing.T) {
 func TestUnsupportedIntakesAndRemovedLanes(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	h.f.labels[8] = []string{"ynf:adopt"}
-	if err := h.e.Sweep(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if items, _ := h.e.Items(ctx); len(items) != 0 {
-		t.Fatalf("adopt lanes should not track anything yet: %+v", items)
-	}
 
 	// An item whose lane was deleted from the policy is treated as switched off.
 	key := item.IssueKey("o/r", 9)
@@ -527,4 +550,439 @@ func TestClosedTicketAndMissingRepoPolicy(t *testing.T) {
 	if err := h.e.Sweep(ctx); err == nil {
 		t.Fatal("an unreadable lanes file should be reported")
 	}
+}
+
+// fakeYnh puts a stand-in for `ynh agent run` first on PATH: it formats the code, as an agent
+// would fix it, and prints the run result ynh prints with --format json. Like ynh, it refuses a
+// focus together with a task.
+func fakeYnh(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	calls := filepath.Join(dir, "calls")
+	script := `#!/bin/sh
+case " $* " in *" --focus "*" --task "*|*" --task "*" --focus "*)
+  echo "Error: cannot use --focus and --task together (focus includes a prompt)" >&2; exit 2 ;;
+esac
+echo "$*" >> "` + calls + `"
+echo "key=${ANTHROPIC_API_KEY}" >> "` + calls + `"
+while [ $# -gt 0 ]; do [ "$1" = --task ] && cat "${2#@}" >> "` + calls + `"; shift; done
+gofmt -w ./internal/format
+echo '{"exit_code":0,"reason":"converged","session_id":"S-ynh-7","backend":"claude","model":"opus"}'
+`
+	if err := os.WriteFile(filepath.Join(dir, "ynh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return calls
+}
+
+func TestYnhRunnerOnTheHost(t *testing.T) {
+	h := newHarness(t)
+	calls := fakeYnh(t)
+	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "sk-test"}[k] }
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Proposed {
+		t.Fatalf("%s %s", it.State, it.Reason)
+	}
+	b, _ := os.ReadFile(calls)
+	if !strings.Contains(string(b), "agent run --harness . --task @") || strings.Contains(string(b), "--focus") || !strings.Contains(string(b), "--profile careful") || !strings.Contains(string(b), "key=sk-test") {
+		t.Fatalf("ynh was called as %s", b)
+	}
+	if !strings.Contains(string(b), "TIDY FOCUS PROMPT") || !strings.Contains(string(b), "> Issue 1") {
+		t.Fatalf("the task should be the focus's prompt and then the quoted ticket: %s", b)
+	}
+	msg := git(t, h.remote, "log", "-1", "--format=%B", "ynf/issue-1")
+	for _, want := range []string{"Co-Authored-By: claude/opus <noreply@anthropic.com>", "YNH-Session: S-ynh-7"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("commit lacks %q:\n%s", want, msg)
+		}
+	}
+}
+
+// fakeDocker records its calls and, for a job, runs gofmt on the mounted worktree and prints a
+// ynh run result, as the agent image would.
+func fakeDocker(t *testing.T) (bin, calls string) {
+	t.Helper()
+	dir := t.TempDir()
+	calls = filepath.Join(dir, "calls")
+	bin = filepath.Join(dir, "docker")
+	script := `#!/bin/sh
+echo "$*" >> "` + calls + `"
+echo "key=${ANTHROPIC_API_KEY}" >> "` + calls + `"
+case "$1" in
+  logs) echo listening ;;
+  run)
+    case "$*" in
+      *" -d "*) echo id ;;
+      *)
+        for a in "$@"; do case "$a" in *:/work) wt="${a%%:/work}" ;; esac; done
+        (cd "$wt" && gofmt -w ./internal/format)
+        echo '{"session_id":"S-img","backend":"claude","model":"opus"}' ;;
+    esac ;;
+esac
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin, calls
+}
+
+func TestYnhRunnerInAnAgentImage(t *testing.T) {
+	h := newHarness(t)
+	h.e.Interactive = false
+	bin, calls := fakeDocker(t)
+	proxy := filepath.Join(t.TempDir(), "ynf-linux")
+	_ = os.WriteFile(proxy, []byte("x"), 0o755)
+	h.e.Executor = func(string) (executor.Executor, error) { return executor.Docker{Bin: bin, ProxyBinary: proxy}, nil }
+	var built []string
+	h.e.BuildImage = func(_ context.Context, wt string, cfg policy.Ynh) (string, error) {
+		built = append(built, cfg.Harness)
+		return "ynf-harness:abc", nil
+	}
+	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "sk-secret"}[k] }
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Proposed {
+		t.Fatalf("%s %s %+v", it.State, it.Reason, it.LastRun)
+	}
+	if len(built) != 1 || built[0] != "." {
+		t.Fatalf("built %v", built)
+	}
+	b, _ := os.ReadFile(calls)
+	log := string(b)
+	for _, want := range []string{"ynf-harness:abc --task @/run/ynf/task.md", "--profile careful", "--allow api.anthropic.com", "-e ANTHROPIC_API_KEY ", "key=sk-secret"} {
+		if !strings.Contains(log, want) {
+			t.Errorf("docker calls lack %q:\n%s", want, log)
+		}
+	}
+	if strings.Contains(log, "ANTHROPIC_API_KEY=sk-secret") {
+		t.Errorf("the key leaked into a command line:\n%s", log)
+	}
+	for _, line := range strings.Split(log, "\n") {
+		if strings.Contains(line, "ynf-harness:abc") && strings.Contains(line, "--user") {
+			t.Errorf("the agent image's own user was overridden: %s", line)
+		}
+	}
+	if msg := git(t, h.remote, "log", "-1", "--format=%B", "ynf/issue-1"); !strings.Contains(msg, "YNH-Session: S-img") {
+		t.Errorf("commit: %s", msg)
+	}
+}
+
+func TestYnhInAContainerNeedsAnImage(t *testing.T) {
+	h := newHarness(t)
+	h.e.Interactive = false
+	h.e.Executor = func(string) (executor.Executor, error) { return executor.Docker{Bin: "docker"}, nil }
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Escalated || !strings.Contains(it.LastRun.Detail, "needs ynh on PATH") {
+		t.Fatalf("%s %+v", it.State, it.LastRun)
+	}
+	h2 := newHarness(t)
+	h2.e.Interactive = false
+	h2.e.Executor = h.e.Executor
+	h2.e.BuildImage = func(context.Context, string, policy.Ynh) (string, error) { return "", fmt.Errorf("no base image") }
+	h2.f.labels[1] = []string{"ynf:agentic"}
+	_ = h2.e.Sweep(ctx)
+	if it := h2.item(t, 1); it.LastRun == nil || !strings.Contains(it.LastRun.Detail, "build agent image: no base image") {
+		t.Fatalf("%+v", it.LastRun)
+	}
+}
+
+// prBranch pushes a branch with unformatted code to the remote, as an author's pull request.
+func (h *harness) prBranch(t *testing.T) string {
+	t.Helper()
+	src := filepath.Join(t.TempDir(), "src")
+	git(t, "", "clone", "-q", h.remote, src)
+	git(t, src, "checkout", "-q", "-b", "human/x")
+	if err := os.WriteFile(filepath.Join(src, "internal/format/g.go"), []byte("package format\nfunc G( ) int { return 2 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, src, "add", "-A")
+	git(t, src, "-c", "user.name=author", "-c", "user.email=a@a", "commit", "-q", "-m", "author's change")
+	git(t, src, "push", "-q", "origin", "human/x")
+	return strings.TrimSpace(git(t, src, "rev-parse", "HEAD"))
+}
+
+func (h *harness) adoptPR(t *testing.T, head string) {
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	h.f.labels[8] = []string{"ynf:adopt"}
+	h.f.prs[8] = &facts.PR{Number: 8, State: "open", HeadRef: "human/x", HeadSHA: head,
+		Checks: []facts.Check{{Name: "lint", Status: "completed", Conclusion: "failure", Required: true}}}
+}
+
+func TestAdoptPushesACommitOnTheAuthorsBranch(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	head := h.prBranch(t)
+	h.adoptPR(t, head)
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	it, _, err := lease.Load(ctx, h.e.Store, item.PRKey("o/r", 8))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it.State != item.Proposed || it.PR != 8 || it.Branch != "human/x" {
+		t.Fatalf("%s %s %+v", it.State, it.Reason, it)
+	}
+	log := git(t, h.remote, "log", "--format=%an|%s", "human/x")
+	lines := strings.Split(strings.TrimSpace(log), "\n")
+	if len(lines) < 3 || !strings.HasPrefix(lines[0], "ynf|ynf(adopt)") || lines[1] != "author|author's change" {
+		t.Fatalf("ynf's commit should sit on top of the author's, never replace it:\n%s", log)
+	}
+	if body := git(t, h.remote, "show", "human/x:internal/format/g.go"); !strings.Contains(body, "func G() int") {
+		t.Fatalf("not formatted:\n%s", body)
+	}
+	if len(h.f.opened) != 0 {
+		t.Fatal("adoption must not open a pull request")
+	}
+	found := false
+	for _, c := range h.f.comments {
+		found = found || (strings.HasPrefix(c, "#8 ") && strings.Contains(c, "stays yours"))
+	}
+	if !found {
+		t.Fatalf("no comment on the pull request: %q", h.f.comments)
+	}
+}
+
+func TestAdoptStartsAgainWhenTheAuthorPushesMeanwhile(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	head := h.prBranch(t)
+	h.adoptPR(t, head)
+	t.Setenv("RACE_REMOTE", h.remote)
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	it, _, _ := lease.Load(ctx, h.e.Store, item.PRKey("o/r", 8))
+	if it.State != item.Proposed || it.Counter("head_moved") != 1 {
+		t.Fatalf("%s %s counters=%v", it.State, it.Reason, it.Counters)
+	}
+	log := git(t, h.remote, "log", "--format=%an|%s", "human/x")
+	if !strings.Contains(log, "author|the author pushes meanwhile") || !strings.HasPrefix(log, "ynf|") {
+		t.Fatalf("the author's racing commit must survive, with ynf's on top:\n%s", log)
+	}
+	entries, _ := h.e.Store.Log(ctx, item.PRKey("o/r", 8))
+	moved := false
+	for _, e := range entries {
+		moved = moved || (e.Kind == "action" && strings.Contains(string(e.Body), "moved from"))
+	}
+	if !moved {
+		t.Fatal("the refused push was not recorded")
+	}
+}
+
+func TestAdoptWaitsWhileCIIsGreen(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	head := h.prBranch(t)
+	h.adoptPR(t, head)
+	h.f.setChecks(8, "success")
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	it, _, _ := lease.Load(ctx, h.e.Store, item.PRKey("o/r", 8))
+	if it.State != item.Intake || it.NextDue == nil {
+		t.Fatalf("a green pull request should be watched, not adopted or ignored: %s %s", it.State, it.Reason)
+	}
+}
+
+func TestPausedLaneHoldsWorkUntilResumed(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if err := h.e.SetPaused(ctx, "o/r", "fmt", true, "", "david"); err == nil {
+		t.Fatal("pausing without a reason should be refused")
+	}
+	if err := h.e.SetPaused(ctx, "o/r", "fmt", true, "release freeze", "david"); err != nil {
+		t.Fatal(err)
+	}
+	h.f.labels[1] = []string{"ynf:fmt", "pkg:internal/format"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Ready || len(h.f.opened) != 0 {
+		t.Fatalf("a paused lane ran: %s %s", it.State, it.Reason)
+	}
+	log, _ := h.e.Store.Log(ctx, item.IssueKey("o/r", 1))
+	if !strings.Contains(string(log[len(log)-1].Body), "by david: release freeze") {
+		t.Fatal("the decision should say who paused the lane and why")
+	}
+	if err := h.e.SetPaused(ctx, "o/r", "fmt", false, "freeze over", "david"); err != nil {
+		t.Fatal(err)
+	}
+	h.advance(5 * time.Minute)
+	if _, err := h.e.RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Proposed {
+		t.Fatalf("after resume: %s %s", it.State, it.Reason)
+	}
+	notes, _ := h.e.Store.Log(ctx, "lane/o/r/fmt")
+	if len(notes) != 2 {
+		t.Fatalf("pause and resume should both be recorded: %d", len(notes))
+	}
+}
+
+func TestQueueDivergenceHoldsNewWork(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:fmt", "pkg:internal/format"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.f.labels[2] = []string{"ynf:fmt", "pkg:internal/format"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 2); it.State != item.Ready || !strings.Contains(it.Reason, "eligible") {
+		t.Fatalf("the second item should wait while one proposal is open: %s %s", it.State, it.Reason)
+	}
+	log, _ := h.e.Store.Log(ctx, item.IssueKey("o/r", 2))
+	if !strings.Contains(string(log[len(log)-1].Body), "1 proposals awaiting review (max 1)") {
+		t.Fatalf("%s", log[len(log)-1].Body)
+	}
+}
+
+func TestYieldFloorPausesTheLane(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	for n, st := range map[int]item.State{11: item.Closed, 12: item.Closed, 13: item.Done} {
+		it := item.Item{Key: item.IssueKey("o/r", n), Lane: "fmt", Repo: "o/r", Number: n, PR: 100 + n, State: st,
+			Counters: map[string]int{"sig/ci/lint": 1, "retry/ci_failed": 2}}
+		if err := lease.Create(ctx, h.e.Store, it); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stats, err := h.e.Stats(ctx)
+	if err != nil || len(stats) != 7 {
+		t.Fatalf("every lane should be listed, with or without items: %+v %v", stats, err)
+	}
+	fmtStats := func(ss []engine.Stats) engine.Stats {
+		for _, s := range ss {
+			if s.Lane == "fmt" {
+				return s
+			}
+		}
+		t.Fatal("no fmt lane")
+		return engine.Stats{}
+	}
+	s := fmtStats(stats)
+	if s.Proposed != 3 || s.Merged != 1 || s.Rejected != 2 || s.Yield < 0.33 || s.Yield > 0.34 || s.Signatures["sig/ci/lint"] != 3 || s.Signatures["retry/ci_failed"] != 0 {
+		t.Fatalf("%+v", s)
+	}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ls, _, _ := h.e.LaneState(ctx, "o/r", "fmt")
+	if !ls.Paused || ls.By != "ynf" || !strings.Contains(ls.Reason, "yield 0.33 is below the floor 0.50 over 3 decided proposals") {
+		t.Fatalf("%+v", ls)
+	}
+	if stats, _ := h.e.Stats(ctx); !fmtStats(stats).Paused {
+		t.Fatal("stats should show the pause")
+	}
+}
+
+type fakeMemory struct {
+	mu      sync.Mutex
+	records []memory.Record
+	asked   []string
+	fail    bool
+}
+
+func (m *fakeMemory) Remember(_ context.Context, r memory.Record) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.fail {
+		return fmt.Errorf("ynm is down")
+	}
+	m.records = append(m.records, r)
+	return nil
+}
+
+func (m *fakeMemory) Context(_ context.Context, ns, text string, _ int) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.asked = append(m.asked, ns+" | "+text)
+	if m.fail {
+		return "", fmt.Errorf("ynm is down")
+	}
+	return "Last time on this item, CI's lint check failed.", nil
+}
+
+func TestMemoryIsWrittenAndRecalled(t *testing.T) {
+	h := newHarness(t)
+	mem := &fakeMemory{}
+	h.e.Memory = mem
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:fmt", "pkg:internal/format"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.f.setChecks(101, "failure")
+	h.advance(time.Minute)
+	if _, err := h.e.RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Escalated {
+		t.Fatalf("%s %s", it.State, it.Reason)
+	}
+	var outcome, failure *memory.Record
+	for i, r := range mem.records {
+		switch r.DataSchema {
+		case "ynf.step.v1":
+			outcome = &mem.records[i]
+		case "ynf.failure.v1":
+			failure = &mem.records[i]
+		}
+	}
+	if outcome == nil || outcome.Subject != item.IssueKey("o/r", 1) || outcome.Namespace != "factory/o/r" || outcome.Data["outcome"] != "converged" {
+		t.Fatalf("outcome memory: %+v", outcome)
+	}
+	if failure == nil || failure.Subject != "sig/ci/lint" || failure.Type != "episodic" || !slices.Contains(failure.Tags, "failure") {
+		t.Fatalf("failure memory: %+v", failure)
+	}
+	if len(mem.asked) == 0 || !strings.HasPrefix(mem.asked[0], "factory/o/r | item/github/o/r/issues/1") {
+		t.Fatalf("recall: %v", mem.asked)
+	}
+	entries, _ := h.e.Store.Log(ctx, item.IssueKey("o/r", 1))
+	for _, en := range entries {
+		if en.Kind != "run" {
+			continue
+		}
+		var rec engine.RunRecord
+		_ = json.Unmarshal(en.Body, &rec)
+		b, err := os.ReadFile(filepath.Join(rec.StepDir, "run", "task.md"))
+		if err != nil || !strings.Contains(string(b), "## What ynf remembers about this work") || !strings.Contains(string(b), "CI's lint check failed") {
+			t.Fatalf("task.md: %s %v", b, err)
+		}
+	}
+}
+
+func TestMemoryOutageNeverStopsAStep(t *testing.T) {
+	h := newHarness(t)
+	h.e.Memory = &fakeMemory{fail: true}
+	h.e.MemoryNamespace = func(repo string) string { return "custom/" + repo }
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:fmt", "pkg:internal/format"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Proposed {
+		t.Fatalf("a memory outage stopped the step: %s %s", it.State, it.Reason)
+	}
+}
+
+func leaseCreate(ctx context.Context, h *harness, it item.Item) error {
+	return lease.Create(ctx, h.e.Store, it)
 }

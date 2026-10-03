@@ -18,6 +18,7 @@ import (
 	"github.com/eyelock/ynf/internal/forge"
 	"github.com/eyelock/ynf/internal/item"
 	"github.com/eyelock/ynf/internal/lease"
+	"github.com/eyelock/ynf/internal/memory"
 	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/store"
 )
@@ -31,6 +32,9 @@ type Git interface {
 	Changed(ctx context.Context, wt string) ([]string, error)
 	Commit(ctx context.Context, wt, message string) (string, error)
 	Push(ctx context.Context, wt, repo, branch string) error
+	Head(ctx context.Context, wt string) (string, error)
+	RemoteSHA(ctx context.Context, mirror, branch string) (string, error)
+	PushFastForward(ctx context.Context, wt, repo, branch string) error
 }
 
 // Engine runs steps.
@@ -49,6 +53,20 @@ type Engine struct {
 	Poll        decide.Poll
 	RunTimeout  time.Duration
 	Interactive bool // allows the process executor (ADR-007)
+
+	// BuildImage builds a ynh agent image for a harness in a worktree (`ynh image --entrypoint
+	// agent`) and returns its tag. Nil means ynh is not available (ADR-012).
+	BuildImage func(ctx context.Context, worktree string, cfg policy.Ynh) (string, error)
+	// Getenv reads the variables a lane passes into its runs (run.env). Default os.Getenv.
+	Getenv func(string) string
+
+	// Memory is ynm when it is configured or detected, else nil (ADR-008). It is advisory: what it
+	// holds goes into a run's task and to people, never into a decision.
+	Memory memory.Memory
+	// MemoryNamespace is the namespace for a repository; default factory/<owner>/<name>.
+	MemoryNamespace func(repo string) string
+	// MemoryBudget is the token budget for what memory adds to a task; default 1000.
+	MemoryBudget int
 
 	Now   func() time.Time
 	NewID func() string
@@ -143,17 +161,27 @@ func (e *Engine) wantLane(name string) bool {
 }
 
 // Sweep runs every enrolled repository's lane searches and starts a step for each new ticket.
-func (e *Engine) Sweep(ctx context.Context) error {
+func (e *Engine) Sweep(ctx context.Context) error { return e.SweepRepos(ctx, e.Repos) }
+
+// SweepRepos is Sweep for some of the enrolled repositories.
+func (e *Engine) SweepRepos(ctx context.Context, repos []string) error {
 	var errs []error
-	for _, repo := range e.Repos {
+	for _, repo := range repos {
 		rp, err := e.Policy(ctx, repo)
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
+		stats, err := e.Stats(ctx)
+		if err != nil {
+			errs = append(errs, err)
+		}
 		for _, name := range rp.File.Names() {
 			if !e.wantLane(name) {
 				continue
+			}
+			if err := e.checkStops(ctx, repo, rp.File.Lanes[name], stats); err != nil {
+				errs = append(errs, err)
 			}
 			if err := e.sweepLane(ctx, repo, rp.File.Lanes[name]); err != nil {
 				errs = append(errs, err)
@@ -177,10 +205,6 @@ func (e *Engine) sweepLane(ctx context.Context, repo string, lane policy.Lane) e
 			if h.Repo != repo || h.IsPR != (lane.Kind == "adopt") {
 				continue
 			}
-			if lane.Kind == "adopt" {
-				e.log().Warn("adopt lanes are not supported yet", "lane", lane.Name, "pr", h.Number)
-				continue
-			}
 			if err := e.track(ctx, lane, h); err != nil {
 				return err
 			}
@@ -196,6 +220,9 @@ func (e *Engine) track(ctx context.Context, lane policy.Lane, h forge.Hit) error
 		Key: item.IssueKey(h.Repo, h.Number), Kind: lane.Kind, Lane: lane.Name,
 		Repo: h.Repo, Number: h.Number, State: item.Intake, Created: now, Updated: now,
 	}
+	if lane.Kind == "adopt" {
+		it.Key, it.PR = item.PRKey(h.Repo, h.Number), h.Number
+	}
 	switch err := lease.Create(ctx, e.Store, it); {
 	case errors.Is(err, store.ErrConflict):
 		return nil
@@ -203,7 +230,7 @@ func (e *Engine) track(ctx context.Context, lane policy.Lane, h forge.Hit) error
 		return err
 	}
 	e.log().Info("tracking", "item", it.Key, "lane", lane.Name)
-	ev := event.New(e.NewID(), "ynf/search", event.TicketMatched, item.IssueSubject(h.Repo, h.Number), now, map[string]any{"lane": lane.Name})
+	ev := event.New(e.NewID(), "ynf/search", event.TicketMatched, it.Subject(), now, map[string]any{"lane": lane.Name})
 	return e.Handle(ctx, it.Key, ev)
 }
 
@@ -224,7 +251,7 @@ func (e *Engine) RunDue(ctx context.Context) (int, error) {
 		if !e.wantLane(it.Lane) {
 			continue
 		}
-		ev := event.New(e.NewID(), "ynf/timer", event.TimerDue, item.IssueSubject(it.Repo, it.Number), e.Now(), nil)
+		ev := event.New(e.NewID(), "ynf/timer", event.TimerDue, it.Subject(), e.Now(), nil)
 		if err := e.Handle(ctx, k, ev); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", k, err))
 		}

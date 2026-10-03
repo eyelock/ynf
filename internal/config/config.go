@@ -41,6 +41,12 @@ type Config struct {
 		CI     string `yaml:"ci"`
 		Review string `yaml:"review"`
 	} `yaml:"poll"`
+	Memory *struct {
+		Provider            string `yaml:"provider"`
+		Namespace           string `yaml:"namespace"`
+		ContextBudgetTokens int    `yaml:"context_budget_tokens"`
+		Cwd                 string `yaml:"cwd"`
+	} `yaml:"memory"`
 
 	Path     string   `yaml:"-"` // the file it was loaded from
 	Shadowed []string `yaml:"-"` // other candidates found at the same level
@@ -113,9 +119,15 @@ func (c *Config) rel(p string) string {
 func (c *Config) SQLitePath() (string, error) {
 	p, ok := strings.CutPrefix(c.Store, "sqlite://")
 	if !ok {
-		return "", fmt.Errorf("store %s: only sqlite:// is built yet (s3:// and dynamodb:// come with the hosted service)", c.Store)
+		return "", fmt.Errorf("store %s is not sqlite://", c.Store)
 	}
 	return c.rel(p), nil
+}
+
+// StoreKind is the store's scheme: sqlite, s3 or dynamodb.
+func (c *Config) StoreKind() string {
+	kind, _, _ := strings.Cut(c.Store, "://")
+	return kind
 }
 
 // WorkPath is the absolute work folder.
@@ -157,4 +169,28 @@ func (c *Config) Author() (name, email string) {
 		return a.Name, a.Email
 	}
 	return "ynf", "ynf@users.noreply.github.com"
+}
+
+// MemorySettings returns whether memory is wanted (nil means detect), the namespace template, the
+// budget and ynm's working directory.
+func (c *Config) MemorySettings() (enabled *bool, namespace string, budget int, cwd string) {
+	namespace, budget = "factory/{repo}", 1000
+	m := c.Memory
+	if m == nil {
+		return nil, namespace, budget, ""
+	}
+	if m.Provider != "" {
+		on := m.Provider == "ynm"
+		enabled = &on
+	}
+	if m.Namespace != "" {
+		namespace = m.Namespace
+	}
+	if m.ContextBudgetTokens > 0 {
+		budget = m.ContextBudgetTokens
+	}
+	if m.Cwd != "" {
+		cwd = c.rel(m.Cwd)
+	}
+	return enabled, namespace, budget, cwd
 }
