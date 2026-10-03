@@ -67,6 +67,8 @@ type Engine struct {
 	MemoryNamespace func(repo string) string
 	// MemoryBudget is the token budget for what memory adds to a task; default 1000.
 	MemoryBudget int
+	// ProgressEvery is how often a run in progress is logged; default 30s, negative for never.
+	ProgressEvery time.Duration
 
 	Now   func() time.Time
 	NewID func() string

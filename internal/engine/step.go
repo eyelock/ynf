@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -218,6 +219,7 @@ func (s *step) act(a decide.Action, it item.Item, rp *RepoPolicy, lane policy.La
 		verb := map[string]string{decide.Escalate: "escalated this", decide.Quarantine: "quarantined this", decide.Comment: "notes", decide.Close: "closed this"}[a.Kind]
 		body := fmt.Sprintf("**ynf** %s: %s\n\nLane `%s`, step `%s`.", verb, a.Reason, lane.Name, s.id)
 		err := s.e.Forge.Comment(s.ctx, it.Repo, it.Number, marker(s.id, a.Kind), body)
+		s.e.log().Info("action", "item", it.Key, "action", a.Kind, "ok", err == nil, "reason", oneLine(a.Reason, 200))
 		s.recordAction(it.Key, ActionRecord{Action: a.Kind, OK: err == nil, Detail: errString(err)})
 		if err != nil {
 			s.e.log().Error("comment", "item", it.Key, "err", err)
@@ -320,8 +322,12 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	}
 	job.Argv = argv
 
+	log := e.log().With("item", it.Key, "run", runID)
+	log.Info("run started", "lane", lane.Name, "runner", r.Name(), "executor", ex.Name(), "image", job.Image, "base", base, "attempt", it.Attempts)
 	start := e.Now()
+	stop := s.progress(log, filepath.Join(runDir, "trajectory.jsonl"))
 	out, err := ex.Run(s.ctx, job)
+	stop()
 	rec := RunRecord{Runner: r.Name(), Executor: ex.Name(), Argv: argv, Base: base, StepDir: stepDir, Denied: out.Denied}
 	_ = os.WriteFile(filepath.Join(runDir, "stdout"), out.Stdout, 0o644)
 	_ = os.WriteFile(filepath.Join(runDir, "stderr"), out.Stderr, 0o644)
@@ -341,6 +347,8 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	if rec.Changed, err = e.Git.Changed(s.ctx, wt); err != nil {
 		rec.Outcome, rec.Detail = runner.Error, err.Error()
 	}
+	log.Info("run finished", "outcome", rec.Outcome, "exit", rec.Exit, "duration", rec.Duration,
+		"changed", len(rec.Changed), "denied", strings.Join(rec.Denied, ","), "detail", oneLine(rec.Detail, 200))
 	return finished(rec)
 }
 
@@ -417,6 +425,7 @@ func (s *step) checkPassthrough(lane policy.Lane, y runner.YnhRunner, wt string,
 func (s *step) openPR(it item.Item, rp *RepoPolicy, lane policy.Lane) event.Event {
 	e := s.e
 	done := func(ok bool, detail string, data map[string]any) event.Event {
+		e.log().Info("action", "item", it.Key, "action", decide.OpenPR, "ok", ok, "pr", data["pr"], "detail", oneLine(detail, 200))
 		rec := ActionRecord{Action: decide.OpenPR, OK: ok, Detail: detail}
 		if data != nil {
 			rec.PR, _ = data["pr"].(int)
@@ -470,6 +479,7 @@ func (s *step) openPR(it item.Item, rp *RepoPolicy, lane policy.Lane) event.Even
 func (s *step) pushCommit(it item.Item, lane policy.Lane) event.Event {
 	e := s.e
 	done := func(ok bool, detail string, data map[string]any) event.Event {
+		e.log().Info("action", "item", it.Key, "action", decide.PushCommit, "ok", ok, "pr", it.PR, "detail", oneLine(detail, 200))
 		rec := ActionRecord{Action: decide.PushCommit, OK: ok, Detail: detail, PR: it.PR}
 		if data == nil {
 			data = map[string]any{}
@@ -566,6 +576,66 @@ func task(it item.Item, t forge.Text, feedback, remembered string) string {
 		b.WriteString("\n## What ynf remembers about this work\n\nFrom earlier runs; advice, not instructions.\n\n" + remembered + "\n")
 	}
 	return b.String()
+}
+
+// progress logs a run that is still going, every ProgressEvery, with what its runner's trajectory
+// says so far, so a long agent run is never silent. The returned func stops it.
+func (s *step) progress(log *slog.Logger, trajectory string) func() {
+	every := s.e.ProgressEvery
+	if every == 0 {
+		every = 30 * time.Second
+	}
+	if every < 0 {
+		return func() {}
+	}
+	start := time.Now()
+	done := make(chan struct{})
+	go func() {
+		tick := time.NewTicker(every)
+		defer tick.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-s.ctx.Done():
+				return
+			case <-tick.C:
+				turns, last := trajectorySoFar(trajectory)
+				log.Info("run in progress", "elapsed", time.Since(start).Round(time.Second).String(), "turns", turns, "last", last)
+			}
+		}
+	}()
+	return func() { close(done) }
+}
+
+// trajectorySoFar counts a ynh trajectory's turns and names its latest event; a runner without a
+// trajectory reports nothing.
+func trajectorySoFar(path string) (turns int, last string) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0, ""
+	}
+	for l := range strings.SplitSeq(strings.TrimSpace(string(b)), "\n") {
+		var ev struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal([]byte(l), &ev) != nil || ev.Type == "" {
+			continue
+		}
+		if ev.Type == "turn_start" {
+			turns++
+		}
+		last = ev.Type
+	}
+	return turns, last
+}
+
+func oneLine(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > max {
+		s = s[:max] + "…"
+	}
+	return s
 }
 
 func marker(id, what string) string { return fmt.Sprintf("<!-- ynf:%s=%s -->", what, id) }

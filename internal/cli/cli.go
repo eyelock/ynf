@@ -58,6 +58,8 @@ Global flags (before the command):
   --config <path>   config file (default: config.yaml in ~/.agents/factory/ or a fallback)
   --format text|json
   --interactive     allow the uncontained process executor (ADR-007)
+  --log-file <path> also write the log to this file (YNF_LOG_FILE)
+  --log-format text|json   (YNF_LOG_FORMAT)
   -v                debug logging
 `
 
@@ -67,7 +69,10 @@ type app struct {
 	format         string
 	interactive    bool
 	verbose        bool
+	logFile        string
+	logFormat      string
 	lanes          multi
+	logClose       func()
 
 	cfg *config.Config
 	eng *engine.Engine
@@ -88,6 +93,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&a.format, "format", envOr("YNF_FORMAT", "text"), "")
 	fs.BoolVar(&a.interactive, "interactive", false, "")
 	fs.BoolVar(&a.verbose, "v", false, "")
+	fs.StringVar(&a.logFile, "log-file", os.Getenv("YNF_LOG_FILE"), "")
+	fs.StringVar(&a.logFormat, "log-format", envOr("YNF_LOG_FORMAT", "text"), "")
 	if err := fs.Parse(args); err != nil {
 		return ExitUsage
 	}
@@ -130,6 +137,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	if a.eng != nil {
 		_ = a.eng.Store.Close()
+	}
+	if a.logClose != nil {
+		a.logClose()
 	}
 	return a.exit(err)
 }
@@ -209,6 +219,32 @@ func (a *app) loadConfig() error {
 	return nil
 }
 
+// logger writes structured logs to stderr as they happen and, with --log-file, to that file too:
+// text (logfmt) for people, json (one object per line) for tools.
+func (a *app) logger() (*slog.Logger, error) {
+	level := slog.LevelInfo
+	if a.verbose {
+		level = slog.LevelDebug
+	}
+	w := a.stderr
+	if a.logFile != "" {
+		f, err := os.OpenFile(a.logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return nil, fmt.Errorf("--log-file: %w", err)
+		}
+		a.logClose = func() { _ = f.Close() }
+		w = io.MultiWriter(a.stderr, f)
+	}
+	opts := &slog.HandlerOptions{Level: level}
+	switch a.logFormat {
+	case "text":
+		return slog.New(slog.NewTextHandler(w, opts)), nil
+	case "json":
+		return slog.New(slog.NewJSONHandler(w, opts)), nil
+	}
+	return nil, fmt.Errorf("--log-format %q: want text or json", a.logFormat)
+}
+
 // openStore opens the configured store (ADR-004).
 func openStore(ctx context.Context, c *config.Config) (store.Store, error) {
 	switch c.StoreKind() {
@@ -252,9 +288,10 @@ func (a *app) engine() (*engine.Engine, error) {
 		return nil, err
 	}
 	name, email := c.Author()
-	level := slog.LevelInfo
-	if a.verbose {
-		level = slog.LevelDebug
+	logger, err := a.logger()
+	if err != nil {
+		_ = st.Close()
+		return nil, withCode(ExitUsage, err)
 	}
 	var mu sync.Mutex
 	entropy := ulid.Monotonic(cryptoReader{}, 0)
@@ -282,7 +319,7 @@ func (a *app) engine() (*engine.Engine, error) {
 			defer mu.Unlock()
 			return ulid.MustNew(ulid.Now(), entropy).String()
 		},
-		Log: slog.New(slog.NewTextHandler(a.stderr, &slog.HandlerOptions{Level: level})),
+		Log: logger,
 	}
 	return a.eng, nil
 }

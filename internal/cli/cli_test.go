@@ -328,3 +328,21 @@ func TestStoreSchemes(t *testing.T) {
 		t.Fatal("version needs no store")
 	}
 }
+
+func TestLogFileAndFormat(t *testing.T) {
+	e := setup(t)
+	logPath := filepath.Join(e.dir, "ynf.log")
+	if code, _, stderr := e.run("--log-file", logPath, "--log-format", "json", "sweep"); code != 0 || !strings.Contains(stderr, `"msg":"decided"`) {
+		t.Fatalf("json to stderr: %d %s", code, stderr)
+	}
+	b, err := os.ReadFile(logPath)
+	if err != nil || !strings.Contains(string(b), `"msg":"decided"`) || !strings.Contains(string(b), `"item":"item/github/o/r/issues/5"`) {
+		t.Fatalf("the log file should hold the same structured lines: %s %v", b, err)
+	}
+	if code, _, _ := e.run("--log-format", "yaml", "items", "ls"); code != cli.ExitUsage {
+		t.Fatalf("bad format: %d", code)
+	}
+	if code, _, _ := e.run("--log-file", "/no/such/dir/ynf.log", "items", "ls"); code != cli.ExitUsage {
+		t.Fatalf("unwritable log file: %d", code)
+	}
+}
