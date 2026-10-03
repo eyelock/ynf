@@ -25,7 +25,7 @@ carried out today.
 | `pr.allowed_paths` | The diff gate refuses changes outside these | yes |
 | `pr.protected_paths` | Refused as well as the built-in protected paths | yes |
 | `pr.draft` | Open pull requests as drafts | yes (default `true`) |
-| `stop` | Stop conditions (ADR-010) | not yet |
+| `stop` | Stop conditions (ADR-010) | `max_open_proposals` holds new work while that many proposals await review; `yield_floor` pauses the lane once `min_sample` (default 20) proposals are decided below it; `review_time_ceiling` and `escaped_defects` not yet |
 | `attempts` | Runs that never finish before the item is quarantined | yes (default 3) |
 
 ## The built-in protected paths

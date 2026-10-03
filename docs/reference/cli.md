@@ -30,6 +30,9 @@ An item is named `owner/name#number`, or by its key, `item/github/<owner>/<name>
 | `ynf items log <item>` | Every decision, run, action and note, in order. |
 | `ynf items retry <item>` | Puts an escalated or quarantined item back to ready, clearing its counters. Refused while another instance holds it. |
 | `ynf items release <item>` | Clears the item's lease, for one left by an instance that died. |
+| `ynf pause <lane> --reason <text> [--repo <owner/name>]` | Pauses a lane: its tracked items carry on, but nothing new starts. Recorded with who and why. |
+| `ynf resume <lane> --reason <text> [--repo <owner/name>]` | Resumes a lane, with a reason, also recorded: stop conditions are changed deliberately (ADR-010). |
+| `ynf stats [--lane <name>]...` | Every lane's items, proposals, merged, rejected, yield, whether it is paused and why, and its top failure signatures. |
 | `ynf replay <item> [--policy <file>]` | Recomputes every recorded decision, under the recorded lane or the same-named lane in `<file>`, and says which differ. |
 
 ## Exit codes

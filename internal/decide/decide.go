@@ -100,6 +100,16 @@ func (d *decider) decide() {
 		}
 
 	case item.Ready:
+		if l := f.Lane; l != nil && l.Paused {
+			d.reason = fmt.Sprintf("lane %s is paused (%s); waiting", lane.Name, l.PausedReason)
+			d.wake(d.in.Poll.Review)
+			return
+		}
+		if max := lane.Stop.MaxOpenProposals; max > 0 && f.Lane != nil && f.Lane.OpenProposals >= max {
+			d.reason = fmt.Sprintf("lane %s has %d proposals awaiting review (max %d); waiting", lane.Name, f.Lane.OpenProposals, max)
+			d.wake(d.in.Poll.Review)
+			return
+		}
 		d.startRun(it.Feedback, "ready")
 
 	case item.Running:

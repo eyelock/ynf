@@ -189,6 +189,9 @@ func (s *step) probe(it item.Item) (facts.Facts, error) {
 		return f, err
 	}
 	f.Ticket, s.text = &t, text
+	if f.Lane, err = s.e.laneFacts(s.ctx, it.Repo, it.Lane); err != nil {
+		return f, err
+	}
 	if it.PR > 0 {
 		p, err := s.e.Forge.PullRequest(s.ctx, it.Repo, it.PR)
 		if err != nil && !errors.Is(err, forge.ErrNotFound) {

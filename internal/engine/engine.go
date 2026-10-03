@@ -160,9 +160,16 @@ func (e *Engine) Sweep(ctx context.Context) error {
 			errs = append(errs, err)
 			continue
 		}
+		stats, err := e.Stats(ctx)
+		if err != nil {
+			errs = append(errs, err)
+		}
 		for _, name := range rp.File.Names() {
 			if !e.wantLane(name) {
 				continue
+			}
+			if err := e.checkStops(ctx, repo, rp.File.Lanes[name], stats); err != nil {
+				errs = append(errs, err)
 			}
 			if err := e.sweepLane(ctx, repo, rp.File.Lanes[name]); err != nil {
 				errs = append(errs, err)

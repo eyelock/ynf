@@ -37,6 +37,7 @@ lanes:
       command: {argv: [gofmt, -w, "./{label.pkg}"]}
     when: {converged: open_pr}
     pr: {allowed_paths: ["**/*.go"]}
+    stop: {max_open_proposals: 1, yield_floor: 0.5, min_sample: 2}
   noop:
     kind: originate
     intake: [{github.search: "label:ynf:noop", every: 5m}]
@@ -777,5 +778,100 @@ func TestAdoptWaitsWhileCIIsGreen(t *testing.T) {
 	it, _, _ := lease.Load(ctx, h.e.Store, item.PRKey("o/r", 8))
 	if it.State != item.Intake || it.NextDue == nil {
 		t.Fatalf("a green pull request should be watched, not adopted or ignored: %s %s", it.State, it.Reason)
+	}
+}
+
+func TestPausedLaneHoldsWorkUntilResumed(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if err := h.e.SetPaused(ctx, "o/r", "fmt", true, "", "david"); err == nil {
+		t.Fatal("pausing without a reason should be refused")
+	}
+	if err := h.e.SetPaused(ctx, "o/r", "fmt", true, "release freeze", "david"); err != nil {
+		t.Fatal(err)
+	}
+	h.f.labels[1] = []string{"ynf:fmt", "pkg:internal/format"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Ready || len(h.f.opened) != 0 {
+		t.Fatalf("a paused lane ran: %s %s", it.State, it.Reason)
+	}
+	log, _ := h.e.Store.Log(ctx, item.IssueKey("o/r", 1))
+	if !strings.Contains(string(log[len(log)-1].Body), "by david: release freeze") {
+		t.Fatal("the decision should say who paused the lane and why")
+	}
+	if err := h.e.SetPaused(ctx, "o/r", "fmt", false, "freeze over", "david"); err != nil {
+		t.Fatal(err)
+	}
+	h.advance(5 * time.Minute)
+	if _, err := h.e.RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Proposed {
+		t.Fatalf("after resume: %s %s", it.State, it.Reason)
+	}
+	notes, _ := h.e.Store.Log(ctx, "lane/o/r/fmt")
+	if len(notes) != 2 {
+		t.Fatalf("pause and resume should both be recorded: %d", len(notes))
+	}
+}
+
+func TestQueueDivergenceHoldsNewWork(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:fmt", "pkg:internal/format"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.f.labels[2] = []string{"ynf:fmt", "pkg:internal/format"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 2); it.State != item.Ready || !strings.Contains(it.Reason, "eligible") {
+		t.Fatalf("the second item should wait while one proposal is open: %s %s", it.State, it.Reason)
+	}
+	log, _ := h.e.Store.Log(ctx, item.IssueKey("o/r", 2))
+	if !strings.Contains(string(log[len(log)-1].Body), "1 proposals awaiting review (max 1)") {
+		t.Fatalf("%s", log[len(log)-1].Body)
+	}
+}
+
+func TestYieldFloorPausesTheLane(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	for n, st := range map[int]item.State{11: item.Closed, 12: item.Closed, 13: item.Done} {
+		it := item.Item{Key: item.IssueKey("o/r", n), Lane: "fmt", Repo: "o/r", Number: n, PR: 100 + n, State: st,
+			Counters: map[string]int{"sig/ci/lint": 1, "retry/ci_failed": 2}}
+		if err := lease.Create(ctx, h.e.Store, it); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stats, err := h.e.Stats(ctx)
+	if err != nil || len(stats) != 7 {
+		t.Fatalf("every lane should be listed, with or without items: %+v %v", stats, err)
+	}
+	fmtStats := func(ss []engine.Stats) engine.Stats {
+		for _, s := range ss {
+			if s.Lane == "fmt" {
+				return s
+			}
+		}
+		t.Fatal("no fmt lane")
+		return engine.Stats{}
+	}
+	s := fmtStats(stats)
+	if s.Proposed != 3 || s.Merged != 1 || s.Rejected != 2 || s.Yield < 0.33 || s.Yield > 0.34 || s.Signatures["sig/ci/lint"] != 3 || s.Signatures["retry/ci_failed"] != 0 {
+		t.Fatalf("%+v", s)
+	}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ls, _, _ := h.e.LaneState(ctx, "o/r", "fmt")
+	if !ls.Paused || ls.By != "ynf" || !strings.Contains(ls.Reason, "yield 0.33 is below the floor 0.50 over 3 decided proposals") {
+		t.Fatalf("%+v", ls)
+	}
+	if stats, _ := h.e.Stats(ctx); !fmtStats(stats).Paused {
+		t.Fatal("stats should show the pause")
 	}
 }

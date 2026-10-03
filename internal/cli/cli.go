@@ -47,6 +47,8 @@ Usage:
   ynf items ls
   ynf items show|log|retry|release <owner/name#number | key>
   ynf replay <owner/name#number | key> [--policy lanes.yaml]
+  ynf pause|resume <lane> --reason <text> [--repo owner/name]
+  ynf stats [--lane name]...
   ynf egress-proxy --allow host,*.domain [--listen :3128] [--log file]   (run inside a container)
 
 Global flags (before the command):
@@ -108,6 +110,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = a.items(ctx, rest)
 	case "replay":
 		err = a.replay(ctx, rest)
+	case "pause", "resume":
+		err = a.pause(ctx, cmd, rest)
+	case "stats":
+		err = a.stats(ctx, rest)
 	case "egress-proxy":
 		err = a.egressProxy(ctx, rest)
 	case "help", "-h", "--help":

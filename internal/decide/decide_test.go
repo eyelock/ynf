@@ -317,3 +317,27 @@ func TestAdoption(t *testing.T) {
 		t.Fatalf("push_commit on an originated item: %s %s", d.Item.State, d.Reason)
 	}
 }
+
+func TestStopConditions(t *testing.T) {
+	lane := lanes(t).Lanes["lint-paydown"] // max_open_proposals: 5
+	poll := decide.Poll{CI: time.Minute, Review: 5 * time.Minute}
+	ready := item.Item{State: item.Ready}
+	for name, c := range map[string]struct {
+		lane  *facts.Lane
+		state item.State
+		says  string
+	}{
+		"paused by a human":    {&facts.Lane{Paused: true, PausedReason: "by david: release freeze"}, item.Ready, "paused (by david: release freeze)"},
+		"queue full":           {&facts.Lane{OpenProposals: 5}, item.Ready, "5 proposals awaiting review (max 5)"},
+		"room in the queue":    {&facts.Lane{OpenProposals: 4}, item.Running, "starting run"},
+		"no lane facts at all": {nil, item.Running, "starting run"},
+	} {
+		d := decide.Decide(decide.Input{Lane: lane, Item: ready, Facts: facts.Facts{Ticket: open(), Lane: c.lane}, Event: ev(event.TimerDue, nil), Poll: poll})
+		if d.Item.State != c.state || !strings.Contains(d.Reason, c.says) {
+			t.Errorf("%s: %s %q", name, d.Item.State, d.Reason)
+		}
+		if c.state == item.Ready && (d.Item.NextDue == nil || d.Item.NextDue.Sub(t0) != poll.Review) {
+			t.Errorf("%s: a held item should be looked at again later", name)
+		}
+	}
+}

@@ -247,3 +247,31 @@ func TestRetryRefusesALiveLease(t *testing.T) {
 		t.Fatalf("%d %s", code, stderr)
 	}
 }
+
+func TestPauseResumeStats(t *testing.T) {
+	e := setup(t)
+	if code, _, _ := e.run("sweep"); code != 0 {
+		t.Fatal("sweep")
+	}
+	for _, args := range [][]string{{"pause"}, {"pause", "fmt"}, {"pause", "--reason", "x"}} {
+		if code, _, _ := e.run(args...); code != cli.ExitUsage {
+			t.Errorf("%v: %d", args, code)
+		}
+	}
+	if code, _, _ := e.run("pause", "nope", "--reason", "x"); code != cli.ExitPolicy {
+		t.Fatalf("unknown lane: %d", code)
+	}
+	if code, out, stderr := e.run("pause", "fmt", "--reason", "release freeze"); code != 0 || !strings.Contains(out, "o/r/fmt: paused (release freeze)") {
+		t.Fatalf("pause: %d %s %s", code, out, stderr)
+	}
+	code, out, _ := e.run("stats")
+	if code != 0 || !strings.Contains(out, "paused: release freeze") || !strings.Contains(out, "off") {
+		t.Fatalf("stats: %d\n%s", code, out)
+	}
+	if code, out, _ := e.run("--format", "json", "resume", "fmt", "--reason", "freeze over"); code != 0 || !strings.Contains(out, `"paused": false`) {
+		t.Fatalf("resume: %d %s", code, out)
+	}
+	if code, out, _ := e.run("--format", "json", "stats", "--lane", "off"); code != 0 || !strings.Contains(out, `"lane": "off"`) || strings.Contains(out, `"lane": "fmt"`) {
+		t.Fatalf("stats --lane: %d %s", code, out)
+	}
+}
