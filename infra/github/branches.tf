@@ -1,11 +1,15 @@
-# main takes no direct push, admins included: every change is a pull request. No status checks
-# are required yet because ynf has no CI; add the job names to required_status_checks when it
-# does.
+# main takes no direct push, admins included: every change is a pull request, and the ci
+# workflow's check job (make check) must pass.
 
 resource "github_branch_protection" "main" {
   repository_id  = github_repository.ynf.node_id
   pattern        = "main"
   enforce_admins = true
+
+  required_status_checks {
+    strict   = false
+    contexts = ["check"]
+  }
 
   # A pull request is required, with no approving review.
   required_pull_request_reviews {

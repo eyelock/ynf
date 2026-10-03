@@ -7,7 +7,7 @@ lives in [`sandbox/`](../../sandbox/README.md).
 | File | What it manages |
 |---|---|
 | `repository.tf` | The repository: description, topics, visibility, features, merge options |
-| `branches.tf` | Protection on `main`: pull request required, admins included, linear history, no force-push or delete |
+| `branches.tf` | Protection on `main`: pull request required with the `check` job green, admins included, linear history, no force-push or delete |
 | `labels.tf` | Issue and PR labels, authoritatively: a label not listed is removed |
 | `actions.tf` | Actions permissions and the read-only default `GITHUB_TOKEN` |
 | `security.tf` | Dependabot alerts and security updates |
