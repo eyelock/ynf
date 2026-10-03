@@ -82,6 +82,7 @@ type Run struct {
 	Executor string   `yaml:"executor" json:"executor,omitempty"`
 	Image    string   `yaml:"image" json:"image,omitempty"`
 	Egress   *Egress  `yaml:"egress" json:"egress,omitempty"`
+	Env      []string `yaml:"env" json:"env,omitempty"`
 	Ynh      *Ynh     `yaml:"ynh" json:"ynh,omitempty"`
 	Command  *Command `yaml:"command" json:"command,omitempty"`
 }
@@ -94,6 +95,8 @@ type Egress struct {
 // Ynh is the ynh runner's settings.
 type Ynh struct {
 	Harness     string            `yaml:"harness" json:"harness"`
+	Vendor      string            `yaml:"vendor" json:"vendor,omitempty"`
+	Base        string            `yaml:"base" json:"base,omitempty"`
 	Focus       string            `yaml:"focus" json:"focus,omitempty"`
 	Profile     string            `yaml:"profile" json:"profile,omitempty"`
 	Sandbox     string            `yaml:"sandbox" json:"sandbox,omitempty"`

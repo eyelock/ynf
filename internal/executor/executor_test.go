@@ -268,3 +268,11 @@ func TestDockerProxyFailures(t *testing.T) {
 		t.Fatal("a proxy that never says it is listening was accepted")
 	}
 }
+
+func TestDockerImageUser(t *testing.T) {
+	args, _ := executor.Docker{Bin: "docker"}.Args(executor.Job{Image: "agent", Worktree: "/w", RunDir: "/r", ImageUser: true}, "n", "none")
+	s := strings.Join(args, " ")
+	if strings.Contains(s, "--user") || strings.Contains(s, "-e HOME=") || !strings.Contains(s, "-e GOCACHE=") {
+		t.Fatalf("an agent image keeps its own user and home, but still gets fresh caches: %s", s)
+	}
+}

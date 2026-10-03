@@ -39,6 +39,12 @@ type Job struct {
 	Image    string
 	Egress   []string
 	Timeout  time.Duration
+	// ImageUser keeps the image's own user and home: an agent image built by ynh keeps its
+	// harness and vendor configuration under its user's home.
+	ImageUser bool
+	// Secrets reach the run by name only: docker reads each value from its own environment, so a
+	// secret never appears in a command line or a process listing.
+	Secrets map[string]string
 }
 
 // Output is how the command ended.
@@ -98,19 +104,20 @@ func (d Docker) Args(j Job, name, network string) ([]string, error) {
 		return nil, errors.New("docker executor needs run.image in the lane")
 	}
 	args := []string{"run", "--rm", "--name", name, "--network", network,
-		"--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "1024",
-		"--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
-		"-v", j.Worktree + ":" + WorkDir,
-		"-v", j.RunDir + ":" + RunDir,
-		"-w", WorkDir,
+		"--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "1024"}
+	if !j.ImageUser {
+		args = append(args, "--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()))
 	}
+	args = append(args, "-v", j.Worktree+":"+WorkDir, "-v", j.RunDir+":"+RunDir, "-w", WorkDir)
 	env := map[string]string{
 		// A fresh cache per run (ADR-007): shared caches make sensors lie.
-		"HOME":                RunDir + "/home",
 		"XDG_CACHE_HOME":      RunDir + "/cache",
 		"GOCACHE":             RunDir + "/cache/go-build",
 		"GOMODCACHE":          RunDir + "/cache/go-mod",
 		"GOLANGCI_LINT_CACHE": RunDir + "/cache/golangci-lint",
+	}
+	if !j.ImageUser {
+		env["HOME"] = RunDir + "/home"
 	}
 	if network != "none" {
 		proxy := "http://egress:" + proxyPort
@@ -124,6 +131,9 @@ func (d Docker) Args(j Job, name, network string) ([]string, error) {
 	}
 	for _, k := range sortedKeys(env) {
 		args = append(args, "-e", k+"="+env[k])
+	}
+	for _, k := range sortedKeys(j.Secrets) {
+		args = append(args, "-e", k)
 	}
 	args = append(args, j.Image)
 	return append(args, j.Argv...), nil
@@ -190,7 +200,14 @@ func (d Docker) Run(ctx context.Context, j Job) (Output, error) {
 // runContainer runs the job and, if ctx ends first, removes the container: killing the docker
 // client alone would leave it running.
 func (d Docker) runContainer(ctx context.Context, j Job, name string, args []string) (Output, error) {
-	out, err := run(ctx, j.Timeout, "", d.Bin, args, nil)
+	var env []string
+	if len(j.Secrets) > 0 {
+		env = os.Environ()
+		for _, k := range sortedKeys(j.Secrets) {
+			env = append(env, k+"="+j.Secrets[k])
+		}
+	}
+	out, err := run(ctx, j.Timeout, "", d.Bin, args, env)
 	if err != nil && (ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded)) {
 		_, _ = d.docker(context.WithoutCancel(ctx), "rm", "-f", name)
 	}
@@ -252,8 +269,10 @@ func (Process) Run(ctx context.Context, j Job) (Output, error) {
 		"GOCACHE="+filepath.Join(cache, "go-build"),
 		"GOLANGCI_LINT_CACHE="+filepath.Join(cache, "golangci-lint"),
 	)
-	for _, k := range sortedKeys(j.Env) {
-		env = append(env, k+"="+j.Env[k])
+	for _, m := range []map[string]string{j.Env, j.Secrets} {
+		for _, k := range sortedKeys(m) {
+			env = append(env, k+"="+m[k])
+		}
 	}
 	return run(ctx, j.Timeout, j.Worktree, j.Argv[0], j.Argv[1:], env)
 }

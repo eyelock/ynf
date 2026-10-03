@@ -310,6 +310,15 @@
         "egress": {
           "$ref": "#/$defs/egress"
         },
+        "env": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z_][A-Z0-9_]*$"
+          },
+          "description": "Names of variables passed from ynf's environment into the run, such as the model provider's key. Values are never logged or recorded. Nothing else from ynf's environment reaches a contained run."
+        },
         "ynh": {
           "type": "object",
           "additionalProperties": false,
@@ -319,7 +328,7 @@
           "properties": {
             "harness": {
               "type": "string",
-              "description": "A harness id (org/name@version) or '.' for the repository's own harness."
+              "description": "A path to a harness folder in the repository ('.' for its own .agents/harness), from which ynf builds the run's image with `ynh image --entrypoint agent`; or an installed id, with run.image naming a prebuilt agent image."
             },
             "focus": {
               "type": "string"
@@ -356,6 +365,19 @@
               "additionalProperties": {
                 "$ref": "#/$defs/template"
               }
+            },
+            "vendor": {
+              "enum": [
+                "claude",
+                "codex",
+                "cursor",
+                "copilot"
+              ],
+              "description": "The vendor the harness runs. Its API host is allowed through the egress proxy without being listed (ADR-007). Default: the harness's default_vendor, treated as claude for egress."
+            },
+            "base": {
+              "type": "string",
+              "description": "The base image `ynh image --base` builds the harness image on, for lanes whose sensors need tools the default ynh image lacks."
             }
           }
         },

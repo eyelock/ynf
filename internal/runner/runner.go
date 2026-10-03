@@ -32,6 +32,9 @@ type Spec struct {
 	TaskFile string // path inside the worktree's step folder, as the command sees it
 	RunDir   string // the step folder, as the command sees it
 	Feedback string
+	// InImage is set when the run happens in an image built by `ynh image --entrypoint agent`,
+	// whose entrypoint is already `ynh agent run --harness local/<name>`.
+	InImage bool
 }
 
 // Result is a run's outcome in ynf's terms.

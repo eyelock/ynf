@@ -13,13 +13,14 @@ carried out today.
 | `enabled` | `false` switches the lane off: its items are tracked and ignored | yes |
 | `intake` | Where work comes from | `github.search`; `jira.search`, webhooks and topics are read and skipped |
 | `guards.eligible` | A CEL expression over structured facts; false means ignored | yes |
-| `run.runner` | `command` or `ynh` | `command`; `ynh` builds its command but needs an image with ynh in it |
+| `run.runner` | `command` or `ynh` | both. On docker, a `ynh` lane runs in an agent image ynf builds from the harness with `ynh image --entrypoint agent` (ynh on PATH), or `run.image` |
 | `run.executor` | `docker`, `process`, `ecs`, `k8s-job`, `ci-inline` | `docker`; `process` with `--interactive` |
 | `run.image` | The container image a command runs in | yes |
 | `run.egress.allow` | Hosts a run may reach | yes: an empty list is no network at all; otherwise an internal network whose only way out is ynf's allow-list proxy. Each denied host is recorded on the run and counted as `sig/egress/denied/<host>` |
 | `run.command.argv` | The command, run without a shell; `{label.<prefix>}`, `{task_file}`, `{run_dir}` are filled in | yes |
 | `run.command.result_file` | A file the command writes with `{outcome, detail, model, session}` | yes |
-| `run.ynh` | `harness`, `focus`, `profile`, `sandbox`, `budgets`, `sensor_scope` | built into the command; see `run.runner` |
+| `run.env` | Variables passed into the run by name, such as the model key; values never logged | yes |
+| `run.ynh` | `harness`, `vendor`, `base`, `focus`, `profile`, `sandbox`, `budgets`, `sensor_scope` | yes; the vendor's API host is allowed through the egress proxy without being listed |
 | `when` | Reactions to `converged`, `ci_failed`, `changes_requested` and `outcome.<name>` | `open_pr`, `escalate`, `quarantine`, `comment`, `close`, `retry`/`then`, `resume_with`/`max`; `push_commit` and `request_review` escalate |
 | `pr.allowed_paths` | The diff gate refuses changes outside these | yes |
 | `pr.protected_paths` | Refused as well as the built-in protected paths | yes |

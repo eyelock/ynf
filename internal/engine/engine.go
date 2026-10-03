@@ -50,6 +50,12 @@ type Engine struct {
 	RunTimeout  time.Duration
 	Interactive bool // allows the process executor (ADR-007)
 
+	// BuildImage builds a ynh agent image for a harness in a worktree (`ynh image --entrypoint
+	// agent`) and returns its tag. Nil means ynh is not available (ADR-012).
+	BuildImage func(ctx context.Context, worktree string, cfg policy.Ynh) (string, error)
+	// Getenv reads the variables a lane passes into its runs (run.env). Default os.Getenv.
+	Getenv func(string) string
+
 	Now   func() time.Time
 	NewID func() string
 	Log   *slog.Logger

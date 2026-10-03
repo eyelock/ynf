@@ -276,16 +276,16 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	if err := os.WriteFile(filepath.Join(runDir, "task.md"), []byte(task(it, s.text, feedback)), 0o644); err != nil {
 		return fail(runner.Error, err)
 	}
-	job := executor.Job{Worktree: wt, RunDir: runDir, Image: lane.Run.Image, Timeout: e.RunTimeout}
-	if lane.Run.Egress != nil {
-		job.Egress = lane.Run.Egress.Allow
+	job, inImage, err := s.job(lane, r, ex, wt, runDir)
+	if err != nil {
+		return fail(runner.OperatorError, err)
 	}
 	_, cr := ex.Paths(job)
 	labels := []string(nil)
 	if t, _, err := e.Forge.Ticket(s.ctx, it.Repo, it.Number); err == nil {
 		labels = t.Labels
 	}
-	argv, err := r.Command(runner.Spec{Lane: lane, Labels: labels, TaskFile: cr + "/task.md", RunDir: cr, Feedback: feedback})
+	argv, err := r.Command(runner.Spec{Lane: lane, Labels: labels, TaskFile: cr + "/task.md", RunDir: cr, Feedback: feedback, InImage: inImage})
 	if err != nil {
 		return fail(runner.OperatorError, err)
 	}
@@ -313,6 +313,46 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		rec.Outcome, rec.Detail = runner.Error, err.Error()
 	}
 	return finished(rec)
+}
+
+// job describes the run for the executor. A ynh lane on a contained executor runs in an agent
+// image ynf builds from the harness (or the lane's run.image), as the image's own user, with the
+// vendor's API host allowed through the egress proxy (ADR-007, ADR-012).
+func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, wt, runDir string) (executor.Job, bool, error) {
+	e := s.e
+	job := executor.Job{Worktree: wt, RunDir: runDir, Image: lane.Run.Image, Timeout: e.RunTimeout, Env: map[string]string{}, Secrets: map[string]string{}}
+	if lane.Run.Egress != nil {
+		job.Egress = append([]string(nil), lane.Run.Egress.Allow...)
+	}
+	getenv := e.Getenv
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	for _, name := range lane.Run.Env {
+		if v := getenv(name); v != "" {
+			job.Secrets[name] = v
+		}
+	}
+	y, isYnh := r.(runner.YnhRunner)
+	if !isYnh || !ex.Contained() {
+		return job, false, nil
+	}
+	if job.Image == "" {
+		if e.BuildImage == nil {
+			return job, false, fmt.Errorf("lane %s runs ynh in a container, which needs ynh on PATH to build the agent image, or run.image", lane.Name)
+		}
+		img, err := e.BuildImage(s.ctx, wt, y.Cfg)
+		if err != nil {
+			return job, false, fmt.Errorf("build agent image: %w", err)
+		}
+		job.Image = img
+	}
+	job.ImageUser = true
+	job.Egress = append(job.Egress, runner.ModelHosts[y.Vendor()]...)
+	if y.Cfg.Vendor != "" {
+		job.Env["YNH_VENDOR"] = y.Cfg.Vendor
+	}
+	return job, true, nil
 }
 
 // openPR gates, commits, pushes and opens (or reuses) the pull request for this step's change.

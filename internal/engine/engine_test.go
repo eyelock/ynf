@@ -64,6 +64,14 @@ lanes:
             gofmt -w ./internal/format && echo '{"outcome":"converged","model":"claude/opus","session":"S-42"}' > {run_dir}/result.json
         result_file: "{run_dir}/result.json"
     when: {converged: open_pr}
+  agentic:
+    kind: originate
+    intake: [{github.search: "label:ynf:agentic", every: 5m}]
+    run:
+      runner: ynh
+      env: [ANTHROPIC_API_KEY]
+      ynh: {harness: ".", focus: tidy}
+    when: {converged: open_pr}
   adopt:
     kind: adopt
     intake: [{github.search: "label:ynf:adopt", every: 5m}]
@@ -526,5 +534,143 @@ func TestClosedTicketAndMissingRepoPolicy(t *testing.T) {
 	h.e.ResetPolicies()
 	if err := h.e.Sweep(ctx); err == nil {
 		t.Fatal("an unreadable lanes file should be reported")
+	}
+}
+
+// fakeYnh puts a stand-in for `ynh agent run` first on PATH: it formats the code, as an agent
+// would fix it, and prints the run result ynh prints with --format json.
+func fakeYnh(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	calls := filepath.Join(dir, "calls")
+	script := `#!/bin/sh
+echo "$*" >> "` + calls + `"
+echo "key=${ANTHROPIC_API_KEY}" >> "` + calls + `"
+gofmt -w ./internal/format
+echo '{"exit_code":0,"reason":"converged","session_id":"S-ynh-7","backend":"claude","model":"opus"}'
+`
+	if err := os.WriteFile(filepath.Join(dir, "ynh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return calls
+}
+
+func TestYnhRunnerOnTheHost(t *testing.T) {
+	h := newHarness(t)
+	calls := fakeYnh(t)
+	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "sk-test"}[k] }
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Proposed {
+		t.Fatalf("%s %s", it.State, it.Reason)
+	}
+	b, _ := os.ReadFile(calls)
+	if !strings.Contains(string(b), "agent run --harness . --task @") || !strings.Contains(string(b), "--focus tidy") || !strings.Contains(string(b), "key=sk-test") {
+		t.Fatalf("ynh was called as %s", b)
+	}
+	msg := git(t, h.remote, "log", "-1", "--format=%B", "ynf/issue-1")
+	for _, want := range []string{"Co-Authored-By: claude/opus <noreply@anthropic.com>", "YNH-Session: S-ynh-7"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("commit lacks %q:\n%s", want, msg)
+		}
+	}
+}
+
+// fakeDocker records its calls and, for a job, runs gofmt on the mounted worktree and prints a
+// ynh run result, as the agent image would.
+func fakeDocker(t *testing.T) (bin, calls string) {
+	t.Helper()
+	dir := t.TempDir()
+	calls = filepath.Join(dir, "calls")
+	bin = filepath.Join(dir, "docker")
+	script := `#!/bin/sh
+echo "$*" >> "` + calls + `"
+echo "key=${ANTHROPIC_API_KEY}" >> "` + calls + `"
+case "$1" in
+  logs) echo listening ;;
+  run)
+    case "$*" in
+      *" -d "*) echo id ;;
+      *)
+        for a in "$@"; do case "$a" in *:/work) wt="${a%%:/work}" ;; esac; done
+        (cd "$wt" && gofmt -w ./internal/format)
+        echo '{"session_id":"S-img","backend":"claude","model":"opus"}' ;;
+    esac ;;
+esac
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin, calls
+}
+
+func TestYnhRunnerInAnAgentImage(t *testing.T) {
+	h := newHarness(t)
+	h.e.Interactive = false
+	bin, calls := fakeDocker(t)
+	proxy := filepath.Join(t.TempDir(), "ynf-linux")
+	_ = os.WriteFile(proxy, []byte("x"), 0o755)
+	h.e.Executor = func(string) (executor.Executor, error) { return executor.Docker{Bin: bin, ProxyBinary: proxy}, nil }
+	var built []string
+	h.e.BuildImage = func(_ context.Context, wt string, cfg policy.Ynh) (string, error) {
+		built = append(built, cfg.Harness)
+		return "ynf-harness:abc", nil
+	}
+	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "sk-secret"}[k] }
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Proposed {
+		t.Fatalf("%s %s %+v", it.State, it.Reason, it.LastRun)
+	}
+	if len(built) != 1 || built[0] != "." {
+		t.Fatalf("built %v", built)
+	}
+	b, _ := os.ReadFile(calls)
+	log := string(b)
+	for _, want := range []string{"ynf-harness:abc --task @/run/ynf/task.md", "--allow api.anthropic.com", "-e ANTHROPIC_API_KEY ", "key=sk-secret"} {
+		if !strings.Contains(log, want) {
+			t.Errorf("docker calls lack %q:\n%s", want, log)
+		}
+	}
+	if strings.Contains(log, "ANTHROPIC_API_KEY=sk-secret") {
+		t.Errorf("the key leaked into a command line:\n%s", log)
+	}
+	for _, line := range strings.Split(log, "\n") {
+		if strings.Contains(line, "ynf-harness:abc") && strings.Contains(line, "--user") {
+			t.Errorf("the agent image's own user was overridden: %s", line)
+		}
+	}
+	if msg := git(t, h.remote, "log", "-1", "--format=%B", "ynf/issue-1"); !strings.Contains(msg, "YNH-Session: S-img") {
+		t.Errorf("commit: %s", msg)
+	}
+}
+
+func TestYnhInAContainerNeedsAnImage(t *testing.T) {
+	h := newHarness(t)
+	h.e.Interactive = false
+	h.e.Executor = func(string) (executor.Executor, error) { return executor.Docker{Bin: "docker"}, nil }
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Escalated || !strings.Contains(it.LastRun.Detail, "needs ynh on PATH") {
+		t.Fatalf("%s %+v", it.State, it.LastRun)
+	}
+	h2 := newHarness(t)
+	h2.e.Interactive = false
+	h2.e.Executor = h.e.Executor
+	h2.e.BuildImage = func(context.Context, string, policy.Ynh) (string, error) { return "", fmt.Errorf("no base image") }
+	h2.f.labels[1] = []string{"ynf:agentic"}
+	_ = h2.e.Sweep(ctx)
+	if it := h2.item(t, 1); it.LastRun == nil || !strings.Contains(it.LastRun.Detail, "build agent image: no base image") {
+		t.Fatalf("%+v", it.LastRun)
 	}
 }

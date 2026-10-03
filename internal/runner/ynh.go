@@ -26,14 +26,35 @@ var ynhOutcomes = map[int]string{
 	30: Aborted, 31: Aborted,
 }
 
-// Command implements Runner.
-func (y YnhRunner) Command(s Spec) ([]string, error) {
-	argv := []string{"ynh", "agent", "run",
-		"--harness", y.Cfg.Harness,
-		"--task", "@" + s.TaskFile,
-		"--format", "json",
-		"--emit-jsonl", s.RunDir + "/trajectory.jsonl",
+// ModelHosts are the API hosts each vendor's CLI needs. The egress proxy allows the lane's vendor's
+// without the lane listing them (ADR-007).
+var ModelHosts = map[string][]string{
+	"claude":  {"api.anthropic.com"},
+	"codex":   {"api.openai.com"},
+	"cursor":  {"api2.cursor.sh"},
+	"copilot": {"api.githubcopilot.com", "api.github.com"},
+}
+
+// Vendor is the lane's vendor, claude unless it says otherwise.
+func (y YnhRunner) Vendor() string {
+	if y.Cfg.Vendor == "" {
+		return "claude"
 	}
+	return y.Cfg.Vendor
+}
+
+// Command implements Runner. In an agent image the entrypoint already names ynh agent run and the
+// harness, so only the flags are passed.
+func (y YnhRunner) Command(s Spec) ([]string, error) {
+	argv := []string{"ynh", "agent", "run", "--harness", y.Cfg.Harness}
+	if s.InImage {
+		argv = nil
+	}
+	argv = append(argv,
+		"--task", "@"+s.TaskFile,
+		"--format", "json",
+		"--emit-jsonl", s.RunDir+"/trajectory.jsonl",
+	)
 	if y.Cfg.Focus != "" {
 		argv = append(argv, "--focus", y.Cfg.Focus)
 	}

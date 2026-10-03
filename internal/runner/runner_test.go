@@ -104,3 +104,17 @@ func TestCommandRunnerEdges(t *testing.T) {
 		t.Fatal(s)
 	}
 }
+
+func TestYnhInImage(t *testing.T) {
+	y := runner.YnhRunner{Cfg: policy.Ynh{Harness: ".", Focus: "tidy"}}
+	argv, err := y.Command(runner.Spec{InImage: true, TaskFile: "/run/ynf/task.md", RunDir: "/run/ynf"})
+	if err != nil || argv[0] != "--task" || slices.Contains(argv, "agent") || slices.Contains(argv, "--harness") {
+		t.Fatalf("in an agent image only flags are passed: %v %v", argv, err)
+	}
+	if y.Vendor() != "claude" || (runner.YnhRunner{Cfg: policy.Ynh{Vendor: "codex"}}).Vendor() != "codex" {
+		t.Fatal("vendor default")
+	}
+	if !slices.Contains(runner.ModelHosts["claude"], "api.anthropic.com") {
+		t.Fatal("claude's model host")
+	}
+}

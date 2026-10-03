@@ -240,6 +240,7 @@ func (a *app) engine() (*engine.Engine, error) {
 		Store: st, Forge: fg,
 		Git:         workspace.Workspace{Root: c.WorkPath(), Token: token, Author: workspace.Author{Name: name, Email: email}},
 		Executor:    a.executor,
+		BuildImage:  imageBuilder(),
 		Repos:       c.Repos,
 		Lanes:       a.lanes,
 		WorkDir:     c.WorkPath(),

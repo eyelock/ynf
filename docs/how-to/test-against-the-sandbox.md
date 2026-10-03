@@ -35,8 +35,13 @@ ok    fmt-format               #6 in_review, draft #11 with trailers, 6 decision
 ok    deps-bump                #3 ignored, 1 decisions replay the same
 ```
 
-Slice 1a covers the lanes that need no agent and no egress: `gofmt` and `deps`. The others wait
-for the ynh runner in a container and the egress proxy.
+Without a model key, run the lanes that need no agent: `gofmt` and `deps` (the default). The ynh
+lanes run the agent in a container built on the sandbox's agent base image:
+
+```bash
+make agent-image                                   # once, and after ynh changes
+ANTHROPIC_API_KEY=... make e2e-only LANES=lint-paydown,doc-drift
+```
 
 Running `e2e-only` twice against the same sandbox is safe: ynf finds the pull request it already
 opened and reuses it.
