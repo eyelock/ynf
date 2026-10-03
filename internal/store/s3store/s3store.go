@@ -2,7 +2,8 @@
 // host, where state must outlive any one process. Compare-and-swap is S3's conditional write:
 // If-None-Match: * to create, If-Match: <etag> to replace only the version that was read.
 //
-// Leases are only as safe as those writes are atomic. AWS S3's are; MinIO's are not under
+// Leases are only as safe as those writes are atomic. AWS S3's are: the conformance suite's race
+// passes against it (TestConformanceOnS3, infra's ynf-conformance bucket). MinIO's are not under
 // concurrency (two of sixteen racers can both win), so MinIO is for development, not for leases.
 //
 // Layout under the prefix:
