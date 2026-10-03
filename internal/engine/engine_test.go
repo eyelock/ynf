@@ -85,6 +85,14 @@ lanes:
       env: [ANTHROPIC_API_KEY]
       ynh: {harness: ".", focus: tidy}
     when: {converged: open_pr}
+  approved:
+    kind: originate
+    intake: [{github.search: "label:ynf:approved", every: 5m}]
+    run:
+      runner: ynh
+      env: [ANTHROPIC_API_KEY]
+      ynh: {harness: ".", focus: tidy, auto_approve: edits}
+    when: {converged: open_pr}
   adopt:
     kind: adopt
     intake: [{github.search: "label:ynf:adopt", every: 5m}]
@@ -874,7 +882,7 @@ func TestYieldFloorPausesTheLane(t *testing.T) {
 		}
 	}
 	stats, err := h.e.Stats(ctx)
-	if err != nil || len(stats) != 8 {
+	if err != nil || len(stats) != 9 {
 		t.Fatalf("every lane should be listed, with or without items: %+v %v", stats, err)
 	}
 	fmtStats := func(ss []engine.Stats) engine.Stats {
@@ -1169,5 +1177,70 @@ func TestADeadHoldersItemIsRestartedWithinATTL(t *testing.T) {
 	}
 	if !restarted {
 		t.Error("the log has no restart decision")
+	}
+}
+
+// TestAutoApproveOnlyInsideAnImageThatSupportsIt: approval prompts are switched off only inside
+// containment, and only when the agent image's own ynh has --auto-approve; an older image is
+// refused before anything runs, rather than failing on an unknown flag.
+func TestAutoApproveOnlyInsideAnImageThatSupportsIt(t *testing.T) {
+	for _, tc := range []struct {
+		caps string
+		ok   bool
+	}{{"0.9.0", true}, {"0.10.0", true}, {"1.0", true}, {"0.8.0", false}, {"dev", false}} {
+		h := newHarness(t)
+		h.e.Interactive = false
+		bin, calls := fakeDocker(t)
+		proxy := filepath.Join(t.TempDir(), "ynf-linux")
+		_ = os.WriteFile(proxy, []byte("x"), 0o755)
+		h.e.Executor = func(string) (executor.Executor, error) { return executor.Docker{Bin: bin, ProxyBinary: proxy}, nil }
+		h.e.BuildImage = func(context.Context, string, policy.Ynh) (string, error) { return "ynf-harness:abc", nil }
+		h.e.ImageCapabilities = func(_ context.Context, img string) (string, error) {
+			if img != "ynf-harness:abc" {
+				t.Errorf("asked %s, not the agent image", img)
+			}
+			return tc.caps, nil
+		}
+		h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "k"}[k] }
+		h.f.labels[1] = []string{"ynf:approved"}
+		if err := h.e.Sweep(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		it := h.item(t, 1)
+		b, _ := os.ReadFile(calls)
+		if tc.ok {
+			if it.State != item.Proposed || !strings.Contains(string(b), "--auto-approve edits") {
+				t.Errorf("%s: %s %+v\n%s", tc.caps, it.State, it.LastRun, b)
+			}
+			continue
+		}
+		if it.State != item.Escalated || it.LastRun.Outcome != "operator_error" ||
+			!strings.Contains(it.LastRun.Detail, "needs ynh capabilities 0.9.0") || !strings.Contains(it.LastRun.Detail, "has "+tc.caps) {
+			t.Errorf("%s: %s %+v", tc.caps, it.State, it.LastRun)
+		}
+		if strings.Contains(string(b), "ynf-harness:abc --task") {
+			t.Errorf("%s: the agent ran anyway:\n%s", tc.caps, b)
+		}
+	}
+}
+
+// TestAutoApproveIsNeverPassedOutsideContainment: on the host, the person running ynf keeps the
+// vendor CLI's approval prompts, whatever the lane says.
+func TestAutoApproveIsNeverPassedOutsideContainment(t *testing.T) {
+	h := newHarness(t)
+	var buf syncBuffer
+	h.e.Log = slog.New(slog.NewTextHandler(&buf, nil))
+	calls := fakeYnh(t)
+	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "k"}[k] }
+	h.f.labels[1] = []string{"ynf:approved"}
+	if err := h.e.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(calls)
+	if len(b) == 0 || strings.Contains(string(b), "--auto-approve") {
+		t.Fatalf("ynh calls: %s", b)
+	}
+	if !strings.Contains(buf.String(), "auto_approve applies only inside containment") {
+		t.Errorf("no warning: %s", buf.String())
 	}
 }

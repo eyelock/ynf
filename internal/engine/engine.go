@@ -57,6 +57,9 @@ type Engine struct {
 	// BuildImage builds a ynh agent image for a harness in a worktree (`ynh image --entrypoint
 	// agent`) and returns its tag. Nil means ynh is not available (ADR-012).
 	BuildImage func(ctx context.Context, worktree string, cfg policy.Ynh) (string, error)
+	// ImageCapabilities reports the capabilities version of the ynh inside an agent image; nil
+	// skips the check.
+	ImageCapabilities func(ctx context.Context, image string) (string, error)
 	// Getenv reads the variables a lane passes into its runs (run.env). Default os.Getenv.
 	Getenv func(string) string
 

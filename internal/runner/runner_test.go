@@ -111,6 +111,15 @@ func TestCommandRunnerEdges(t *testing.T) {
 	}
 }
 
+func TestYnhAutoApproveOnlyInAnImage(t *testing.T) {
+	y := runner.YnhRunner{Cfg: policy.Ynh{Harness: ".", AutoApprove: "all"}}
+	in, _ := y.Command(runner.Spec{InImage: true, TaskFile: "t", RunDir: "r"})
+	out, _ := y.Command(runner.Spec{TaskFile: "t", RunDir: "r"})
+	if !strings.Contains(strings.Join(in, " "), "--auto-approve all") || slices.Contains(out, "--auto-approve") {
+		t.Fatalf("in an image %v; on the host %v", in, out)
+	}
+}
+
 func TestYnhInImage(t *testing.T) {
 	y := runner.YnhRunner{Cfg: policy.Ynh{Harness: ".", Focus: "tidy"}}
 	argv, err := y.Command(runner.Spec{InImage: true, TaskFile: "/run/ynf/task.md", RunDir: "/run/ynf", Focus: &runner.Focus{Prompt: "Tidy."}})

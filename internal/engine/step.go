@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -409,6 +410,9 @@ func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, wt, 
 		return job, false, err
 	}
 	if !ex.Contained() {
+		if y.Cfg.AutoApprove != "" {
+			e.log().Warn("auto_approve applies only inside containment; this run keeps its approval prompts", "lane", lane.Name, "executor", ex.Name())
+		}
 		return job, false, nil
 	}
 	if job.Image == "" {
@@ -422,11 +426,42 @@ func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, wt, 
 		job.Image = img
 	}
 	job.ImageUser = true
+	if y.Cfg.AutoApprove != "" && e.ImageCapabilities != nil {
+		caps, err := e.ImageCapabilities(s.ctx, job.Image)
+		if err != nil {
+			return job, false, fmt.Errorf("read the agent image's ynh capabilities: %w", err)
+		}
+		if !atLeast(caps, autoApproveCapabilities) {
+			return job, false, fmt.Errorf("lane %s sets auto_approve, which needs ynh capabilities %s in the agent image; %s has %s: rebuild its base on a newer ynh", lane.Name, autoApproveCapabilities, job.Image, caps)
+		}
+	}
 	job.Egress = append(job.Egress, runner.ModelHosts[y.Vendor()]...)
 	if y.Cfg.Vendor != "" {
 		job.Env["YNH_VENDOR"] = y.Cfg.Vendor
 	}
 	return job, true, nil
+}
+
+// autoApproveCapabilities is the first ynh capabilities version with --auto-approve.
+const autoApproveCapabilities = "0.9.0"
+
+// atLeast compares dotted versions numerically; anything unparseable is too old.
+func atLeast(have, want string) bool {
+	h, w := strings.Split(have, "."), strings.Split(want, ".")
+	for i := range w {
+		if i >= len(h) {
+			return false
+		}
+		hn, err1 := strconv.Atoi(h[i])
+		wn, err2 := strconv.Atoi(w[i])
+		if err1 != nil || err2 != nil {
+			return false
+		}
+		if hn != wn {
+			return hn > wn
+		}
+	}
+	return true
 }
 
 // proxyVars are what a worker behind the egress proxy needs to reach it.

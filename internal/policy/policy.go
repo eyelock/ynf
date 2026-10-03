@@ -94,12 +94,15 @@ type Egress struct {
 
 // Ynh is the ynh runner's settings.
 type Ynh struct {
-	Harness     string            `yaml:"harness" json:"harness"`
-	Vendor      string            `yaml:"vendor" json:"vendor,omitempty"`
-	Base        string            `yaml:"base" json:"base,omitempty"`
-	Focus       string            `yaml:"focus" json:"focus,omitempty"`
-	Profile     string            `yaml:"profile" json:"profile,omitempty"`
-	Sandbox     string            `yaml:"sandbox" json:"sandbox,omitempty"`
+	Harness string `yaml:"harness" json:"harness"`
+	Vendor  string `yaml:"vendor" json:"vendor,omitempty"`
+	Base    string `yaml:"base" json:"base,omitempty"`
+	Focus   string `yaml:"focus" json:"focus,omitempty"`
+	Profile string `yaml:"profile" json:"profile,omitempty"`
+	Sandbox string `yaml:"sandbox" json:"sandbox,omitempty"`
+	// AutoApprove is ynh's --auto-approve (edits or all): the worker runs without approval prompts.
+	// ynf passes it only to a contained run (ADR-007).
+	AutoApprove string            `yaml:"auto_approve" json:"auto_approve,omitempty"`
 	Budgets     *Budgets          `yaml:"budgets" json:"budgets,omitempty"`
 	SensorScope map[string]string `yaml:"sensor_scope" json:"sensor_scope,omitempty"`
 }
