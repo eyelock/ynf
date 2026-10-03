@@ -9,12 +9,26 @@ lives in [`sandbox/`](../../sandbox/README.md).
 | `repository.tf` | The repository: description, topics, visibility, features, merge options |
 | `branches.tf` | Protection on `main`: pull request required with the `check` job green, admins included, linear history, no force-push or delete |
 | `labels.tf` | Issue and PR labels, authoritatively: a label not listed is removed |
-| `actions.tf` | Actions permissions and the read-only default `GITHUB_TOKEN` |
+| `actions.tf` | Actions permissions, the read-only default `GITHUB_TOKEN`, and that the `RELEASE_TOKEN` secret exists |
 | `security.tf` | Dependabot alerts and security updates |
 | `imports.tf` | Import blocks that adopt the live repository into a fresh state |
 
-Not managed here: anything committed to the repository (`.github/`), and GitHub Pages, which is
-added once `docs/` is on `main`.
+Not managed here: anything committed to the repository (`.github/`), GitHub Pages, which is
+added once `docs/` is on `main`, and the value of `RELEASE_TOKEN`: GitHub never returns it, so
+Terraform only tracks that the secret exists.
+
+## The release token
+
+The release workflow publishes the GitHub release and pushes the formula to
+`eyelock/homebrew-tap` with `RELEASE_TOKEN`, a fine-grained token limited to those two
+repositories with **Contents: Read and write**. Set or rotate it with gh, so the value never
+passes through Terraform:
+
+```bash
+gh secret set RELEASE_TOKEN -R eyelock/ynf
+```
+
+`imports.tf` adopts it into state on the next apply.
 
 ## Use
 
