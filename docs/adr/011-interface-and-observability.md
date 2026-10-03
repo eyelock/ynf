@@ -14,19 +14,22 @@ before it ships.
 **The CLI:**
 
 ```
-ynf serve        [--store <url>] [--executor docker] [--lanes <file>]
-ynf step         --event <file|-> [--interactive]
-ynf sweep        [--lane <name>]
-ynf lanes        validate | ls | show <lane> | explain <lane> --item <key>
-ynf items        ls [--lane] [--state] | show <key> | log <key>
-ynf items        release <key> | retry <key> | quarantine <key>
-ynf replay       <key> [--policy <file>] [--since <time>]
+ynf serve        [--interval 1m] [--lane <name>]...
+ynf sweep        [--until-settled] [--timeout 20m] [--lane <name>]...
+ynf step         --event <file|->                        CI-native host
+ynf lanes        validate [--file <path>] | show --repo <owner/name> [<lane>] | explain <lane> --item <key>
+ynf items        ls | show <item> | log <item> | retry <item> | release <item> | quarantine <item>
+ynf replay       <item> [--policy <file>]
 ynf pause        <lane> --reason <text>
 ynf resume       <lane> --reason <text>
 ynf stats        [--lane <name>] [--window 30d]
 ynf shadow       <lane> --since 90d
 ynf doctor
 ```
+
+Global flags come before the command: `--config <path>` (default: `config.yaml` found in the home
+factory folder, ADR-009), `--format text|json`, `--interactive` (allows the uncontained `process`
+executor, ADR-007) and `-v`. An item is named `owner/name#number` or by its store key.
 
 Every command takes `--format json` and returns one object.
 
@@ -45,8 +48,13 @@ failure signatures with ynm's reflective summaries.
 
 **Observability:** structured JSON logs, and an OpenTelemetry trace per step with spans for
 claim, probe, decide, act, and the run. Every span carries the item key, `step_id`, lane, policy
-hash and lease epoch. Exit codes for `ynf step`: `0` acted or nothing to do, `10` lost the claim,
-`20` adapter error, `30` policy invalid, `40` containment unavailable.
+hash and lease epoch.
+
+**Exit codes**, for every command: `0` success, `2` usage, `20` an adapter failed (the forge, git,
+docker, the store), `30` config or lanes invalid, `31` `sweep --until-settled` timed out before
+every item settled, `32` `replay` found decisions that differ. A step that loses its claim, or a
+lane that cannot run contained, is not an exit code: the first is another instance's work, and the
+second is recorded on the item as an `operator_error` outcome and escalated.
 
 ## Alternatives
 
