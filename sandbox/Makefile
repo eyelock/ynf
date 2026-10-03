@@ -21,8 +21,10 @@ validate: init
 plan: init
 	$(TF) plan
 
+# GitHub sometimes answers "403 Repository has been locked" for a few seconds after a new
+# repository's first push. Apply is idempotent, so a failed apply is retried once.
 up: init
-	$(TF) apply -auto-approve
+	$(TF) apply -auto-approve || { echo "apply failed; retrying once"; sleep 15; $(TF) apply -auto-approve; }
 	$(TF) output
 
 down: init

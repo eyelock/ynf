@@ -3,6 +3,8 @@
 # The sandbox's factory: five lanes, one per kind of work, so every ynf path has a lane to run in.
 # Every fixture carries a `pkg:<path>` label; lanes use it to scope the harness's sensors to the
 # part of the repository the work is about, so a run is judged on its own debt, not everyone's.
+# Lint gets a cache inside the worktree: golangci-lint's shared cache attributes findings to
+# whichever copy of identical code it saw first, and --new-from-merge-base then drops them.
 version: 1
 
 defaults:
@@ -24,8 +26,8 @@ lanes:
         harness: .
         focus: tidy
         sensor_scope:
-          lint: 'golangci-lint run ./{label.pkg}/...'
-          test: 'go test ./{label.pkg}/...'
+          lint: 'GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run ./{label.pkg}/...'
+          test: 'go test -count=1 ./{label.pkg}/...'
           docs: 'sh scripts/check-docs.sh {label.pkg}'
     when:
       converged: open_pr
@@ -50,8 +52,8 @@ lanes:
         harness: .
         focus: docs
         sensor_scope:
-          lint: 'golangci-lint run ./{label.pkg}/...'
-          test: 'go test ./{label.pkg}/...'
+          lint: 'GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run ./{label.pkg}/...'
+          test: 'go test -count=1 ./{label.pkg}/...'
           docs: 'sh scripts/check-docs.sh {label.pkg}'
     when:
       converged: open_pr
@@ -91,8 +93,8 @@ lanes:
         harness: .
         focus: fix-ci
         sensor_scope:
-          lint: 'golangci-lint run --config .golangci.ci.yml --new-from-merge-base=origin/main ./{label.pkg}/...'
-          test: 'go test ./{label.pkg}/...'
+          lint: 'GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run --config .golangci.ci.yml --new-from-merge-base=origin/main ./{label.pkg}/...'
+          test: 'go test -count=1 ./{label.pkg}/...'
           docs: 'sh scripts/check-docs.sh {label.pkg}'
     when:
       converged: push_commit

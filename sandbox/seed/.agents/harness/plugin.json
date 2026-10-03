@@ -32,7 +32,7 @@
       "category": "behaviour",
       "tolerance": "blocking",
       "version_command": "go version",
-      "source": { "command": "go test ./..." },
+      "source": { "command": "go test -count=1 ./..." },
       "output": { "format": "text" }
     },
     "docs": {
