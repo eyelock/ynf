@@ -85,3 +85,35 @@ func TestResolveShadows(t *testing.T) {
 		t.Fatalf("%s %v", dir, shadowed)
 	}
 }
+
+func TestParseDuration(t *testing.T) {
+	for in, want := range map[string]string{"5m": "5m0s", "90d": "2160h0m0s", "30s": "30s"} {
+		d, err := policy.ParseDuration(in)
+		if err != nil || d.String() != want {
+			t.Errorf("%s: %v %v", in, d, err)
+		}
+	}
+	if _, err := policy.ParseDuration("xd"); err == nil {
+		t.Error("xd parsed")
+	}
+	l := policy.Intake{Every: "5m"}
+	if l.Interval().Minutes() != 5 {
+		t.Error("Interval")
+	}
+}
+
+func TestDraftDefaultAndGuardTypes(t *testing.T) {
+	if !(policy.PR{}).IsDraft() {
+		t.Fatal("pull requests should be drafts by default")
+	}
+	f := false
+	if (policy.PR{Draft: &f}).IsDraft() {
+		t.Fatal("draft: false ignored")
+	}
+	if ok, err := policy.Guard("", nil, nil); !ok || err != nil {
+		t.Fatal("empty guard should pass")
+	}
+	if _, err := policy.Guard(`"text"`, map[string]any{}, map[string]any{}); err == nil {
+		t.Fatal("non-bool guard accepted")
+	}
+}

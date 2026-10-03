@@ -121,3 +121,41 @@ func TestRenewKeepsSavesWorking(t *testing.T) {
 		t.Fatalf("after release: %s lease=%v", got.State, got.Lease)
 	}
 }
+
+func TestHeartbeatReportsLoss(t *testing.T) {
+	s, key := setup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := newClock()
+	a, err := lease.Claim(ctx, s, key, "a", "step-a", 90*time.Second, c.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.add(2 * time.Minute)
+	if _, err := lease.Claim(ctx, s, key, "b", "step-b", 90*time.Second, c.now); err != nil {
+		t.Fatal(err)
+	}
+	lost := make(chan error, 1)
+	go a.Heartbeat(ctx, time.Millisecond, func(err error) { lost <- err })
+	select {
+	case err := <-lost:
+		if !errors.Is(err, lease.ErrLost) {
+			t.Fatalf("got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("heartbeat never noticed the lost lease")
+	}
+	if err := a.Release(ctx); !errors.Is(err, lease.ErrLost) {
+		t.Fatalf("release after loss: %v", err)
+	}
+}
+
+func TestClaimMissingItem(t *testing.T) {
+	s, _ := setup(t)
+	if _, err := lease.Claim(context.Background(), s, "item/none", "a", "s", time.Minute, newClock().now); err == nil {
+		t.Fatal("claimed a missing item")
+	}
+	if err := lease.Create(context.Background(), s, item.Item{Key: item.IssueKey("o/r", 1)}); err == nil {
+		t.Fatal("created a duplicate item")
+	}
+}
