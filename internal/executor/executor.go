@@ -10,9 +10,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -45,6 +47,9 @@ type Job struct {
 	// Secrets reach the run by name only: docker reads each value from its own environment, so a
 	// secret never appears in a command line or a process listing.
 	Secrets map[string]string
+	// Files are mounted read-only into the container, container path to host path: configuration
+	// the operator sets and the run cannot change.
+	Files map[string]string
 }
 
 // Output is how the command ended.
@@ -109,6 +114,9 @@ func (d Docker) Args(j Job, name, network string) ([]string, error) {
 		args = append(args, "--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()))
 	}
 	args = append(args, "-v", j.Worktree+":"+WorkDir, "-v", j.RunDir+":"+RunDir, "-w", WorkDir)
+	for _, dst := range slices.Sorted(maps.Keys(j.Files)) {
+		args = append(args, "-v", j.Files[dst]+":"+dst+":ro")
+	}
 	env := map[string]string{
 		// A fresh cache per run (ADR-007): shared caches make sensors lie.
 		"XDG_CACHE_HOME":      RunDir + "/cache",

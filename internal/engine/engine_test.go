@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -669,6 +670,18 @@ func TestYnhRunnerInAnAgentImage(t *testing.T) {
 		if strings.Contains(line, "ynf-harness:abc") && strings.Contains(line, "--user") {
 			t.Errorf("the agent image's own user was overridden: %s", line)
 		}
+	}
+	// ynh grants its worker no edits by design; ynf, the operator, grants them inside containment
+	// as Claude Code managed settings, read-only and outside anything the agent can write.
+	mount := regexp.MustCompile(`-v (\S+):` + regexp.QuoteMeta(engine.ClaudeManagedSettings) + `:ro`).FindStringSubmatch(log)
+	if mount == nil {
+		t.Fatalf("no read-only managed settings mount:\n%s", log)
+	}
+	if b, err := os.ReadFile(mount[1]); err != nil || !strings.Contains(string(b), `"defaultMode":"acceptEdits"`) {
+		t.Fatalf("managed settings: %s %v", b, err)
+	}
+	if strings.Contains(mount[1], string(filepath.Separator)+"run"+string(filepath.Separator)) {
+		t.Errorf("the settings are inside the run folder the agent can write: %s", mount[1])
 	}
 	if msg := git(t, h.remote, "log", "-1", "--format=%B", "ynf/issue-1"); !strings.Contains(msg, "YNH-Session: S-img") {
 		t.Errorf("commit: %s", msg)

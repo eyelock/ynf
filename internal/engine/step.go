@@ -383,11 +383,34 @@ func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, wt, 
 		job.Image = img
 	}
 	job.ImageUser = true
+	if err := grantEdits(&job, filepath.Dir(runDir)); err != nil {
+		return job, false, err
+	}
 	job.Egress = append(job.Egress, runner.ModelHosts[y.Vendor()]...)
 	if y.Cfg.Vendor != "" {
 		job.Env["YNH_VENDOR"] = y.Cfg.Vendor
 	}
 	return job, true, nil
+}
+
+// ClaudeManagedSettings is where Claude Code reads policy it lets nothing override.
+const ClaudeManagedSettings = "/etc/claude-code/managed-settings.json"
+
+// grantEdits lets a contained ynh worker edit its working copy unattended. ynh passes its worker no
+// permission flag by design: granting writes is the operator's job, in the vendor CLI's own
+// configuration. ynf is that operator, and grants only inside containment, as managed settings
+// the agent cannot change, written beside the run folder rather than in it or the worktree.
+// File edits are accepted; commands still need approval, and ynh runs the sensors itself.
+func grantEdits(job *executor.Job, dir string) error {
+	p := filepath.Join(dir, "claude-managed-settings.json")
+	if err := os.WriteFile(p, []byte(`{"permissions":{"defaultMode":"acceptEdits"}}`+"\n"), 0o644); err != nil {
+		return err
+	}
+	if job.Files == nil {
+		job.Files = map[string]string{}
+	}
+	job.Files[ClaudeManagedSettings] = p
+	return nil
 }
 
 // proxyVars are what a worker behind the egress proxy needs to reach it.

@@ -49,6 +49,11 @@ func TestDockerArgs(t *testing.T) {
 	if s := strings.Join(args, " "); !strings.Contains(s, "--network ynf-abc-net") || !strings.Contains(s, "-e HTTPS_PROXY=http://egress:3128") {
 		t.Errorf("egress run args: %s", s)
 	}
+	j.Files = map[string]string{"/etc/b.json": "/h/b.json", "/etc/a.json": "/h/a.json"}
+	args, _ = d.Args(j, "ynf-abc", "none")
+	if s := strings.Join(args, " "); !strings.Contains(s, "-v /h/a.json:/etc/a.json:ro -v /h/b.json:/etc/b.json:ro") {
+		t.Errorf("files should be mounted read-only, in order: %s", s)
+	}
 	if wt, rd := d.Paths(j); wt != executor.WorkDir || rd != executor.RunDir {
 		t.Fatal("container paths")
 	}

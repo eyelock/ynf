@@ -56,6 +56,16 @@ with ynf's trailers (ADR-010), pushes, opens or updates the pull request, and co
 the GitHub App and JIRA credentials only ynf holds. A prompt-injected agent can at worst produce
 a bad diff, which a human reviews.
 
+**ynf grants the worker its edits, and only inside containment.** ynh passes its worker no
+permission flag, by design: granting writes is the operator's job, in the vendor CLI's own
+configuration. ynf is that operator. For a contained ynh run it mounts Claude Code managed
+settings, read-only, at `/etc/claude-code/managed-settings.json`, with
+`permissions.defaultMode: acceptEdits`: the worker edits its working copy unattended, commands
+still need approval, and ynh runs the sensors itself. Managed settings override anything else
+Claude Code reads, so the agent cannot widen them, and the file lives beside the run folder, not
+in it or in the worktree, so it never reaches the diff. An uncontained `process` run grants
+nothing: there, the operator's own CLI configuration applies.
+
 **A diff gate before every push.** ynf refuses to push, and escalates, when the diff:
 
 - touches paths outside the lane's `allowed_paths` (all paths by default)
