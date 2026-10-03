@@ -35,7 +35,7 @@
         "body",
         "labels",
         "lane",
-        "verify",
+        "calibrate",
         "expect"
       ],
       "properties": {
@@ -90,8 +90,8 @@
             }
           }
         },
-        "verify": {
-          "$ref": "#/$defs/verify"
+        "calibrate": {
+          "$ref": "#/$defs/calibrate"
         },
         "expect": {
           "type": "object",
@@ -151,8 +151,8 @@
         }
       }
     },
-    "verify": {
-      "description": "What `make verify` checks. One of three forms: sensors (the lane's scoped sensors before and after a known fix), command (a command-runner lane's diff is non-empty and identical across runs), or disabled (the lane is switched off).",
+    "calibrate": {
+      "description": "What `make calibrate` checks: the fixture, not the factory. One of three forms: sensors (the lane's scoped sensors before and after a known fix), command (a command-runner lane's diff is non-empty and identical across runs), or disabled (the lane is switched off).",
       "oneOf": [
         {
           "type": "object",

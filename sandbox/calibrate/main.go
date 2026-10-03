@@ -1,9 +1,11 @@
-// Command verify proves the sandbox's fixtures still behave as designed.
+// Command calibrate proves the sandbox's fixtures can still tell a fixed state from an unfixed one.
 //
-// It clones the live sandbox and, for each fixture in fixtures.yaml, runs the lane's scoped
-// sensors through `ynh check` with the same --sensor-overlay the lane would use: the sensors named
-// in `before` must fail, and after the fixture's known fix only those in `after` may. A fixture
-// that cannot produce that reproducible negative cannot tell a good agent run from a bad one.
+// It tests the test rig, not the factory: no agent and no ynf run. It clones the live sandbox and,
+// for each fixture in fixtures.yaml, runs the lane's scoped sensors through `ynh check` with the
+// same --sensor-overlay the lane would use: the sensors named in `before` must fail, and after
+// the fixture's known fix only those in `after` may. A fixture that cannot produce that
+// reproducible negative cannot tell a good agent run from a bad one, which is what an end-to-end
+// test of the factory relies on. The idea is ynh's `ynh check --calibrate`, applied to fixtures.
 package main
 
 import (
@@ -34,10 +36,10 @@ type fixture struct {
 	PullRequest *struct {
 		Branch string `yaml:"branch"`
 	} `yaml:"pull_request"`
-	Verify verify `yaml:"verify"`
+	Calibrate calibration `yaml:"calibrate"`
 }
 
-type verify struct {
+type calibration struct {
 	Before   []string                      `yaml:"before"`
 	Fix      string                        `yaml:"fix"`
 	After    []string                      `yaml:"after"`
@@ -75,11 +77,11 @@ func main() {
 	root := flag.String("root", ".", "the sandbox/ directory")
 	repo := flag.String("repo", "eyelock/ynf-sandbox", "the sandbox repository")
 	ynh := flag.String("ynh", envOr("YNH", "ynh"), "the ynh binary (needs .agents/harness support)")
-	only := flag.String("only", "", "verify only this fixture id")
+	only := flag.String("only", "", "calibrate only this fixture id")
 	flag.Parse()
 
 	if err := run(*root, *repo, *ynh, *only); err != nil {
-		fmt.Fprintln(os.Stderr, "verify:", err)
+		fmt.Fprintln(os.Stderr, "calibrate:", err)
 		os.Exit(1)
 	}
 }
@@ -94,7 +96,7 @@ func run(root, repo, ynh, only string) error {
 		return err
 	}
 
-	tmp, err := os.MkdirTemp("", "ynf-verify-")
+	tmp, err := os.MkdirTemp("", "ynf-calibrate-")
 	if err != nil {
 		return err
 	}
@@ -127,7 +129,7 @@ func run(root, repo, ynh, only string) error {
 		if only != "" && f.ID != only {
 			continue
 		}
-		v := verifier{root: root, origin: origin, tmp: tmp, ynh: ynh}
+		v := calibrator{root: root, origin: origin, tmp: tmp, ynh: ynh}
 		detail, err := v.fixture(f, lf.Lanes[f.Lane])
 		mark := "ok  "
 		if err != nil {
@@ -137,7 +139,7 @@ func run(root, repo, ynh, only string) error {
 		fmt.Printf("%s  %-26s %s\n", mark, f.ID, detail)
 	}
 	if failed > 0 {
-		return fmt.Errorf("%d fixture(s) did not behave as designed", failed)
+		return fmt.Errorf("%d fixture(s) cannot tell fixed from unfixed", failed)
 	}
 	return nil
 }
@@ -155,25 +157,25 @@ func preflight(ynh, dir string) error {
 	return nil
 }
 
-type verifier struct {
+type calibrator struct {
 	root, origin, tmp, ynh string
 }
 
-func (v verifier) fixture(f fixture, l lane) (string, error) {
+func (v calibrator) fixture(f fixture, l lane) (string, error) {
 	switch {
-	case f.Verify.Disabled:
+	case f.Calibrate.Disabled:
 		if l.Enabled == nil || *l.Enabled {
 			return "", fmt.Errorf("lane %s is enabled; expected it switched off", f.Lane)
 		}
 		return fmt.Sprintf("lane %s is switched off", f.Lane), nil
-	case f.Verify.Command != nil:
+	case f.Calibrate.Command != nil:
 		return v.command(f, l)
 	default:
 		return v.sensors(f, l)
 	}
 }
 
-func (v verifier) sensors(f fixture, l lane) (string, error) {
+func (v calibrator) sensors(f fixture, l lane) (string, error) {
 	pkg, err := label(f, "pkg")
 	if err != nil {
 		return "", err
@@ -189,21 +191,21 @@ func (v verifier) sensors(f fixture, l lane) (string, error) {
 		return "", err
 	}
 	var ignore string
-	if f.Verify.Flaky != nil {
-		ignore = f.Verify.Flaky.Sensor
+	if f.Calibrate.Flaky != nil {
+		ignore = f.Calibrate.Flaky.Sensor
 	}
 
 	before, err := v.failing(wt, string(ov), ignore)
 	if err != nil {
 		return "", err
 	}
-	if !sameSet(before, f.Verify.Before) {
-		return "", fmt.Errorf("before the fix %v failed, expected %v", before, f.Verify.Before)
+	if !sameSet(before, f.Calibrate.Before) {
+		return "", fmt.Errorf("before the fix %v failed, expected %v", before, f.Calibrate.Before)
 	}
 	detail := fmt.Sprintf("before %v", before)
 
-	if f.Verify.Flaky != nil {
-		fl := f.Verify.Flaky
+	if f.Calibrate.Flaky != nil {
+		fl := f.Calibrate.Flaky
 		fails := 0
 		for range fl.Runs {
 			out, err := v.failing(wt, string(ov), "", "--only", fl.Sensor)
@@ -220,25 +222,25 @@ func (v verifier) sensors(f fixture, l lane) (string, error) {
 		detail += fmt.Sprintf(", flaky %s %d/%d", fl.Sensor, fails, fl.Runs)
 	}
 
-	if f.Verify.Fix == "" {
+	if f.Calibrate.Fix == "" {
 		return detail + ", no fix to apply", nil
 	}
-	if _, err := cmd(wt, "git", "apply", filepath.Join(v.root, f.Verify.Fix)); err != nil {
-		return "", fmt.Errorf("apply %s: %w", f.Verify.Fix, err)
+	if _, err := cmd(wt, "git", "apply", filepath.Join(v.root, f.Calibrate.Fix)); err != nil {
+		return "", fmt.Errorf("apply %s: %w", f.Calibrate.Fix, err)
 	}
 	after, err := v.failing(wt, string(ov), ignore)
 	if err != nil {
 		return "", err
 	}
-	if !sameSet(after, f.Verify.After) {
-		return "", fmt.Errorf("after the fix %v failed, expected %v", after, f.Verify.After)
+	if !sameSet(after, f.Calibrate.After) {
+		return "", fmt.Errorf("after the fix %v failed, expected %v", after, f.Calibrate.After)
 	}
 	return detail + fmt.Sprintf(", after %v", after), nil
 }
 
 // command runs a command-runner lane twice on fresh worktrees: it must change something, and the
 // same input must produce the same diff.
-func (v verifier) command(f fixture, l lane) (string, error) {
+func (v calibrator) command(f fixture, l lane) (string, error) {
 	pkg, err := label(f, "pkg")
 	if err != nil {
 		return "", err
@@ -272,7 +274,7 @@ func (v verifier) command(f fixture, l lane) (string, error) {
 	return fmt.Sprintf("%s: same %d-line diff twice", strings.Join(argv, " "), strings.Count(diffs[0], "\n")), nil
 }
 
-func (v verifier) worktree(f fixture, suffix string) (string, error) {
+func (v calibrator) worktree(f fixture, suffix string) (string, error) {
 	ref := "origin/main"
 	if f.Kind == "pull_request" && f.PullRequest != nil {
 		ref = "origin/" + f.PullRequest.Branch
@@ -285,7 +287,7 @@ func (v verifier) worktree(f fixture, suffix string) (string, error) {
 }
 
 // failing runs ynh check and returns the names of the sensors that failed, minus ignore.
-func (v verifier) failing(dir, overlay, ignore string, extra ...string) ([]string, error) {
+func (v calibrator) failing(dir, overlay, ignore string, extra ...string) ([]string, error) {
 	args := append([]string{"check", dir, "--cwd", dir, "--no-baseline", "--format", "json", "--sensor-overlay", overlay}, extra...)
 	out, err := cmd(dir, v.ynh, args...)
 	var exit *exec.ExitError

@@ -2,9 +2,14 @@
 #
 # Every issue and pull request the sandbox starts with, and what ynf is expected to do with it.
 # Expectations live here, in ynf, never in the sandbox, so the agent cannot read what it is being
-# tested on. Terraform reads this file to create the issues, branches and pull requests, and
-# `make verify` reads each fixture's verify block to prove the fixture still behaves as designed:
-# the lane's scoped sensors fail before the known fix and pass after it.
+# tested on. Terraform reads this file to create the issues, branches and pull requests.
+#
+# Each fixture has two kinds of expectation:
+#   calibrate  what `make calibrate` checks now: the lane's scoped sensors fail before the known
+#              fix and pass after it, so the fixture can tell a fixed state from an unfixed one.
+#              This tests the fixture, not the factory.
+#   expect     what ynf should do with the fixture end to end: the acceptance test for the
+#              factory, once ynf can run (`make e2e`).
 version: 1
 
 fixtures:
@@ -14,7 +19,7 @@ fixtures:
     body: fixtures/lint-store-errcheck.md
     labels: ["ynf:lint", "pkg:internal/store"]
     lane: lint-paydown
-    verify:
+    calibrate:
       before: [lint]
       fix: fixtures/lint-store-errcheck.fix.patch
       after: []
@@ -30,7 +35,7 @@ fixtures:
     body: fixtures/lint-report-staticcheck.md
     labels: ["ynf:lint", "pkg:internal/report"]
     lane: lint-paydown
-    verify:
+    calibrate:
       before: [lint]
       fix: fixtures/lint-report-staticcheck.fix.patch
       after: []
@@ -45,7 +50,7 @@ fixtures:
     body: fixtures/lint-clock-errcheck.md
     labels: ["ynf:lint", "pkg:internal/clock"]
     lane: lint-paydown
-    verify:
+    calibrate:
       before: [lint]
       fix: fixtures/lint-clock-errcheck.fix.patch
       after: []
@@ -64,7 +69,7 @@ fixtures:
     body: fixtures/lint-legacy-gate.md
     labels: ["ynf:lint", "pkg:internal/legacy"]
     lane: lint-paydown
-    verify:
+    calibrate:
       before: [lint]
       fix: fixtures/lint-legacy-gate.fix.patch
       after: []
@@ -80,7 +85,7 @@ fixtures:
     body: fixtures/lint-export-injection.md
     labels: ["ynf:lint", "pkg:internal/export"]
     lane: lint-paydown
-    verify:
+    calibrate:
       before: [lint]
       fix: fixtures/lint-export-injection.fix.patch
       after: []
@@ -97,7 +102,7 @@ fixtures:
     body: fixtures/docs-greet-flags.md
     labels: ["ynf:docs", "pkg:cmd/greet"]
     lane: doc-drift
-    verify:
+    calibrate:
       before: [docs]
       fix: fixtures/docs-greet-flags.fix.patch
       after: []
@@ -112,7 +117,7 @@ fixtures:
     body: fixtures/docs-status-iana.md
     labels: ["ynf:docs", "pkg:internal/status"]
     lane: doc-drift
-    verify:
+    calibrate:
       before: []    # nothing to fail: this fixture is about egress, not a sensor
     expect:
       result: any
@@ -127,7 +132,7 @@ fixtures:
     body: fixtures/fmt-format.md
     labels: ["ynf:fmt", "pkg:internal/format"]
     lane: gofmt
-    verify:
+    calibrate:
       command: { deterministic: true }
     expect:
       result: in_review
@@ -141,7 +146,7 @@ fixtures:
     body: fixtures/deps-bump.md
     labels: ["ynf:deps"]
     lane: deps
-    verify:
+    calibrate:
       disabled: true
     expect:
       result: ignored
@@ -157,7 +162,7 @@ fixtures:
     pull_request:
       branch: human/retry-helper
       files: fixtures/fix-ci-retry/files
-    verify:
+    calibrate:
       before: [lint]
       fix: fixtures/fix-ci-retry.fix.patch
       after: []
