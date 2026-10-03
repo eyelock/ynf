@@ -275,3 +275,42 @@ func TestPauseResumeStats(t *testing.T) {
 		t.Fatalf("stats --lane: %d %s", code, out)
 	}
 }
+
+func TestStepFromAGitHubEvent(t *testing.T) {
+	e := setup(t)
+	ev := filepath.Join(e.dir, "event.json")
+	_ = os.WriteFile(ev, []byte(`{"repository":{"full_name":"o/r"},"issue":{"number":5}}`), 0o644)
+	if code, out, stderr := e.run("step", "--github-event", ev, "--github-event-name", "issues"); code != 0 || !strings.Contains(out, "issues on o/r: issues [5]") {
+		t.Fatalf("%d %s %s", code, out, stderr)
+	}
+	if code, out, _ := e.run("items", "ls"); code != 0 || !strings.Contains(out, "ignored") {
+		t.Fatalf("the issue should be tracked by the step: %s", out)
+	}
+	t.Setenv("GITHUB_EVENT_PATH", ev)
+	t.Setenv("GITHUB_EVENT_NAME", "schedule")
+	if code, out, _ := e.run("step"); code != 0 || !strings.Contains(out, "o/r#5") {
+		t.Fatalf("a scheduled step sweeps: %d %s", code, out)
+	}
+	t.Setenv("GITHUB_EVENT_NAME", "")
+	if code, _, _ := e.run("step"); code != cli.ExitUsage {
+		t.Fatalf("no event name: %d", code)
+	}
+	if code, _, _ := e.run("step", "--github-event", "/no/such", "--github-event-name", "issues"); code != cli.ExitUsage {
+		t.Fatalf("missing file: %d", code)
+	}
+	_ = os.WriteFile(ev, []byte(`{"repository":{"full_name":"x/y"},"issue":{"number":1}}`), 0o644)
+	if code, _, _ := e.run("step", "--github-event", ev, "--github-event-name", "issues"); code == 0 {
+		t.Fatal("an unenrolled repository's event was handled")
+	}
+}
+
+func TestServeListenNeedsASecret(t *testing.T) {
+	e := setup(t)
+	t.Setenv("YNF_WEBHOOK_SECRET", "")
+	if code, _, stderr := e.run("serve", "--listen", "127.0.0.1:0"); code != cli.ExitPolicy || !strings.Contains(stderr, "needs a webhook secret") {
+		t.Fatalf("%d %s", code, stderr)
+	}
+	if code, _, _ := e.run("sweep", "--listen", "127.0.0.1:0"); code != cli.ExitUsage {
+		t.Fatalf("--listen on sweep: %d", code)
+	}
+}

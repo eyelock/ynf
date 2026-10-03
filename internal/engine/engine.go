@@ -161,9 +161,12 @@ func (e *Engine) wantLane(name string) bool {
 }
 
 // Sweep runs every enrolled repository's lane searches and starts a step for each new ticket.
-func (e *Engine) Sweep(ctx context.Context) error {
+func (e *Engine) Sweep(ctx context.Context) error { return e.SweepRepos(ctx, e.Repos) }
+
+// SweepRepos is Sweep for some of the enrolled repositories.
+func (e *Engine) SweepRepos(ctx context.Context, repos []string) error {
 	var errs []error
-	for _, repo := range e.Repos {
+	for _, repo := range repos {
 		rp, err := e.Policy(ctx, repo)
 		if err != nil {
 			errs = append(errs, err)

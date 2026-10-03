@@ -160,6 +160,8 @@ func (a *app) sweep(ctx context.Context, args []string, forever bool) error {
 	if forever {
 		*interval = time.Minute
 	}
+	listen := fs.String("listen", "", "")
+	secretEnv := fs.String("webhook-secret-env", "YNF_WEBHOOK_SECRET", "")
 	fs.Var(&a.lanes, "lane", "")
 	if err := fs.Parse(args); err != nil {
 		return withCode(ExitUsage, err)
@@ -167,6 +169,16 @@ func (a *app) sweep(ctx context.Context, args []string, forever bool) error {
 	e, err := a.engine()
 	if err != nil {
 		return err
+	}
+	if *listen != "" {
+		if !forever {
+			return withCode(ExitUsage, errors.New("--listen is for serve"))
+		}
+		addr, err := a.listen(ctx, e, *listen, *secretEnv)
+		if err != nil {
+			return err
+		}
+		e.Log.Info("receiving GitHub webhooks", "addr", addr, "path", "/webhook/github")
 	}
 	deadline := time.Now().Add(*timeout)
 	for {

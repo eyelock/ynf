@@ -968,3 +968,7 @@ func TestMemoryOutageNeverStopsAStep(t *testing.T) {
 		t.Fatalf("a memory outage stopped the step: %s %s", it.State, it.Reason)
 	}
 }
+
+func leaseCreate(ctx context.Context, h *harness, it item.Item) error {
+	return lease.Create(ctx, h.e.Store, it)
+}

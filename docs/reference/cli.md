@@ -24,7 +24,8 @@ An item is named `owner/name#number`, or by its key, `item/github/<owner>/<name>
 | `ynf lanes validate [--file <path>]` | Validates a lanes file against the schema. Default `.agents/factory/lanes.yaml`. |
 | `ynf lanes show [--repo <owner/name>] [<lane>]` | The lanes ynf reads from a repository's default branch, with defaults applied. |
 | `ynf sweep [--until-settled] [--timeout 20m] [--interval 15s] [--lane <name>]...` | Runs every lane's searches, then steps every due item. With `--until-settled`, repeats until every item is settled or the timeout passes. |
-| `ynf serve [--lane <name>]...` | `sweep` every minute, until interrupted. |
+| `ynf serve [--listen <addr>] [--webhook-secret-env <var>] [--lane <name>]...` | `sweep` every minute, until interrupted. With `--listen`, also receives GitHub webhooks at `POST /webhook/github` (and `GET /healthz`): each is verified against the secret in `--webhook-secret-env` (default `YNF_WEBHOOK_SECRET`; serve refuses to listen without one), de-duplicated by delivery id, and handled in order. A webhook is a hint: facts are probed fresh. |
+| `ynf step --github-event <file> --github-event-name <name>` | The CI-native host: handle one GitHub event, as a workflow's trigger gives it (`GITHUB_EVENT_PATH`, `GITHUB_EVENT_NAME`). A `schedule` or `workflow_dispatch` event runs the reconciliation sweep. |
 | `ynf items ls` | Every tracked item: lane, state, pull request, reason. |
 | `ynf items show <item>` | The item document. |
 | `ynf items log <item>` | Every decision, run, action and note, in order. |

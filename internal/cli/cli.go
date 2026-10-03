@@ -43,7 +43,8 @@ Usage:
   ynf lanes validate [--file lanes.yaml]
   ynf lanes show --repo owner/name [lane]
   ynf sweep [--until-settled] [--timeout 20m] [--interval 15s] [--lane name]...
-  ynf serve [--interval 1m] [--lane name]...
+  ynf serve [--interval 1m] [--listen :8080 [--webhook-secret-env YNF_WEBHOOK_SECRET]] [--lane name]...
+  ynf step --github-event <file> --github-event-name <name>      (CI: GITHUB_EVENT_PATH, GITHUB_EVENT_NAME)
   ynf items ls
   ynf items show|log|retry|release <owner/name#number | key>
   ynf replay <owner/name#number | key> [--policy lanes.yaml]
@@ -110,6 +111,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = a.items(ctx, rest)
 	case "replay":
 		err = a.replay(ctx, rest)
+	case "step":
+		err = a.step(ctx, rest)
 	case "pause", "resume":
 		err = a.pause(ctx, cmd, rest)
 	case "stats":

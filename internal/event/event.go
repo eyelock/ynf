@@ -13,6 +13,7 @@ const (
 	RunFinished   = "ynf.run.finished"   // a runner finished; data carries the outcome
 	TimerDue      = "ynf.timer.due"      // the item's next_due passed
 	ActionDone    = "ynf.action.done"    // a forge action completed; data carries what it produced
+	ForgeChanged  = "ynf.forge.changed"  // a webhook says something about the item changed; facts are re-probed
 )
 
 // Event is a CloudEvents 1.0 envelope.
