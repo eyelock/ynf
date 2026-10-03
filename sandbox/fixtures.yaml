@@ -161,7 +161,7 @@ fixtures:
     lane: fix-ci
     pull_request:
       branch: human/retry-helper
-      files: fixtures/fix-ci-retry/files
+      files: fixtures/fix-ci-retry/testdata
     calibrate:
       before: [lint]
       fix: fixtures/fix-ci-retry.fix.patch

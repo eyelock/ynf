@@ -70,6 +70,7 @@ lanes:
         every: 5m
     run:
       runner: command
+      image: golang:1.26-alpine
       command:
         argv: ['gofmt', '-w', './{label.pkg}']
       egress:
