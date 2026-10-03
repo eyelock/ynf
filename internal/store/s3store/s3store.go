@@ -2,6 +2,9 @@
 // host, where state must outlive any one process. Compare-and-swap is S3's conditional write:
 // If-None-Match: * to create, If-Match: <etag> to replace only the version that was read.
 //
+// Leases are only as safe as those writes are atomic. AWS S3's are; MinIO's are not under
+// concurrency (two of sixteen racers can both win), so MinIO is for development, not for leases.
+//
 // Layout under the prefix:
 //
 //	docs/<key>                 documents; the ETag is the version
@@ -288,3 +291,14 @@ func (s *Store) Due(ctx context.Context, now time.Time, limit int) ([]string, er
 
 // Close implements store.Store.
 func (s *Store) Close() error { return nil }
+
+// RemovePrefix deletes everything under the store's prefix. Tests use it to clean up.
+func RemovePrefix(ctx context.Context, s *Store) {
+	keys, err := s.list(ctx, s.prefix)
+	if err != nil {
+		return
+	}
+	for _, k := range keys {
+		_, _ = s.c.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: &s.bucket, Key: aws.String(k)})
+	}
+}

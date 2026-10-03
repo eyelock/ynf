@@ -54,12 +54,15 @@ func minio(t *testing.T) string {
 
 var buckets atomic.Int64
 
-func TestConformance(t *testing.T) {
+// TestConformanceOnMinIO runs the suite against MinIO. MinIO's conditional writes are not atomic
+// under concurrency (two of sixteen racers can both win), so the race is not verifiable there;
+// TestConformanceOnS3 holds real S3 to it.
+func TestConformanceOnMinIO(t *testing.T) {
 	ep := minio(t)
 	t.Setenv("AWS_ACCESS_KEY_ID", "ynf")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "ynf-test-secret")
 	t.Setenv("AWS_REGION", "us-east-1")
-	storetest.Run(t, func(t *testing.T) store.Store {
+	storetest.RunWith(t, func(t *testing.T) store.Store {
 		bucket := fmt.Sprintf("ynf-test-%d-%d", os.Getpid(), buckets.Add(1))
 		s, err := s3store.Open(context.Background(), "s3://"+bucket+"/state?region=us-east-1&path_style=true&endpoint="+ep)
 		if err != nil {
@@ -73,7 +76,33 @@ func TestConformance(t *testing.T) {
 			t.Fatal(err)
 		}
 		return s
+	}, storetest.Options{NonAtomicCAS: "MinIO's conditional writes are not atomic under concurrency"})
+}
+
+// TestConformanceOnS3 runs the whole suite, the race included, against real S3: set YNF_S3_BUCKET
+// to a bucket the AWS credential chain can write. Each subtest uses its own prefix and removes it.
+func TestConformanceOnS3(t *testing.T) {
+	bucket := os.Getenv("YNF_S3_BUCKET")
+	if bucket == "" {
+		t.Skip("set YNF_S3_BUCKET to hold real S3 to the suite")
+	}
+	var n atomic.Int64
+	storetest.Run(t, func(t *testing.T) store.Store {
+		prefix := fmt.Sprintf("conformance/%d-%d-%d", os.Getpid(), time.Now().UnixNano(), n.Add(1))
+		s, err := s3store.Open(context.Background(), "s3://"+bucket+"/"+prefix+"?region="+envOr("AWS_REGION", "us-east-1"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { s3store.RemovePrefix(context.Background(), s) })
+		return s
 	})
+}
+
+func envOr(k, d string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return d
 }
 
 func TestOpenRejectsBadURLs(t *testing.T) {

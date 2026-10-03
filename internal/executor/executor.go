@@ -115,6 +115,8 @@ func (d Docker) Args(j Job, name, network string) ([]string, error) {
 		"GOCACHE":             RunDir + "/cache/go-build",
 		"GOMODCACHE":          RunDir + "/cache/go-mod",
 		"GOLANGCI_LINT_CACHE": RunDir + "/cache/golangci-lint",
+		// Go makes its module cache read-only by default, which leaves run folders nobody can delete.
+		"GOFLAGS": "-modcacherw",
 	}
 	if !j.ImageUser {
 		env["HOME"] = RunDir + "/home"
@@ -268,6 +270,7 @@ func (Process) Run(ctx context.Context, j Job) (Output, error) {
 		"XDG_CACHE_HOME="+cache,
 		"GOCACHE="+filepath.Join(cache, "go-build"),
 		"GOLANGCI_LINT_CACHE="+filepath.Join(cache, "golangci-lint"),
+		"GOFLAGS=-modcacherw",
 	)
 	for _, m := range []map[string]string{j.Env, j.Secrets} {
 		for _, k := range sortedKeys(m) {

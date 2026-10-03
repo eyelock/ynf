@@ -15,8 +15,19 @@ import (
 	"github.com/eyelock/ynf/internal/store"
 )
 
+// Options says what a provider's backend can be held to.
+type Options struct {
+	// NonAtomicCAS marks a backend whose conditional writes are not atomic under concurrency, such
+	// as MinIO: the race is then reported as unverifiable instead of passing by luck. Leases are
+	// not safe on such a backend.
+	NonAtomicCAS string
+}
+
 // Run runs the suite against stores made by open; each subtest gets a fresh store.
-func Run(t *testing.T, open func(t *testing.T) store.Store) {
+func Run(t *testing.T, open func(t *testing.T) store.Store) { RunWith(t, open, Options{}) }
+
+// RunWith is Run with options.
+func RunWith(t *testing.T, open func(t *testing.T) store.Store, opts Options) {
 	t.Run("create only", func(t *testing.T) {
 		s := open(t)
 		ctx := context.Background()
@@ -50,6 +61,9 @@ func Run(t *testing.T, open func(t *testing.T) store.Store) {
 	})
 
 	t.Run("exactly one racer wins", func(t *testing.T) {
+		if opts.NonAtomicCAS != "" {
+			t.Skip("not verifiable on this backend: " + opts.NonAtomicCAS)
+		}
 		s := open(t)
 		ctx := context.Background()
 		v0, _ := s.Put(ctx, "k", []byte("0"), "")
