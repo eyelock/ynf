@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1014,4 +1015,54 @@ func TestAHarnessThatStripsTheKeyIsRefused(t *testing.T) {
 	if b, _ := os.ReadFile(calls); len(b) > 0 {
 		t.Fatalf("the agent was started anyway: %s", b)
 	}
+}
+
+// TestProgressIsLoggedDuringALongRun: a run writes progress lines from its trajectory while it
+// goes, so a long agent run is never silent.
+func TestProgressIsLoggedDuringALongRun(t *testing.T) {
+	h := newHarness(t)
+	dir := t.TempDir()
+	script := `#!/bin/sh
+while [ $# -gt 0 ]; do [ "$1" = --emit-jsonl ] && traj="$2"; shift; done
+echo '{"type":"session_start"}' > "$traj"
+echo '{"type":"turn_start"}' >> "$traj"
+echo '{"type":"turn_start"}' >> "$traj"
+echo '{"type":"sensor_run"}' >> "$traj"
+sleep 1
+gofmt -w ./internal/format
+echo '{"exit_code":0}'
+`
+	_ = os.WriteFile(filepath.Join(dir, "ynh"), []byte(script), 0o755)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	var buf syncBuffer
+	h.e.Log = slog.New(slog.NewTextHandler(&buf, nil))
+	h.e.ProgressEvery = 200 * time.Millisecond
+	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "k"}[k] }
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{`msg="run started"`, `runner=ynh`, `msg="run in progress"`, `turns=2 last=sensor_run`, `msg="run finished"`, `outcome=converged exit=0`, `msg=action item=item/github/o/r/issues/1 action=open_pr ok=true`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+type syncBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }

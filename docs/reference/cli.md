@@ -11,6 +11,8 @@ ynf [global flags] <command> [flags]
 | `--config <path>` | `config.yaml` in `~/.agents/factory/`, `~/.ynh/ynf/`, `~/.ynm/ynf/` or `~/.ynf/` | The config file. `YNF_CONFIG` is the fallback. |
 | `--format text\|json` | `text` | `json` prints one object per command. `YNF_FORMAT` is the fallback. |
 | `--interactive` | off | Allows the uncontained `process` executor (ADR-007). |
+| `--log-file <path>` | none | Also write the log to this file, as it happens. `YNF_LOG_FILE` is the fallback. |
+| `--log-format text\|json` | `text` | `text` is logfmt for people; `json` is one object per line for tools. `YNF_LOG_FORMAT` is the fallback. |
 | `-v` | off | Debug logging to stderr. |
 
 An item is named `owner/name#number`, or by its key, `item/github/<owner>/<name>/issues/<number>`.
@@ -35,6 +37,10 @@ An item is named `owner/name#number`, or by its key, `item/github/<owner>/<name>
 | `ynf resume <lane> --reason <text> [--repo <owner/name>]` | Resumes a lane, with a reason, also recorded: stop conditions are changed deliberately (ADR-010). |
 | `ynf stats [--lane <name>]...` | Every lane's items, proposals, merged, rejected, yield, whether it is paused and why, and its top failure signatures. |
 | `ynf replay <item> [--policy <file>]` | Recomputes every recorded decision, under the recorded lane or the same-named lane in `<file>`, and says which differ. |
+
+## What the log shows
+
+Every decision (`decided`: item, event, state, reason), every run (`run started`: lane, runner, executor, image, attempt; `run in progress` every 30 seconds: elapsed, turns and the latest event from the runner's trajectory; `run finished`: outcome, exit, duration, files changed, hosts denied) and every forge action (`action`: what, ok, detail). A long agent run is never silent.
 
 ## Exit codes
 

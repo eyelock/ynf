@@ -7,11 +7,13 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,13 +117,14 @@ func run(root, repo string, lanes []string, timeout time.Duration) error {
 		return err
 	}
 
-	args := []string{"--config", cfg, "--format", "json", "sweep", "--until-settled", "--interval", "10s", "--timeout", timeout.String()}
+	logPath := filepath.Join(tmp, "ynf.log")
+	args := []string{"--config", cfg, "--format", "json", "--log-file", logPath, "sweep", "--until-settled", "--interval", "10s", "--timeout", timeout.String()}
 	for _, l := range lanes {
 		args = append(args, "--lane", l)
 	}
-	fmt.Printf("running ynf %s\n", strings.Join(lanes, ", "))
+	fmt.Printf("running ynf %s\nynf log (also below as it happens): %s\n\n", strings.Join(lanes, ", "), logPath)
 	start := time.Now()
-	out, err := sh("", ynf, args...)
+	out, err := stream(ynf, args...)
 	if err != nil {
 		return fmt.Errorf("ynf sweep: %w\n%s", err, out)
 	}
@@ -255,6 +258,29 @@ func issueNumbers(repo string) (map[string]int, error) {
 }
 
 func sh(dir, name string, args ...string) (string, error) { return shEnv(dir, nil, name, args...) }
+
+// stream runs a command, returning its stdout and showing its stderr (ynf's log) as it happens,
+// indented under the e2e output.
+func stream(name string, args ...string) (string, error) {
+	c := exec.Command(name, args...)
+	var stdout bytes.Buffer
+	c.Stdout = &stdout
+	pr, pw := io.Pipe()
+	c.Stderr = pw
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sc := bufio.NewScanner(pr)
+		sc.Buffer(make([]byte, 64*1024), 1024*1024)
+		for sc.Scan() {
+			fmt.Println("  │ " + sc.Text())
+		}
+	}()
+	err := c.Run()
+	_ = pw.Close()
+	<-done
+	return stdout.String(), err
+}
 
 func shEnv(dir string, env []string, name string, args ...string) (string, error) {
 	c := exec.Command(name, args...)
