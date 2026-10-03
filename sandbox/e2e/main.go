@@ -84,6 +84,15 @@ func run(root, repo string, lanes []string, timeout time.Duration) error {
 	if out, err := sh(filepath.Dir(root), "go", "build", "-o", ynf, "./cmd/ynf"); err != nil {
 		return fmt.Errorf("build ynf: %w\n%s", err, out)
 	}
+	// The docker executor's egress proxy is a linux ynf, found beside ynf.
+	arch, err := sh("", "docker", "version", "--format", "{{.Server.Arch}}")
+	if err != nil {
+		return fmt.Errorf("docker: %w", err)
+	}
+	arch = strings.TrimSpace(arch)
+	if out, err := shEnv(filepath.Dir(root), []string{"GOOS=linux", "GOARCH=" + arch, "CGO_ENABLED=0"}, "go", "build", "-o", ynf+"-linux-"+arch, "./cmd/ynf"); err != nil {
+		return fmt.Errorf("build linux ynf: %w\n%s", err, out)
+	}
 	cfg := filepath.Join(tmp, "config.yaml")
 	if err := os.WriteFile(cfg, fmt.Appendf(nil, "version: 1\nrepos: [%s]\npoll: {ci: 15s, review: 1m}\n", repo), 0o644); err != nil {
 		return err
@@ -205,9 +214,14 @@ func issueNumbers(repo string) (map[string]int, error) {
 	return m, nil
 }
 
-func sh(dir, name string, args ...string) (string, error) {
+func sh(dir, name string, args ...string) (string, error) { return shEnv(dir, nil, name, args...) }
+
+func shEnv(dir string, env []string, name string, args ...string) (string, error) {
 	c := exec.Command(name, args...)
 	c.Dir = dir
+	if env != nil {
+		c.Env = append(os.Environ(), env...)
+	}
 	var stdout, stderr bytes.Buffer
 	c.Stdout, c.Stderr = &stdout, &stderr
 	if err := c.Run(); err != nil {

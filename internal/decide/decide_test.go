@@ -242,3 +242,13 @@ func TestEdgeEvents(t *testing.T) {
 		t.Errorf("string list of changes: %v", d.Actions)
 	}
 }
+
+func TestEgressDenialsAreSignatures(t *testing.T) {
+	lane := lanes(t).Lanes["lint-paydown"]
+	d := decide.Decide(decide.Input{Lane: lane, Item: item.Item{State: item.Running}, Facts: facts.Facts{Ticket: open()},
+		Event: ev(event.RunFinished, map[string]any{"outcome": "converged", "changed": []any{"a.go"}, "denied": []any{"www.iana.org", "sum.golang.org"}}),
+		Poll:  decide.Poll{CI: time.Minute}})
+	if d.Item.Counter("sig/egress/denied/www.iana.org") != 1 || d.Item.Counter("sig/egress/denied/sum.golang.org") != 1 {
+		t.Fatalf("%v", d.Item.Counters)
+	}
+}

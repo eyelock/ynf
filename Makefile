@@ -13,12 +13,15 @@ COVERAGE    ?= 80
 
 check: fmt-check vet lint cover
 
+# bin/ynf for this machine, plus static linux builds the docker executor runs as its egress proxy.
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/ynf ./cmd/ynf
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/ynf-linux-arm64 ./cmd/ynf
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/ynf-linux-amd64 ./cmd/ynf
 
 install: build
 	@mkdir -p $(INSTALL_DIR)
-	cp bin/ynf $(INSTALL_DIR)/ynf
+	cp bin/ynf bin/ynf-linux-arm64 bin/ynf-linux-amd64 $(INSTALL_DIR)/
 	@echo "installed ynf $(VERSION) to $(INSTALL_DIR)"
 
 test:

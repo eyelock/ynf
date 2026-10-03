@@ -118,6 +118,9 @@ func (d *decider) running() {
 			ID: ev.Str("run_id"), Outcome: ev.Str("outcome"), Detail: ev.Str("detail"),
 			Changed: stringList(ev.Data["changed"]), Finished: d.now,
 		}
+		for _, host := range stringList(ev.Data["denied"]) {
+			it.Bump("sig/egress/denied/" + host)
+		}
 		outcome := it.LastRun.Outcome
 		if outcome == "converged" {
 			if len(it.LastRun.Changed) == 0 {

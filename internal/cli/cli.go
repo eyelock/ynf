@@ -19,7 +19,6 @@ import (
 	"github.com/eyelock/ynf/internal/config"
 	"github.com/eyelock/ynf/internal/decide"
 	"github.com/eyelock/ynf/internal/engine"
-	"github.com/eyelock/ynf/internal/executor"
 	"github.com/eyelock/ynf/internal/forge"
 	"github.com/eyelock/ynf/internal/store/sqlite"
 	"github.com/eyelock/ynf/internal/workspace"
@@ -48,6 +47,7 @@ Usage:
   ynf items ls
   ynf items show|log|retry|release <owner/name#number | key>
   ynf replay <owner/name#number | key> [--policy lanes.yaml]
+  ynf egress-proxy --allow host,*.domain [--listen :3128] [--log file]   (run inside a container)
 
 Global flags (before the command):
   --config <path>   config file (default: config.yaml in ~/.agents/factory/ or a fallback)
@@ -108,6 +108,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = a.items(ctx, rest)
 	case "replay":
 		err = a.replay(ctx, rest)
+	case "egress-proxy":
+		err = a.egressProxy(ctx, rest)
 	case "help", "-h", "--help":
 		_, _ = fmt.Fprint(stdout, usage)
 		return ExitOK
@@ -237,7 +239,7 @@ func (a *app) engine() (*engine.Engine, error) {
 	a.eng = &engine.Engine{
 		Store: st, Forge: fg,
 		Git:         workspace.Workspace{Root: c.WorkPath(), Token: token, Author: workspace.Author{Name: name, Email: email}},
-		Executor:    executor.For,
+		Executor:    a.executor,
 		Repos:       c.Repos,
 		Lanes:       a.lanes,
 		WorkDir:     c.WorkPath(),

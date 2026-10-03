@@ -54,6 +54,7 @@ type RunRecord struct {
 	Outcome  string   `json:"outcome"`
 	Detail   string   `json:"detail,omitempty"`
 	Changed  []string `json:"changed,omitempty"`
+	Denied   []string `json:"denied,omitempty"` // hosts the egress proxy refused
 	StepDir  string   `json:"step_dir"`
 	Duration string   `json:"duration"`
 }
@@ -227,7 +228,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		s.run = &rec
 		s.recordRun(it.Key, rec)
 		return s.event(event.RunFinished, it, map[string]any{
-			"run_id": runID, "outcome": rec.Outcome, "detail": rec.Detail, "changed": anyList(rec.Changed),
+			"run_id": runID, "outcome": rec.Outcome, "detail": rec.Detail, "changed": anyList(rec.Changed), "denied": anyList(rec.Denied),
 		})
 	}
 	fail := func(outcome string, err error) event.Event {
@@ -292,7 +293,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 
 	start := e.Now()
 	out, err := ex.Run(s.ctx, job)
-	rec := RunRecord{Runner: r.Name(), Executor: ex.Name(), Argv: argv, Base: base, StepDir: stepDir}
+	rec := RunRecord{Runner: r.Name(), Executor: ex.Name(), Argv: argv, Base: base, StepDir: stepDir, Denied: out.Denied}
 	_ = os.WriteFile(filepath.Join(runDir, "stdout"), out.Stdout, 0o644)
 	_ = os.WriteFile(filepath.Join(runDir, "stderr"), out.Stderr, 0o644)
 	switch {

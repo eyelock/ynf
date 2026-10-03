@@ -91,7 +91,12 @@ derived from the run's backend rather than declared by the harness (default, 202
 
 Running a harness in a lane is where a mismatch shows up, so it has to show up legibly rather than
 as a timeout three tools deep. Egress goes through an allow-list proxy in the executor that logs
-every denial. A run with denials records them in its step log, and each denied host becomes a
+every denial. With docker, a lane that allows no hosts runs with `--network none`; one that
+allows hosts runs on a per-run `--internal` network, which has no route out, beside a proxy
+container (ynf itself, `ynf egress-proxy`) that is the only thing attached to both that network
+and the outside. The proxy is reached through the standard `HTTP(S)_PROXY` variables; a tool that
+ignores them simply cannot connect. Every job container also drops all capabilities, cannot gain
+privileges, and is named, so a run whose lease is lost is removed rather than left running. A run with denials records them in its step log, and each denied host becomes a
 failure signature, `sig/egress/denied/<host>` (ADR-008). A lane that keeps hitting the same
 denial says exactly which line to add, or which harness behaviour to question.
 

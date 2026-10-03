@@ -16,7 +16,7 @@ carried out today.
 | `run.runner` | `command` or `ynh` | `command`; `ynh` builds its command but needs an image with ynh in it |
 | `run.executor` | `docker`, `process`, `ecs`, `k8s-job`, `ci-inline` | `docker`; `process` with `--interactive` |
 | `run.image` | The container image a command runs in | yes |
-| `run.egress.allow` | Hosts a run may reach | an empty list (no network); a non-empty list waits for the egress proxy and fails the run as `operator_error` |
+| `run.egress.allow` | Hosts a run may reach | yes: an empty list is no network at all; otherwise an internal network whose only way out is ynf's allow-list proxy. Each denied host is recorded on the run and counted as `sig/egress/denied/<host>` |
 | `run.command.argv` | The command, run without a shell; `{label.<prefix>}`, `{task_file}`, `{run_dir}` are filled in | yes |
 | `run.command.result_file` | A file the command writes with `{outcome, detail, model, session}` | yes |
 | `run.ynh` | `harness`, `focus`, `profile`, `sandbox`, `budgets`, `sensor_scope` | built into the command; see `run.runner` |
