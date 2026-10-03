@@ -24,6 +24,7 @@ type PR struct {
 	Draft            bool    `json:"draft"`
 	Fork             bool    `json:"fork"`
 	HeadSHA          string  `json:"head_sha"`
+	HeadRef          string  `json:"head_ref"`
 	Checks           []Check `json:"checks"`
 	ChangesRequested bool    `json:"changes_requested"`
 	Approved         bool    `json:"approved"`

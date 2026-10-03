@@ -75,9 +75,21 @@ lanes:
   adopt:
     kind: adopt
     intake: [{github.search: "label:ynf:adopt", every: 5m}]
+    guards: {eligible: 'facts.pr.ci == "failure"'}
     run:
       runner: command
-      command: {argv: ["true"]}
+      command:
+        argv:
+          - sh
+          - -c
+          - |
+            if [ -n "$RACE_REMOTE" ] && [ ! -f "$RACE_REMOTE.moved" ]; then
+              touch "$RACE_REMOTE.moved"
+              git -c user.name=author -c user.email=a@a commit -q --allow-empty -m "the author pushes meanwhile"
+              git push -q "$RACE_REMOTE" HEAD:refs/heads/human/x
+              git reset -q --hard HEAD~1
+            fi
+            gofmt -w ./internal/format
     when: {converged: push_commit}
   off:
     kind: originate
@@ -483,13 +495,6 @@ func TestRunnerReportedModelAndSessionBecomeTrailers(t *testing.T) {
 func TestUnsupportedIntakesAndRemovedLanes(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	h.f.labels[8] = []string{"ynf:adopt"}
-	if err := h.e.Sweep(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if items, _ := h.e.Items(ctx); len(items) != 0 {
-		t.Fatalf("adopt lanes should not track anything yet: %+v", items)
-	}
 
 	// An item whose lane was deleted from the policy is treated as switched off.
 	key := item.IssueKey("o/r", 9)
@@ -672,5 +677,105 @@ func TestYnhInAContainerNeedsAnImage(t *testing.T) {
 	_ = h2.e.Sweep(ctx)
 	if it := h2.item(t, 1); it.LastRun == nil || !strings.Contains(it.LastRun.Detail, "build agent image: no base image") {
 		t.Fatalf("%+v", it.LastRun)
+	}
+}
+
+// prBranch pushes a branch with unformatted code to the remote, as an author's pull request.
+func (h *harness) prBranch(t *testing.T) string {
+	t.Helper()
+	src := filepath.Join(t.TempDir(), "src")
+	git(t, "", "clone", "-q", h.remote, src)
+	git(t, src, "checkout", "-q", "-b", "human/x")
+	if err := os.WriteFile(filepath.Join(src, "internal/format/g.go"), []byte("package format\nfunc G( ) int { return 2 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, src, "add", "-A")
+	git(t, src, "-c", "user.name=author", "-c", "user.email=a@a", "commit", "-q", "-m", "author's change")
+	git(t, src, "push", "-q", "origin", "human/x")
+	return strings.TrimSpace(git(t, src, "rev-parse", "HEAD"))
+}
+
+func (h *harness) adoptPR(t *testing.T, head string) {
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	h.f.labels[8] = []string{"ynf:adopt"}
+	h.f.prs[8] = &facts.PR{Number: 8, State: "open", HeadRef: "human/x", HeadSHA: head,
+		Checks: []facts.Check{{Name: "lint", Status: "completed", Conclusion: "failure", Required: true}}}
+}
+
+func TestAdoptPushesACommitOnTheAuthorsBranch(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	head := h.prBranch(t)
+	h.adoptPR(t, head)
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	it, _, err := lease.Load(ctx, h.e.Store, item.PRKey("o/r", 8))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it.State != item.Proposed || it.PR != 8 || it.Branch != "human/x" {
+		t.Fatalf("%s %s %+v", it.State, it.Reason, it)
+	}
+	log := git(t, h.remote, "log", "--format=%an|%s", "human/x")
+	lines := strings.Split(strings.TrimSpace(log), "\n")
+	if len(lines) < 3 || !strings.HasPrefix(lines[0], "ynf|ynf(adopt)") || lines[1] != "author|author's change" {
+		t.Fatalf("ynf's commit should sit on top of the author's, never replace it:\n%s", log)
+	}
+	if body := git(t, h.remote, "show", "human/x:internal/format/g.go"); !strings.Contains(body, "func G() int") {
+		t.Fatalf("not formatted:\n%s", body)
+	}
+	if len(h.f.opened) != 0 {
+		t.Fatal("adoption must not open a pull request")
+	}
+	found := false
+	for _, c := range h.f.comments {
+		found = found || (strings.HasPrefix(c, "#8 ") && strings.Contains(c, "stays yours"))
+	}
+	if !found {
+		t.Fatalf("no comment on the pull request: %q", h.f.comments)
+	}
+}
+
+func TestAdoptStartsAgainWhenTheAuthorPushesMeanwhile(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	head := h.prBranch(t)
+	h.adoptPR(t, head)
+	t.Setenv("RACE_REMOTE", h.remote)
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	it, _, _ := lease.Load(ctx, h.e.Store, item.PRKey("o/r", 8))
+	if it.State != item.Proposed || it.Counter("head_moved") != 1 {
+		t.Fatalf("%s %s counters=%v", it.State, it.Reason, it.Counters)
+	}
+	log := git(t, h.remote, "log", "--format=%an|%s", "human/x")
+	if !strings.Contains(log, "author|the author pushes meanwhile") || !strings.HasPrefix(log, "ynf|") {
+		t.Fatalf("the author's racing commit must survive, with ynf's on top:\n%s", log)
+	}
+	entries, _ := h.e.Store.Log(ctx, item.PRKey("o/r", 8))
+	moved := false
+	for _, e := range entries {
+		moved = moved || (e.Kind == "action" && strings.Contains(string(e.Body), "moved from"))
+	}
+	if !moved {
+		t.Fatal("the refused push was not recorded")
+	}
+}
+
+func TestAdoptWaitsWhileCIIsGreen(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	head := h.prBranch(t)
+	h.adoptPR(t, head)
+	h.f.setChecks(8, "success")
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	it, _, _ := lease.Load(ctx, h.e.Store, item.PRKey("o/r", 8))
+	if it.State != item.Intake || it.NextDue == nil {
+		t.Fatalf("a green pull request should be watched, not adopted or ignored: %s %s", it.State, it.Reason)
 	}
 }

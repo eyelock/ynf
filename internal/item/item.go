@@ -100,6 +100,19 @@ func IssueKey(repo string, number int) string {
 	return fmt.Sprintf("item/github/%s/issues/%d", repo, number)
 }
 
+// PRKey is the store key for an adopted GitHub pull request's item.
+func PRKey(repo string, number int) string {
+	return fmt.Sprintf("item/github/%s/pulls/%d", repo, number)
+}
+
+// Subject is the event subject for an item.
+func (it Item) Subject() string {
+	if it.Kind == "adopt" {
+		return fmt.Sprintf("github:pr:%s#%d", it.Repo, it.Number)
+	}
+	return IssueSubject(it.Repo, it.Number)
+}
+
 // IssueSubject is the event subject for a GitHub issue.
 func IssueSubject(repo string, number int) string {
 	return fmt.Sprintf("github:issue:%s#%d", repo, number)

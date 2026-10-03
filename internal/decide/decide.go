@@ -17,10 +17,11 @@ import (
 
 // Action kinds the engine carries out. Each is idempotent per step (ADR-005).
 const (
-	Run        = "run"        // start the lane's runner on a fresh worktree
-	OpenPR     = "open_pr"    // diff gate, commit with trailers, push, open or update the pull request
-	Escalate   = "escalate"   // tell a human, on the ticket
-	Quarantine = "quarantine" // tell a human the item was taken out of rotation
+	Run        = "run"         // start the lane's runner on a fresh worktree
+	OpenPR     = "open_pr"     // diff gate, commit with trailers, push, open or update the pull request
+	PushCommit = "push_commit" // adopted items: diff gate, commit, push to the pull request's branch, never forced
+	Escalate   = "escalate"    // tell a human, on the ticket
+	Quarantine = "quarantine"  // tell a human the item was taken out of rotation
 	Comment    = "comment"
 	Close      = "close"
 )
@@ -83,6 +84,10 @@ func (d *decider) decide() {
 
 	switch it.State {
 	case "", item.Intake:
+		if it.Kind == "adopt" {
+			d.intakeAdopted()
+			return
+		}
 		ok, err := policy.Guard(lane.Guards.Eligible, f.CEL(), d.itemCEL())
 		switch {
 		case err != nil:
@@ -106,6 +111,47 @@ func (d *decider) decide() {
 	case item.Escalated, item.Quarantined, item.Done, item.Closed, item.Ignored:
 		d.reason = fmt.Sprintf("%s: nothing to do without a human (%s)", it.State, ev.Type)
 		it.NextDue = nil
+	}
+}
+
+// intakeAdopted decides whether to take on someone else's pull request (ADR-002, ADR-007). A pull
+// request that is not eligible yet (say its checks are still running) is looked at again later
+// rather than ignored; a fork or a draft is never adopted.
+func (d *decider) intakeAdopted() {
+	it, lane, pr := &d.it, d.in.Lane, d.in.Facts.PR
+	switch {
+	case pr == nil:
+		d.escalate("pull request #%d is gone", it.Number)
+		return
+	case pr.Merged || pr.State == "closed":
+		d.to(item.Closed, "#%d is no longer open", pr.Number)
+		return
+	case pr.Fork:
+		d.to(item.Ignored, "#%d comes from a fork; ynf does not push to forks", pr.Number)
+		return
+	case pr.Draft:
+		it.State = item.Intake
+		d.reason = fmt.Sprintf("#%d is a draft; waiting", pr.Number)
+		d.wake(d.in.Poll.Review)
+		return
+	}
+	ok, err := policy.Guard(lane.Guards.Eligible, d.in.Facts.CEL(), d.itemCEL())
+	switch {
+	case err != nil:
+		d.escalate("eligibility guard failed: %v", err)
+	case !ok:
+		it.State = item.Intake
+		d.reason = fmt.Sprintf("#%d is not eligible for lane %s yet", pr.Number, lane.Name)
+		d.wake(d.in.Poll.Review)
+	default:
+		it.Branch, it.PRHead = pr.HeadRef, pr.HeadSHA
+		feedback := ""
+		if failed := pr.Failed(); len(failed) > 0 {
+			feedback = "These checks are failing on the pull request: " + strings.Join(failed, ", ")
+		}
+		it.Feedback = feedback
+		d.to(item.Ready, "adopting #%d (%s at %.7s)", pr.Number, pr.HeadRef, pr.HeadSHA)
+		d.wake(0)
 	}
 }
 
@@ -134,16 +180,29 @@ func (d *decider) running() {
 		d.react("outcome."+outcome, Escalate, fmt.Sprintf("The previous run ended %s: %s", outcome, it.LastRun.Detail))
 
 	case event.ActionDone:
-		if ev.Str("action") != OpenPR {
-			d.reason = "action " + ev.Str("action") + " done"
+		action := ev.Str("action")
+		if action != OpenPR && action != PushCommit {
+			d.reason = "action " + action + " done"
 			return
 		}
 		if !ev.Bool("ok") {
+			if ev.Bool("head_moved") {
+				// The author pushed while ynf worked: start again from their new head.
+				if n := it.Bump("head_moved"); n > lane.Attempts {
+					d.escalate("the pull request's head kept moving (%d times)", n)
+					return
+				}
+				d.to(item.Ready, "the head moved while ynf worked; starting again from the new head")
+				d.wake(0)
+				return
+			}
 			d.escalate("could not propose the change: %s", ev.Str("reason"))
 			return
 		}
-		it.PR = int(num(ev.Data["pr"]))
-		it.Branch = ev.Str("branch")
+		if action == OpenPR {
+			it.PR = int(num(ev.Data["pr"]))
+			it.Branch = ev.Str("branch")
+		}
 		it.PRHead = ev.Str("head")
 		it.Feedback = ""
 		d.to(item.Proposed, "proposed as #%d", it.PR)
@@ -225,9 +284,13 @@ func (d *decider) react(key, def, feedback string) {
 func (d *decider) act(action, format string, args ...any) {
 	reason := fmt.Sprintf(format, args...)
 	switch action {
-	case OpenPR:
+	case OpenPR, PushCommit:
+		if (action == PushCommit) != (d.it.Kind == "adopt") {
+			d.escalate("%s: %s is for %s items, and this one is %s", reason, action, map[string]string{OpenPR: "originated", PushCommit: "adopted"}[action], orDefault(d.it.Kind, "originate"))
+			return
+		}
 		d.reason = reason + ": proposing the change"
-		d.actions = append(d.actions, Action{Kind: OpenPR})
+		d.actions = append(d.actions, Action{Kind: action})
 		d.it.NextDue = nil
 	case Quarantine:
 		d.quarantine("%s", reason)
@@ -237,7 +300,7 @@ func (d *decider) act(action, format string, args ...any) {
 	case Comment:
 		d.reason = reason
 		d.actions = append(d.actions, Action{Kind: Comment, Reason: reason})
-	default: // escalate, and anything this slice does not carry out yet (push_commit, request_review)
+	default: // escalate, and anything not carried out yet (request_review)
 		if action != Escalate {
 			reason = fmt.Sprintf("%s (%s is not supported yet)", reason, action)
 		}

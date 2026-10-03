@@ -122,3 +122,35 @@ func TestErrors(t *testing.T) {
 		t.Fatal("default remote should be GitHub")
 	}
 }
+
+func TestFastForwardOnly(t *testing.T) {
+	ctx := context.Background()
+	bare := remote(t)
+	w := workspace.Workspace{Root: t.TempDir(), RemoteURL: func(string) string { return bare }}
+	mirror, _ := w.Mirror(ctx, "o/r")
+	a, _ := w.Worktree(ctx, mirror, "main", filepath.Join(t.TempDir(), "a"))
+	b, _ := w.Worktree(ctx, mirror, "main", filepath.Join(t.TempDir(), "b"))
+	base, err := w.Head(ctx, a)
+	if err != nil || len(base) != 40 {
+		t.Fatalf("%q %v", base, err)
+	}
+	if tip, _ := w.RemoteSHA(ctx, mirror, "main"); tip != base {
+		t.Fatalf("remote tip %s, head %s", tip, base)
+	}
+	for _, wt := range []string{a, b} {
+		_ = os.WriteFile(filepath.Join(wt, "from_"+filepath.Base(wt)+".go"), []byte("package a\n"), 0o644)
+		_, _ = w.Changed(ctx, wt)
+		if _, err := w.Commit(ctx, wt, "from "+filepath.Base(wt)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.PushFastForward(ctx, a, "o/r", "main"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.PushFastForward(ctx, b, "o/r", "main"); err == nil {
+		t.Fatal("a push that would overwrite someone else's commit succeeded")
+	}
+	if _, err := w.RemoteSHA(ctx, mirror, "no-such-branch"); err == nil {
+		t.Fatal("missing branch")
+	}
+}

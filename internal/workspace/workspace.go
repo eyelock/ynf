@@ -104,6 +104,25 @@ func (w Workspace) Commit(ctx context.Context, wt, message string) (string, erro
 	return strings.TrimSpace(out), err
 }
 
+// Head returns the worktree's HEAD commit.
+func (w Workspace) Head(ctx context.Context, wt string) (string, error) {
+	out, err := w.git(ctx, wt, "rev-parse", "HEAD")
+	return strings.TrimSpace(out), err
+}
+
+// RemoteSHA returns origin's branch tip as of the last fetch.
+func (w Workspace) RemoteSHA(ctx context.Context, mirror, branch string) (string, error) {
+	out, err := w.git(ctx, mirror, "rev-parse", "refs/remotes/origin/"+branch)
+	return strings.TrimSpace(out), err
+}
+
+// PushFastForward pushes HEAD to branch only if that is a fast-forward: the push to someone else's
+// branch, which must never overwrite their work (ADR-007).
+func (w Workspace) PushFastForward(ctx context.Context, wt, repo, branch string) error {
+	_, err := w.git(ctx, wt, "push", "-q", w.url(repo), "HEAD:refs/heads/"+branch)
+	return err
+}
+
 // Push force-pushes HEAD to branch. ynf only force-pushes branches it originated; adopted
 // branches are never force-pushed (ADR-007).
 func (w Workspace) Push(ctx context.Context, wt, repo, branch string) error {

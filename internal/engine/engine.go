@@ -31,6 +31,9 @@ type Git interface {
 	Changed(ctx context.Context, wt string) ([]string, error)
 	Commit(ctx context.Context, wt, message string) (string, error)
 	Push(ctx context.Context, wt, repo, branch string) error
+	Head(ctx context.Context, wt string) (string, error)
+	RemoteSHA(ctx context.Context, mirror, branch string) (string, error)
+	PushFastForward(ctx context.Context, wt, repo, branch string) error
 }
 
 // Engine runs steps.
@@ -183,10 +186,6 @@ func (e *Engine) sweepLane(ctx context.Context, repo string, lane policy.Lane) e
 			if h.Repo != repo || h.IsPR != (lane.Kind == "adopt") {
 				continue
 			}
-			if lane.Kind == "adopt" {
-				e.log().Warn("adopt lanes are not supported yet", "lane", lane.Name, "pr", h.Number)
-				continue
-			}
 			if err := e.track(ctx, lane, h); err != nil {
 				return err
 			}
@@ -202,6 +201,9 @@ func (e *Engine) track(ctx context.Context, lane policy.Lane, h forge.Hit) error
 		Key: item.IssueKey(h.Repo, h.Number), Kind: lane.Kind, Lane: lane.Name,
 		Repo: h.Repo, Number: h.Number, State: item.Intake, Created: now, Updated: now,
 	}
+	if lane.Kind == "adopt" {
+		it.Key, it.PR = item.PRKey(h.Repo, h.Number), h.Number
+	}
 	switch err := lease.Create(ctx, e.Store, it); {
 	case errors.Is(err, store.ErrConflict):
 		return nil
@@ -209,7 +211,7 @@ func (e *Engine) track(ctx context.Context, lane policy.Lane, h forge.Hit) error
 		return err
 	}
 	e.log().Info("tracking", "item", it.Key, "lane", lane.Name)
-	ev := event.New(e.NewID(), "ynf/search", event.TicketMatched, item.IssueSubject(h.Repo, h.Number), now, map[string]any{"lane": lane.Name})
+	ev := event.New(e.NewID(), "ynf/search", event.TicketMatched, it.Subject(), now, map[string]any{"lane": lane.Name})
 	return e.Handle(ctx, it.Key, ev)
 }
 
@@ -230,7 +232,7 @@ func (e *Engine) RunDue(ctx context.Context) (int, error) {
 		if !e.wantLane(it.Lane) {
 			continue
 		}
-		ev := event.New(e.NewID(), "ynf/timer", event.TimerDue, item.IssueSubject(it.Repo, it.Number), e.Now(), nil)
+		ev := event.New(e.NewID(), "ynf/timer", event.TimerDue, it.Subject(), e.Now(), nil)
 		if err := e.Handle(ctx, k, ev); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", k, err))
 		}

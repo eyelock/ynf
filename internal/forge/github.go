@@ -89,7 +89,7 @@ func (g *GitHub) PullRequest(ctx context.Context, repo string, number int) (*fac
 	p := &facts.PR{
 		Number: number, State: pr.GetState(), Merged: pr.GetMerged(), Draft: pr.GetDraft(),
 		Fork:    pr.GetHead().GetRepo().GetFullName() != pr.GetBase().GetRepo().GetFullName(),
-		HeadSHA: pr.GetHead().GetSHA(),
+		HeadSHA: pr.GetHead().GetSHA(), HeadRef: pr.GetHead().GetRef(),
 	}
 	required := g.required(ctx, o, r, pr.GetBase().GetRef())
 

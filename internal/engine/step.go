@@ -116,6 +116,7 @@ type step struct {
 
 	mirror string
 	wt     string
+	base   string // the commit the run started from
 	run    *RunRecord
 	result runner.Result
 	text   forge.Text
@@ -175,7 +176,7 @@ func (s *step) decideAndAct(ev event.Event) (*event.Event, error) {
 }
 
 func (s *step) event(typ string, it item.Item, data map[string]any) event.Event {
-	return event.New(s.e.NewID(), "ynf/step/"+s.id, typ, item.IssueSubject(it.Repo, it.Number), s.e.Now(), data)
+	return event.New(s.e.NewID(), "ynf/step/"+s.id, typ, it.Subject(), s.e.Now(), data)
 }
 
 func (s *step) probe(it item.Item) (facts.Facts, error) {
@@ -205,6 +206,9 @@ func (s *step) act(a decide.Action, it item.Item, rp *RepoPolicy, lane policy.La
 		return &ev, nil
 	case decide.OpenPR:
 		ev := s.openPR(it, rp, lane)
+		return &ev, nil
+	case decide.PushCommit:
+		ev := s.pushCommit(it, lane)
 		return &ev, nil
 	case decide.Escalate, decide.Quarantine, decide.Comment, decide.Close:
 		verb := map[string]string{decide.Escalate: "escalated this", decide.Quarantine: "quarantined this", decide.Comment: "notes", decide.Close: "closed this"}[a.Kind]
@@ -252,7 +256,13 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		return fail(runner.Error, err)
 	}
 	base := rp.Base
-	if feedback != "" && it.Branch != "" && e.Git.RemoteHas(s.ctx, mirror, it.Branch) {
+	switch {
+	case it.Kind == "adopt":
+		base = it.Branch // the author's branch, as it is now
+		if !e.Git.RemoteHas(s.ctx, mirror, base) {
+			return fail(runner.Error, fmt.Errorf("the pull request's branch %s is gone", base))
+		}
+	case feedback != "" && it.Branch != "" && e.Git.RemoteHas(s.ctx, mirror, it.Branch):
 		base = it.Branch // resume from what was proposed, with the feedback
 	}
 	if s.wt != "" {
@@ -272,6 +282,9 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		return fail(runner.Error, err)
 	}
 	s.mirror, s.wt = mirror, wt
+	if s.base, err = e.Git.Head(s.ctx, wt); err != nil {
+		return fail(runner.Error, err)
+	}
 
 	if err := os.WriteFile(filepath.Join(runDir, "task.md"), []byte(task(it, s.text, feedback)), 0o644); err != nil {
 		return fail(runner.Error, err)
@@ -405,6 +418,50 @@ func (s *step) openPR(it item.Item, rp *RepoPolicy, lane policy.Lane) event.Even
 	}
 	_ = e.Forge.Comment(s.ctx, it.Repo, it.Number, marker(s.id, decide.OpenPR), fmt.Sprintf("**ynf** proposed #%d.", n))
 	return done(true, "", map[string]any{"pr": n, "branch": branch, "head": sha})
+}
+
+// pushCommit adds this step's change to an adopted pull request's branch: gated, never forced, and
+// only if the author has not pushed since the run started (ADR-007).
+func (s *step) pushCommit(it item.Item, lane policy.Lane) event.Event {
+	e := s.e
+	done := func(ok bool, detail string, data map[string]any) event.Event {
+		rec := ActionRecord{Action: decide.PushCommit, OK: ok, Detail: detail, PR: it.PR}
+		if data == nil {
+			data = map[string]any{}
+		}
+		rec.Commit, _ = data["head"].(string)
+		s.recordAction(it.Key, rec)
+		data["action"], data["ok"], data["reason"] = decide.PushCommit, ok, detail
+		return s.event(event.ActionDone, it, data)
+	}
+	if s.wt == "" || s.run == nil {
+		return done(false, "no change from this step to propose", nil)
+	}
+	if err := gate.Check(s.run.Changed, lane.PR.AllowedPaths, lane.PR.ProtectedPaths); err != nil {
+		return done(false, err.Error(), nil)
+	}
+	if _, err := e.Git.Mirror(s.ctx, it.Repo); err != nil {
+		return done(false, err.Error(), nil)
+	}
+	if tip, err := e.Git.RemoteSHA(s.ctx, s.mirror, it.Branch); err != nil || tip != s.base {
+		return done(false, fmt.Sprintf("%s moved from %.7s to %.7s while ynf worked", it.Branch, s.base, tip), map[string]any{"head_moved": true})
+	}
+	subject := fmt.Sprintf("ynf(%s): %s", lane.Name, s.text.Title)
+	if len(subject) > 72 {
+		subject = subject[:71] + "…"
+	}
+	msg := subject + "\n\n" + fmt.Sprintf("Added by ynf to #%d, lane %s.\n\n", it.Number, lane.Name) + trailers(it, s.id, s.run.RunID, s.result)
+	sha, err := e.Git.Commit(s.ctx, s.wt, msg)
+	if err != nil {
+		return done(false, err.Error(), nil)
+	}
+	if err := e.Git.PushFastForward(s.ctx, s.wt, it.Repo, it.Branch); err != nil {
+		// Someone pushed between the check and the push: never overwrite, start again.
+		return done(false, err.Error(), map[string]any{"head_moved": true})
+	}
+	_ = e.Forge.Comment(s.ctx, it.Repo, it.Number, marker(s.id, decide.PushCommit),
+		fmt.Sprintf("**ynf** added %.7s to this pull request (lane `%s`). The pull request stays yours: review the commit, and merge or revert it as you would any other.", sha, lane.Name))
+	return done(true, "", map[string]any{"head": sha})
 }
 
 func (s *step) record(key, kind string, body any) error {

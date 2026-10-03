@@ -9,7 +9,7 @@ carried out today.
 
 | Key | Meaning | Today |
 |---|---|---|
-| `kind` | `originate` (ynf opens the branch and pull request) or `adopt` (someone else's pull request) | `originate`; `adopt` lanes are read and skipped |
+| `kind` | `originate` (ynf opens the branch and pull request) or `adopt` (someone else's pull request) | both. An adopted pull request is watched until its guard holds, never adopted from a fork or while a draft, and gets ynf's commit pushed on top, never forced; if the author pushes while ynf works, ynf starts again from their new head |
 | `enabled` | `false` switches the lane off: its items are tracked and ignored | yes |
 | `intake` | Where work comes from | `github.search`; `jira.search`, webhooks and topics are read and skipped |
 | `guards.eligible` | A CEL expression over structured facts; false means ignored | yes |
@@ -21,7 +21,7 @@ carried out today.
 | `run.command.result_file` | A file the command writes with `{outcome, detail, model, session}` | yes |
 | `run.env` | Variables passed into the run by name, such as the model key; values never logged | yes |
 | `run.ynh` | `harness`, `vendor`, `base`, `focus`, `profile`, `sandbox`, `budgets`, `sensor_scope` | yes; the vendor's API host is allowed through the egress proxy without being listed |
-| `when` | Reactions to `converged`, `ci_failed`, `changes_requested` and `outcome.<name>` | `open_pr`, `escalate`, `quarantine`, `comment`, `close`, `retry`/`then`, `resume_with`/`max`; `push_commit` and `request_review` escalate |
+| `when` | Reactions to `converged`, `ci_failed`, `changes_requested` and `outcome.<name>` | `open_pr` (originate), `push_commit` (adopt), `escalate`, `quarantine`, `comment`, `close`, `retry`/`then`, `resume_with`/`max`; `request_review` escalates |
 | `pr.allowed_paths` | The diff gate refuses changes outside these | yes |
 | `pr.protected_paths` | Refused as well as the built-in protected paths | yes |
 | `pr.draft` | Open pull requests as drafts | yes (default `true`) |
