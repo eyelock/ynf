@@ -169,9 +169,26 @@ jsonschema validation failed with 'https://eyelock.github.io/ynf/schema/lanes.sc
 
 That's the layering again. On its own, the sandbox's file isn't a complete set of lanes: its `deps`
 entry only switches off a lane the configuration repository defines. ynf validates the merged
-result when it reads both, which is what `doctor` and `lanes show` just did. `validate` checks one
-file, so give it one that stands alone. Write the `gofmt` lane into a file of its own; you'll use it
-again in lesson 4:
+result when it reads both, which is what `doctor` and `lanes show` just did. Give `validate` the
+repository and it does the same, so you can check a change to a repository's lanes before you
+push it:
+
+```bash
+ynf lanes validate --repo <you>/ynf-sandbox --file ~/ynf-tutorial/lanes.yaml
+```
+
+Expected:
+
+```text
+/Users/you/ynf-tutorial/lanes.yaml: valid, 1 lanes (deps)
+merged over config@998570c of <you>/ynf-sandbox-factory
+```
+
+The file alone failed; merged over the configuration repository's lanes it is valid. Errors in
+the merged result are reported the same way as above, naming the key that is wrong.
+
+Lesson 4 replays a ticket under a changed lane, so write the `gofmt` lane into a file of its own
+now. It is a whole lane, so it validates on its own too:
 
 ```bash
 cat > ~/ynf-tutorial/gofmt.yaml <<'EOF'

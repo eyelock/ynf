@@ -2053,3 +2053,39 @@ func TestAFailedTicketCommentIsLogged(t *testing.T) {
 		t.Fatalf("the failed comment was not logged:\n%s", logged.String())
 	}
 }
+
+// TestPolicyWithLayer: a repository's lanes given as bytes are laid over the configuration
+// repository's like the ones read from the forge, and nothing is cached.
+func TestPolicyWithLayer(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.e.ConfigRepo = "acme/factory"
+	h.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\n"))
+	h.f.setFile("acme/factory", ".agents/factory/lanes.yaml", []byte(`version: 1
+lanes:
+  agent:
+    kind: originate
+    intake: [{github.search: "label:ynf:agent", every: 5m}]
+    run: {runner: command, command: {argv: ["true"]}}
+    when: {converged: open_pr}
+`))
+	rp, err := h.e.PolicyWithLayer(ctx, "o/r", []byte("version: 1\nlanes:\n  agent:\n    enabled: false\n"))
+	if err != nil || rp.Config == nil || rp.File.Lanes["agent"].Enabled == nil || *rp.File.Lanes["agent"].Enabled {
+		t.Fatalf("%+v %v", rp, err)
+	}
+	if _, err := h.e.PolicyWithLayer(ctx, "o/r", []byte("version: 1\nlanes:\n  agent:\n    kind: nonsense\n")); err == nil || !strings.Contains(err.Error(), "schema") {
+		t.Fatalf("invalid merged: %v", err)
+	}
+	if _, err := h.e.PolicyWithLayer(ctx, "o/r", []byte("lanes: [")); err == nil {
+		t.Fatal("not YAML")
+	}
+	none := newHarness(t)
+	if _, err := none.e.PolicyWithLayer(ctx, "o/r", nil); err == nil {
+		t.Fatal("no lanes anywhere")
+	}
+	h.e.ConfigRepo = "acme/missing"
+	h.e.ResetPolicies()
+	if _, err := h.e.PolicyWithLayer(ctx, "o/r", nil); err == nil {
+		t.Fatal("an unreadable configuration repository")
+	}
+}
