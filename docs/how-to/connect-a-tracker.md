@@ -28,8 +28,14 @@ trackers:
       labels: result.fields.labels
       status: result.fields.status.name
       repo: result.fields.components[0].name    # optional: where the ticket says its code goes
+      comments: result.fields.comment.comments.map(c, c.body)   # the text of each comment: see below
     closed_when: 'status in ["Done", "Won''t Do"]'
 ```
+
+Map `comments` to the text of each comment on the ticket. ynf marks every comment it posts, and
+with `comments` mapped it posts only if no existing comment has the mark, so a step that is
+retried never comments twice. Without it ynf cannot tell, and a retry may post the same comment
+again.
 
 The tool names and argument names are your server's. Every key is in
 [Configuration](../reference/configuration.md#the-configuration-repository).

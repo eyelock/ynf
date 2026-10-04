@@ -51,10 +51,13 @@ read from its default branch at a resolved commit (ADR-006). In its factory fold
   `provider: mcp`: its `site`, its MCP `server` (a `command` started with only PATH, HOME and
   the variables in its `env`, or a `url` with a `token_env` bearer token), the tool and arguments
   for `get`, `comment` and `label`, CEL `fields` that read the get tool's result (`title`,
-  `body`, `labels`, `status`, and `repo` when the ticket names its repository in a structured
-  field), and `closed_when`. ynf calls the tools directly, with no model, using its own
+  `body`, `labels`, `status`, `repo` when the ticket names its repository in a structured
+  field, and `comments`, a list of the text of each of the ticket's comments), and `closed_when`. ynf calls the tools directly, with no model, using its own
   credentials. A reference may use the tracker's name, `jira/PLAT-881`; the item is stored by the
   tracker's host. A ticket that names its repository must agree with `--repo`.
+  Map `comments` so a retried step never comments twice: ynf posts a comment only if none of
+  those texts contains its hidden marker, as it does on GitHub. Without `comments` it cannot
+  tell, and a retried step may post the same comment again.
   These are declared only here: they carry credentials and decide which repositories ynf
   touches, so a target repository can never declare or change them.
 - `lanes.yaml`, optional: lanes and defaults for every enrolled repository. A target repository's
