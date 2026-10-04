@@ -23,7 +23,7 @@ as a hosted service.
 | Writer | What | Type | Namespace and subject |
 |---|---|---|---|
 | ynh run, via ynm's plugin, when its harness wants memory | in-run learnings and scratch | `working`, promoted to `episodic` | `session/<id>`, the repository's namespace |
-| ynf, per occurrence of a failure | one record each time a signature occurs, its text naming the item, run, step and time | `episodic`, `dataSchema: ynf.failure.v1`, tagged `ynf.failure.v1` | `factory/<host>/<org>/<repo>`, subject = the failure signature |
+| ynf, per occurrence of a failure | one record each time a signature occurs, its text naming the item, run, step and time | `episodic`, `dataSchema: ynf.failure.v1`, tagged `ynf.failure.v1`, `failure` and `occurrence` | `factory/<host>/<org>/<repo>`, subject = the failure signature |
 | ynm dream | "this keeps happening" | `reflective`, and `procedural` on promote | the same signature subject |
 
 **ynf's own store is the run history; memory holds the patterns.** Every decision, run and action
@@ -33,8 +33,10 @@ built to merge and supersede: its dedupe pass merges episodic memories it judges
 fact, and its contradiction pass, grouping by subject, retires an older memory a newer one
 supersedes. Step records sharing an item as their subject ("attempt 1 failed", "attempt 2
 converged") would be pruned into a history that was never true. Failure occurrences are what ynm
-is for, so ynf writes those, and makes each one's text its own (the item, run, step and time), so
-the dedupe pass never takes two occurrences for one fact and the reflect pass sees every one.
+is for, so ynf writes those, and makes each one's text its own (the item, run, step and time), and
+tags it `occurrence`, ynm's reserved tag for one event in a series where repetition is the signal.
+The dedupe and contradiction passes leave an occurrence alone, so it is never merged or superseded,
+and the reflect pass still counts every one. An older ynm stores the tag as an ordinary tag.
 
 **Failure signatures are the subject.** A signature is deterministic and normalised, so the same
 failure clusters without a model:

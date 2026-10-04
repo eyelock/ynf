@@ -578,7 +578,7 @@ func checkMemory(f fixture, numbers map[string]int, items []item, repo string, m
 		}
 		if !slices.ContainsFunc(memories, func(m memoryRecord) bool {
 			c := m.Current
-			return c.DataSchema == "ynf.failure.v1" && c.Subject == sig && c.Data["item"] == it.Key && slices.Contains(c.Tags, "ynf.failure.v1")
+			return c.DataSchema == "ynf.failure.v1" && c.Subject == sig && c.Data["item"] == it.Key && slices.Contains(c.Tags, "ynf.failure.v1") && slices.Contains(c.Tags, "occurrence")
 		}) {
 			return "", fmt.Errorf("%s: no ynf.failure.v1 memory for %s", name, sig)
 		}

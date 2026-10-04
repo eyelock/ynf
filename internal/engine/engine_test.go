@@ -1029,7 +1029,7 @@ func TestMemoryIsWrittenNotRelayed(t *testing.T) {
 	}
 	f := failures[0]
 	if f.Subject != "sig/ci/lint" || f.Type != "episodic" || f.Level != "distributed" || f.Namespace != "factory/github.com/o/r" ||
-		!slices.Contains(f.Tags, "ynf.failure.v1") || !slices.Contains(f.Tags, "failure") ||
+		!slices.Contains(f.Tags, "ynf.failure.v1") || !slices.Contains(f.Tags, "failure") || !slices.Contains(f.Tags, "occurrence") ||
 		!strings.Contains(f.Content, "occurrence 1") || !strings.Contains(f.Content, "run `") || f.Data["step"] == "" {
 		t.Fatalf("failure memory: %+v", f)
 	}
