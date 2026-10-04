@@ -260,3 +260,20 @@ func TestYnhWithNoModel(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+// TestYnhEffort: a lane's effort reaches ynh as --effort, and the effort the run was asked for is
+// read back beside the one the backend reported.
+func TestYnhEffort(t *testing.T) {
+	argv, err := runner.YnhRunner{Cfg: policy.Ynh{Harness: ".", Effort: "low"}}.Command(runner.Spec{TaskFile: "t", RunDir: "r"})
+	if err != nil || !strings.Contains(strings.Join(argv, " "), "--effort low") {
+		t.Fatalf("%v %v", argv, err)
+	}
+	argv, _ = runner.YnhRunner{Cfg: policy.Ynh{Harness: "."}}.Command(runner.Spec{TaskFile: "t", RunDir: "r"})
+	if slices.Contains(argv, "--effort") {
+		t.Fatalf("no effort was asked for: %v", argv)
+	}
+	r := runner.YnhRunner{}.Interpret(0, []byte(`{"exit_code":0,"backend":"claude","effort":"medium","effort_requested":"low"}`), "")
+	if r.Effort != "medium" || r.EffortRequested != "low" {
+		t.Fatalf("%+v", r.Usage)
+	}
+}

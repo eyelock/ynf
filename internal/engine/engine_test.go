@@ -2196,3 +2196,24 @@ lanes:
 		t.Fatal("an unreadable configuration repository")
 	}
 }
+
+// TestStatsGroupByTheEffortAskedForWhenNoneIsReported: a run whose backend reports no effort is
+// grouped under the effort its lane asked for, so two efforts still compare.
+func TestStatsGroupByTheEffortAskedForWhenNoneIsReported(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:agent"}
+	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "github.com", Key: "o/r#1"}, Lane: "agent"}); err != nil {
+		t.Fatal(err)
+	}
+	key := item.IssueKey("github.com", "o/r", 1)
+	b, _ := json.Marshal(engine.RunRecord{Runner: "ynh", Model: "claude/sonnet", Outcome: "converged", Usage: runner.Usage{EffortRequested: "low"}})
+	if err := h.e.Store.Append(ctx, key, store.LogEntry{ID: "R9", Time: h.e.Now(), Kind: "run", Body: b}); err != nil {
+		t.Fatal(err)
+	}
+	stats, _ := h.e.Stats(ctx)
+	i := slices.IndexFunc(stats, func(s engine.Stats) bool { return s.Lane == "agent" })
+	if i < 0 || !slices.ContainsFunc(stats[i].Models, func(m engine.ModelStats) bool { return m.Model == "claude/sonnet" && m.Effort == "low" }) {
+		t.Fatalf("%+v", stats[i].Models)
+	}
+}

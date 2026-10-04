@@ -276,7 +276,13 @@ func (e *Engine) addModelStats(ctx context.Context, s *Stats, it item.Item) erro
 		default:
 			model = r.Runner + " (model not reported)"
 		}
-		m := find(model, r.Effort)
+		// The effort the backend reported, else the one asked for: a backend that reports none
+		// still ran at the lane's request, and grouping it under "-" would hide the comparison.
+		effort := r.Effort
+		if effort == "" {
+			effort = r.EffortRequested
+		}
+		m := find(model, effort)
 		m.Runs++
 		m.Turns += r.Turns
 		m.Tokens += r.Tokens

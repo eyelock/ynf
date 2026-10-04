@@ -109,8 +109,10 @@ column names it for unpinned runs too, and nothing in ynf changes. Until then ev
 default model is grouped here. A command lane has no model at all: its row says `none (command)`,
 and its turns, tokens and cost are `-`, never reported rather than zero.
 
-The effort column is read the same way: it is what ynh reports the run used. A lane can't set it,
-because ynh has no way to be told an effort level yet.
+The effort column is what ynh reports the run used, or, when the backend reports none, the effort
+the run was asked for. A lane asks for one with `run.ynh.effort`: `low`, `medium` or `high`, passed
+to ynh as `--effort`, which maps it to each vendor's own setting. Copies of a lane at two efforts
+compare in `ynf stats` exactly as copies on two models do, below.
 
 ## Pin a model, and compare
 

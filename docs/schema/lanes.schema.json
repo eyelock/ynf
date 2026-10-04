@@ -348,7 +348,11 @@
               "type": "string",
               "minLength": 1,
               "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:-]*$",
-              "description": "ynh's --model: the model the agent runs on, as the vendor names it (for the claude vendor, an alias such as sonnet or a full name such as claude-sonnet-5-5). Letters, digits and . - _ / :, not starting with a dash. Omit it for the vendor's default. The effort level is reported, not set: ynh has no way to be told one."
+              "description": "ynh's --model: the model the agent runs on, as the vendor names it (for the claude vendor, an alias such as sonnet or a full name such as claude-sonnet-5-5). Letters, digits and . - _ / :, not starting with a dash. Omit it for the vendor's default."
+            },
+            "effort": {
+              "enum": ["low", "medium", "high"],
+              "description": "ynh's --effort: the reasoning effort the agent is asked to run at. ynh maps it to each vendor's own setting (claude's --effort, codex's model_reasoning_effort) and refuses it, before the run starts, for a vendor with no effort control (cursor). Omit it for the harness's agent.effort, else the vendor's default. Needs ynh 0.10.0 or later. The run records the effort asked for and the effort the backend reported."
             },
             "auto_approve": {
               "enum": [

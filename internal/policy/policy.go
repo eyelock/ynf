@@ -120,6 +120,10 @@ type Ynh struct {
 	// Model is ynh's --model: the model the agent runs on, as the vendor names it. Empty is the
 	// vendor's default. The schema limits it to a plain name, so it never reaches argv as a flag.
 	Model string `yaml:"model" json:"model,omitempty"`
+	// Effort is ynh's --effort (low, medium or high): the reasoning effort the agent is asked to
+	// run at, which ynh maps to each vendor's own setting and refuses where a vendor has none.
+	// Empty is the harness's agent.effort, else the vendor's default. It needs ynh 0.10.0 or later.
+	Effort string `yaml:"effort" json:"effort,omitempty"`
 	// AutoApprove is ynh's --auto-approve (edits or all): the worker runs without approval prompts.
 	// ynf passes it only to a contained run (ADR-007).
 	AutoApprove string            `yaml:"auto_approve" json:"auto_approve,omitempty"`

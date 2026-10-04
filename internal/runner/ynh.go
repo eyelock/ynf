@@ -90,6 +90,9 @@ func (y YnhRunner) Command(s Spec) ([]string, error) {
 	if y.Cfg.Model != "" {
 		argv = append(argv, "--model", y.Cfg.Model)
 	}
+	if y.Cfg.Effort != "" {
+		argv = append(argv, "--effort", y.Cfg.Effort)
+	}
 	// Approval prompts are only safe to switch off inside containment ynf owns (ADR-007).
 	switch {
 	case (s.InImage || s.Contained) && y.Cfg.AutoApprove != "":
@@ -134,15 +137,18 @@ func (y YnhRunner) Interpret(exit int, stdout []byte, _ string) Result {
 	}
 	r := Result{Outcome: outcome}
 	var res struct {
-		Reason      string `json:"reason"`
-		SessionID   string `json:"session_id"`
-		Backend     string `json:"backend"`
-		Model       string `json:"model"`
-		Effort      string `json:"effort"`
-		YnhVersion  string `json:"ynh_version"`
-		AutoApprove string `json:"auto_approve"`
-		BoundBy     string `json:"bound_by"`
-		Harness     struct {
+		Reason    string `json:"reason"`
+		SessionID string `json:"session_id"`
+		Backend   string `json:"backend"`
+		Model     string `json:"model"`
+		Effort    string `json:"effort"`
+		// EffortRequested is what was asked for (--effort or the harness's agent.effort); Effort
+		// stays what the backend reported running at.
+		EffortRequested string `json:"effort_requested"`
+		YnhVersion      string `json:"ynh_version"`
+		AutoApprove     string `json:"auto_approve"`
+		BoundBy         string `json:"bound_by"`
+		Harness         struct {
 			Name, Version, SHA string
 		} `json:"harness"`
 		Sensors []struct {
@@ -164,7 +170,7 @@ func (y YnhRunner) Interpret(exit int, stdout []byte, _ string) Result {
 			r.Model = res.Backend + "/" + res.Model
 		}
 		r.Usage = Usage{
-			Effort: res.Effort, Turns: res.Consumed.Turns, Tokens: res.Consumed.Tokens, CostUSD: res.Consumed.CostUSD,
+			Effort: res.Effort, EffortRequested: res.EffortRequested, Turns: res.Consumed.Turns, Tokens: res.Consumed.Tokens, CostUSD: res.Consumed.CostUSD,
 			InputTokens: res.Consumed.InputTokens, OutputTokens: res.Consumed.OutputTokens, CacheReadTokens: res.Consumed.CacheReadTokens,
 			Backend: res.Backend, BoundBy: res.BoundBy, HarnessSHA: res.Harness.SHA, RunnerVersion: res.YnhVersion, AutoApprove: res.AutoApprove,
 		}
