@@ -1,6 +1,11 @@
 * **Start**
   * [Overview](/README.md)
 
+* **Tutorials**
+  * [Tutorials overview](/tutorial/README.md)
+  * [1. ynf on its own](/tutorial/ynf/README.md)
+  * [2. The factory](/tutorial/factory/README.md)
+
 * **How-to guides**
   * [How-to overview](/how-to/README.md)
   * [Run ynf locally](/how-to/run-ynf-locally.md)

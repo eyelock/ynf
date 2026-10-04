@@ -7,8 +7,8 @@ tracker that isn't GitHub.
 
 Every lane in this track is a command lane: `gofmt`, run in a container. There is no model, no API
 key and no agent, and runs take seconds. ynf doesn't need ynh or ynm to do any of this: it detects
-them and never requires them (ADR-012). The factory track adds them, once you know how the loop
-behaves.
+them and never requires them (ADR-012). [The factory track](../factory/README.md) adds them, once you know
+how the loop behaves.
 
 Each lesson builds on the one before. Every step is a command followed by what you should see.
 Timestamps, ids, issue and pull request numbers will differ from the ones shown.

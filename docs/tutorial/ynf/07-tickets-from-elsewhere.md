@@ -212,4 +212,5 @@ repositories.
   request.
 
 To connect a real tracker, such as JIRA, follow [Connect a tracker](../../how-to/connect-a-tracker.md).
-To bring in agents and memory, continue with the factory track, which picks up from this sandbox.
+To bring in agents and memory, continue with [the factory track](../factory/README.md), which picks
+up from this sandbox.
