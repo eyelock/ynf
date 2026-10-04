@@ -1,4 +1,5 @@
 # ynf: your named factory.
+#   make deps     check the prerequisites (Go, golangci-lint) and download the modules
 #   make check    format, vet, lint, tests with the race detector, and the coverage gate
 #   make build    bin/ynf
 #   make install  bin/ynf into $(INSTALL_DIR)
@@ -18,9 +19,16 @@ FACTORY_IMAGE ?= ynf-factory:dev
 YNH_SRC       ?=
 YNM_SRC       ?=
 
-.PHONY: check build install test cover lint vet fmt fmt-check e2e calibrate clean factory-image
+.PHONY: deps check build install test cover lint vet fmt fmt-check e2e calibrate clean factory-image
 
 check: fmt-check vet lint cover
+
+deps:
+	@command -v go >/dev/null 2>&1 || { echo "Installing Go..."; brew install go; }
+	@command -v golangci-lint >/dev/null 2>&1 || { echo "Installing golangci-lint..."; brew install golangci-lint; }
+	go mod download
+	cd sandbox/e2e && go mod download
+	@echo "All prerequisites installed."
 
 # bin/ynf for this machine, plus static linux builds the docker executor runs as its egress proxy.
 build:
@@ -30,7 +38,13 @@ build:
 
 install: build
 	@mkdir -p $(INSTALL_DIR)
-	cp bin/ynf bin/ynf-linux-arm64 bin/ynf-linux-amd64 $(INSTALL_DIR)/
+	@# Copy to a temporary name, then rename over the old binary. Overwriting a binary in place
+	@# keeps the same file, and on macOS the kernel's cached code-signature check for it can go
+	@# stale: the next launch is killed with SIGKILL (exit 137) and no message. A rename puts a
+	@# new file in place.
+	@for f in ynf ynf-linux-arm64 ynf-linux-amd64; do \
+	  cp bin/$$f $(INSTALL_DIR)/.$$f.tmp && mv -f $(INSTALL_DIR)/.$$f.tmp $(INSTALL_DIR)/$$f; \
+	done
 	@echo "installed ynf $(VERSION) to $(INSTALL_DIR)"
 
 test:
