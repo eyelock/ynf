@@ -19,10 +19,9 @@ the folder the file is in.
 | `lease.heartbeat` | `30s` | How often a holder renews. Must be shorter than `ttl`. |
 | `poll.ci` | `30s` | How often a proposed item's checks are probed. |
 | `poll.review` | `5m` | How often an item in review is probed for merge, close or review. |
-| `memory.provider` | detected | `ynm`, or `none` to switch memory off. Without a `memory` block, ynf uses ynm when it is on PATH (ADR-012). |
-| `memory.namespace` | `factory/{repo}` | Where a repository's memories go; `{repo}` is `owner/name`. |
-| `memory.context_budget_tokens` | `1000` | How much remembered context is added to a run's task. |
-| `memory.cwd` | where ynf runs | The directory ynm runs as if from, which decides its store. |
+| `memory.provider` | detected | `ynm`, or `none` to switch memory off. Without a `memory` block, ynf uses ynm when it is on PATH (ADR-012). ynf writes what only it can see (each step's outcome, and failures recurring across runs) and never puts memory into an agent's task: a harness that wants memory connects its agent to ynm itself (ADR-008). |
+| `memory.namespace` | `factory/{repo}` | Where a repository's memories go; `{repo}` is `host/owner/name`, so the same `owner/name` on two forges never share one. |
+| `memory.cwd` | where ynf runs | The directory ynm runs as if from, which decides its store: your own on a laptop; a shared one, such as a git remote ynm pushes to, wherever memory must outlive the process or be shared. |
 
 What ynf writes to memory, and why it never decides anything with it, is in
 [Learning from failure](../explanation/learning-from-failure.md); the data shapes are

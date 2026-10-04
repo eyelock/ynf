@@ -10,7 +10,7 @@
 #   make e2e        rebuild the sandbox, run ynf against it until everything settles, and check
 #                   each fixture's expect block (tests the factory; LANES=gofmt,deps,reclaim by default)
 #   make e2e-only   the same, without the rebuild
-#   make reset also empties the sandbox's ynm namespace (factory/eyelock/ynf-sandbox), so every
+#   make reset also empties the sandbox's ynm namespace (factory/github.com/eyelock/ynf-sandbox), so every
 #   e2e run starts from the same memory; e2e checks each item that ran left its memories
 #   make agent-image  build ynf-sandbox-agent:latest, the base the ynh lanes' harness images use,
 #                   on the ynh release image YNH_BASE; YNH_SRC=path to a ynh checkout builds its

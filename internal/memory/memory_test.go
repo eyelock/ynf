@@ -47,25 +47,10 @@ func TestYnmRemember(t *testing.T) {
 	}
 }
 
-func TestYnmContext(t *testing.T) {
-	bin, calls := fakeYnm(t, 0)
-	out, err := memory.Ynm{Bin: bin}.Context(context.Background(), "factory/o/r", "item/x sig/y", 800)
-	if err != nil || out != "remembered: TestSince is a known flake" {
-		t.Fatalf("%q %v", out, err)
-	}
-	b, _ := os.ReadFile(calls)
-	if !strings.Contains(string(b), "--budget-tokens\n800\n--text\nitem/x sig/y\n") {
-		t.Fatalf("%s", b)
-	}
-}
-
 func TestYnmFailure(t *testing.T) {
 	bin, _ := fakeYnm(t, 1)
 	if err := (memory.Ynm{Bin: bin}).Remember(context.Background(), memory.Record{Type: "episodic", Content: "x", Namespace: "n"}); err == nil {
 		t.Fatal("a failed ynm call should be reported")
-	}
-	if _, err := (memory.Ynm{Bin: bin}).Context(context.Background(), "n", "", 10); err == nil {
-		t.Fatal("a failed context call should be reported")
 	}
 }
 

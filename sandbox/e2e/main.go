@@ -434,10 +434,12 @@ func check(f fixture, numbers map[string]int, items []item, repo, ynf, cfg, trac
 	return detail, nil
 }
 
-// memoryNamespace is where the sandbox's memories go; {repo} is owner/name.
+// memoryNamespace is where the sandbox's memories go; {repo} is host/owner/name.
 const memoryNamespace = "factory/{repo}"
 
-func namespaceFor(repo string) string { return strings.ReplaceAll(memoryNamespace, "{repo}", repo) }
+func namespaceFor(repo string) string {
+	return strings.ReplaceAll(memoryNamespace, "{repo}", "github.com/"+repo)
+}
 
 type memoryRecord struct {
 	MemoryID string `json:"memoryId"`

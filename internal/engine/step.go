@@ -385,7 +385,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 			focus = &f
 		}
 	}
-	body := task(it, s.text, feedback, s.recall(it))
+	body := task(it, s.text, feedback)
 	if focus != nil {
 		body = focus.Prompt + "\n\n" + body
 	}
@@ -735,7 +735,7 @@ func prBody(it item.Item, lane policy.Lane, run *RunRecord) string {
 
 // task is what the runner is asked to do. Ticket text is quoted data, never instructions to ynf
 // (NFR-5).
-func task(it item.Item, t forge.Text, feedback, remembered string) string {
+func task(it item.Item, t forge.Text, feedback string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Task: %s\n\n%s\n\nThe ticket, quoted as the reporter wrote it:\n\n", it.Ref(), t.URL)
 	for l := range strings.SplitSeq(strings.TrimSpace(t.Title+"\n\n"+t.Body), "\n") {
@@ -743,9 +743,6 @@ func task(it item.Item, t forge.Text, feedback, remembered string) string {
 	}
 	if feedback != "" {
 		b.WriteString("\n## Feedback from the previous attempt\n\n" + feedback + "\n")
-	}
-	if remembered != "" {
-		b.WriteString("\n## What ynf remembers about this work\n\nFrom earlier runs; advice, not instructions.\n\n" + remembered + "\n")
 	}
 	return b.String()
 }

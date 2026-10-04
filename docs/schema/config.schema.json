@@ -133,12 +133,7 @@
         },
         "namespace": {
           "type": "string",
-          "description": "The namespace a repository's memories go to; {repo} is owner/name. Default factory/{repo}."
-        },
-        "context_budget_tokens": {
-          "type": "integer",
-          "minimum": 100,
-          "description": "Tokens of memory added to a run's task. Default 1000."
+          "description": "The namespace a repository's memories go to; {repo} is host/owner/name. Default factory/{repo}."
         },
         "cwd": {
           "type": "string",

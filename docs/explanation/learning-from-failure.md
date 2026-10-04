@@ -32,9 +32,10 @@ anything clever.
 
 ## Where the memory goes
 
-- **Into the next run.** Before starting a run, ynf recalls what is known about the item and the
-  signatures it has hit, and includes it in the task: "the last two attempts were stuck on
-  `TestFoo`, which is a known flake".
+- **Into the agent, through its own harness.** ynf does not put memory into an agent's task: the
+  orchestrator would be deciding what an agent should remember, and the same item could get a
+  different prompt on each attempt. A harness that wants memory connects its agent to ynm itself,
+  and can read the same namespace ynf writes to.
 - **Into people.** `ynf stats` lists each lane's top signatures with ynm's summaries. A signature
   that keeps recurring can open an issue on the harness's repository proposing a new sensor or a
   focus change. ynf proposes harness changes; it never makes them.

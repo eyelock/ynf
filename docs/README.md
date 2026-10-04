@@ -40,8 +40,8 @@ each with one job.
   SQLite, S3 or DynamoDB.
 - **The agent never pushes.** It runs contained, with no forge write credentials; ynf commits,
   pushes and opens the pull request.
-- **Memory is advisory.** Failure signatures cluster in ynm so people and the next run learn from
-  them; decisions run on deterministic counters.
-- **One Go binary, three hosts:** a daemon, a hosted service, or a CI job.
+- **Memory is advisory.** Failure signatures cluster in ynm so people, and agents whose harness
+  reads ynm, learn from them; decisions run on deterministic counters.
+- **One Go binary, four hosts:** a developer's machine, a pool of workers, a job runner, or CI.
 - **ynh and ynm are optional.** Installed, they are detected and used with no configuration; absent,
   any command can be the inner loop and memory is simply off.

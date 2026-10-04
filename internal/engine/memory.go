@@ -13,36 +13,14 @@ import (
 	"github.com/eyelock/ynf/internal/memory"
 )
 
-func (e *Engine) namespace(repo string) string {
+// namespace is where an item's repository's memories go: {repo} is host/owner/name, so the same
+// owner/name on two forges never share one (ADR-008).
+func (e *Engine) namespace(it item.Item) string {
+	repo := it.Forge + "/" + it.Repo
 	if e.MemoryNamespace != nil {
 		return e.MemoryNamespace(repo)
 	}
 	return "factory/" + repo
-}
-
-// recall is what memory holds about an item and the failures it has hit, for its next run's task.
-func (s *step) recall(it item.Item) string {
-	m := s.e.Memory
-	if m == nil {
-		return ""
-	}
-	budget := s.e.MemoryBudget
-	if budget == 0 {
-		budget = 1000
-	}
-	focus := []string{it.Key}
-	for name := range it.Counters {
-		if strings.HasPrefix(name, "sig/") {
-			focus = append(focus, name)
-		}
-	}
-	slices.Sort(focus[1:])
-	text, err := m.Context(s.ctx, s.e.namespace(it.Repo), strings.Join(focus, " "), budget)
-	if err != nil {
-		s.e.log().Warn("memory context", "item", it.Key, "err", err)
-		return ""
-	}
-	return text
 }
 
 // remember writes what a decision learned (ADR-008): a run's outcome as an episodic memory about
@@ -54,7 +32,7 @@ func (s *step) remember(in decide.Input, d decide.Decision) {
 	if m == nil {
 		return
 	}
-	it, ns := d.Item, s.e.namespace(d.Item.Repo)
+	it, ns := d.Item, s.e.namespace(d.Item)
 	ctx := context.WithoutCancel(s.ctx)
 	write := func(r memory.Record) {
 		r.Type, r.Namespace, r.Source = "episodic", ns, "ynf/step/"+s.id
