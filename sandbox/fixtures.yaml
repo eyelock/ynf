@@ -1,6 +1,7 @@
 # yaml-language-server: $schema=./fixtures.schema.json
 #
-# Every issue and pull request the sandbox starts with, and what ynf is expected to do with it.
+# Every issue and pull request the sandbox starts with, and every ticket in its tracker that is
+# not a forge (kind: ticket, written by e2e), and what ynf is expected to do with each.
 # Expectations live here, in ynf, never in the sandbox, so the agent cannot read what it is being
 # tested on. Terraform reads this file to create the issues, branches and pull requests.
 #
@@ -174,6 +175,22 @@ fixtures:
       checks:
         - no lane label, so no search finds it; e2e starts it with ynf start --lane gofmt
         - it ends like any found ticket, a draft pull request in review
+
+  - id: tracker-format
+    kind: ticket
+    ticket: SBX-1
+    title: internal/format is not gofmt-clean, from the tracker
+    body: fixtures/tracker-format.md
+    labels: ["pkg:internal/format"]
+    lane: gofmt
+    calibrate:
+      command: { deterministic: true }
+    expect:
+      result: in_review
+      labels: { present: [ynf:in-review], absent: [ynf:working, ynf:proposed] }
+      checks:
+        - a ticket in a tracker that is not a forge (the sandbox's JIRA stand-in), naming its repository
+        - e2e starts it with ynf start tracker/SBX-1 --repo; the pull request is linked on the ticket
 
   - id: deps-bump
     kind: issue

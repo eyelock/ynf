@@ -41,6 +41,14 @@ read from its default branch at a resolved commit (ADR-006). In its factory fold
   `provider: github`, its `url` and the `token_env` holding ynf's token for it; its repositories
   are enrolled as `host/owner/name`, and everything about them (searches, clones, pushes, pull
   requests, labels, webhooks) goes to that forge with that token.
+  A tracker that is not a forge, such as JIRA Cloud or Data Center, is declared by name with
+  `provider: mcp`: its `site`, its MCP `server` (a `command` started with only PATH, HOME and
+  the variables in its `env`, or a `url` with a `token_env` bearer token), the tool and arguments
+  for `get`, `comment` and `label`, CEL `fields` that read the get tool's result (`title`,
+  `body`, `labels`, `status`, and `repo` when the ticket names its repository in a structured
+  field), and `closed_when`. ynf calls the tools directly, with no model, using its own
+  credentials. A reference may use the tracker's name, `jira/PLAT-881`; the item is stored by the
+  tracker's host. A ticket that names its repository must agree with `--repo`.
   These are declared only here: they carry credentials and decide which repositories ynf
   touches, so a target repository can never declare or change them.
 - `lanes.yaml`, optional: lanes and defaults for every enrolled repository. A target repository's

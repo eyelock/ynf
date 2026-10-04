@@ -282,11 +282,11 @@ func table(items []item.Item) string {
 
 // key accepts an item key, or a reference (ADR-002): host/owner/name#number, owner/name#number
 // on the configured forge (defaultHost), or host/KEY for a ticket on another tracker.
-func key(s, defaultHost string) (string, error) {
+func key(s, defaultHost string, resolve func(name string) (string, error)) (string, error) {
 	if strings.HasPrefix(s, "item/") {
 		return s, nil
 	}
-	ref, err := parseRef(s, defaultHost)
+	ref, err := parseRef(s, defaultHost, resolve)
 	if err != nil {
 		return "", withCode(ExitUsage, err)
 	}
@@ -294,7 +294,7 @@ func key(s, defaultHost string) (string, error) {
 }
 
 // parseRef resolves a reference to a tracker host and the tracker's own key.
-func parseRef(s, defaultHost string) (tracker.Ref, error) {
+func parseRef(s, defaultHost string, resolve func(name string) (string, error)) (tracker.Ref, error) {
 	if repoPart, num, ok := strings.Cut(s, "#"); ok {
 		n, err := strconv.Atoi(num)
 		parts := strings.Split(repoPart, "/")
@@ -305,7 +305,18 @@ func parseRef(s, defaultHost string) (tracker.Ref, error) {
 			}
 			return tracker.Ref{Host: host, Key: forge.IssueKey(parts[0]+"/"+parts[1], n)}, nil
 		}
-	} else if host, k, ok := strings.Cut(s, "/"); ok && strings.Contains(host, ".") && k != "" && !strings.Contains(k, "/") {
+	} else if host, k, ok := strings.Cut(s, "/"); ok && host != "" && k != "" && !strings.Contains(k, "/") {
+		if !strings.Contains(host, ".") {
+			// A configured tracker's name, such as jira: stored by its host.
+			if resolve == nil {
+				return tracker.Ref{}, fmt.Errorf("%q: %q is not a host or a configured tracker", s, host)
+			}
+			h, err := resolve(host)
+			if err != nil {
+				return tracker.Ref{}, fmt.Errorf("%q: %w", s, err)
+			}
+			host = h
+		}
 		return tracker.Ref{Host: host, Key: k}, nil
 	}
 	return tracker.Ref{}, fmt.Errorf("%q is not a reference (owner/name#number, host/owner/name#number, host/KEY) or an item key", s)
@@ -325,7 +336,7 @@ func (a *app) items(ctx context.Context, args []string) error {
 	if len(args) < 2 {
 		return withCode(ExitUsage, fmt.Errorf("items %s needs an item", args[0]))
 	}
-	k, err := key(args[1], e.ForgeHost)
+	k, err := key(args[1], e.ForgeHost, trackerNames(ctx, e))
 	if err != nil {
 		return err
 	}
@@ -427,7 +438,7 @@ func (a *app) replay(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	k, err := key(args[0], e.ForgeHost)
+	k, err := key(args[0], e.ForgeHost, trackerNames(ctx, e))
 	if err != nil {
 		return err
 	}
@@ -481,3 +492,8 @@ func onlyRepo(ctx context.Context, e *engine.Engine) (string, error) {
 }
 
 func short(sha string) string { return sha[:min(7, len(sha))] }
+
+// trackerNames resolves a configured tracker's name to its host, for references.
+func trackerNames(ctx context.Context, e *engine.Engine) func(string) (string, error) {
+	return func(name string) (string, error) { return e.TrackerHost(ctx, name) }
+}

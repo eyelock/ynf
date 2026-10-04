@@ -51,6 +51,9 @@ type Engine struct {
 	Forges map[string]ForgeInstance
 	// NewForge builds a forge instance the configuration repository declares; nil allows none.
 	NewForge func(name string, cfg map[string]any) (ForgeInstance, error)
+	// NewTracker builds a tracker instance the configuration repository declares, returning its
+	// host; nil allows none.
+	NewTracker func(name string, cfg map[string]any) (string, tracker.Tracker, error)
 	// ConfigRepo is the factory's configuration repository (owner/name on the forge), whose
 	// factory.yaml enrols repositories and whose lanes.yaml every enrolled repository's lanes
 	// are laid over (ADR-006). Empty: Repos is the enrolment and each repository's lanes stand
@@ -101,6 +104,8 @@ type Engine struct {
 	mu       sync.Mutex
 	policies map[string]*RepoPolicy
 	factory  *FactoryPolicy
+	// trackerHosts maps a configured tracker's name to its host, for shorthand references.
+	trackerHosts map[string]string
 }
 
 // RepoPolicy is a repository's lane policy, read from its default branch.
@@ -166,6 +171,9 @@ func (e *Engine) Factory(ctx context.Context) (*FactoryPolicy, error) {
 		return nil, fmt.Errorf("%s/%s: %w", e.ConfigRepo, dir, err)
 	}
 	if err := e.addForges(f); err != nil {
+		return nil, fmt.Errorf("%s: %w", e.ConfigRepo, err)
+	}
+	if err := e.addTrackers(f); err != nil {
 		return nil, fmt.Errorf("%s: %w", e.ConfigRepo, err)
 	}
 	fp := &FactoryPolicy{Repo: e.ConfigRepo, SHA: sha, Dir: dir, File: f, Lanes: files[policy.LanesFile]}
@@ -553,4 +561,53 @@ func (e *Engine) isForge(host string) bool {
 	defer e.mu.Unlock()
 	_, ok := e.Forges[host]
 	return ok
+}
+
+// addTrackers registers the tracker instances a configuration repository declares (ADR-003).
+func (e *Engine) addTrackers(f *policy.Factory) error {
+	for _, name := range slices.Sorted(maps.Keys(f.Trackers)) {
+		if e.NewTracker == nil {
+			return fmt.Errorf("tracker %s: this ynf cannot add trackers", name)
+		}
+		host, tr, err := e.NewTracker(name, f.Trackers[name])
+		if err != nil {
+			return fmt.Errorf("tracker %s: %w", name, err)
+		}
+		e.mu.Lock()
+		if e.Trackers == nil {
+			e.Trackers = map[string]tracker.Tracker{}
+		}
+		e.Trackers[host] = tr
+		if e.trackerHosts == nil {
+			e.trackerHosts = map[string]string{}
+		}
+		e.trackerHosts[name] = host
+		e.mu.Unlock()
+	}
+	return nil
+}
+
+// TrackerHost is the host of the tracker the configuration repository names name, so a
+// reference can use the name (jira/PLAT-881) and still be stored by host.
+func (e *Engine) TrackerHost(ctx context.Context, name string) (string, error) {
+	if _, err := e.Factory(ctx); err != nil {
+		return "", err
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if host, ok := e.trackerHosts[name]; ok {
+		return host, nil
+	}
+	return "", fmt.Errorf("no tracker is configured as %q", name)
+}
+
+// CloseTrackers ends the trackers that hold a session, such as an MCP server ynf started.
+func (e *Engine) CloseTrackers() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, tr := range e.Trackers {
+		if c, ok := tr.(interface{ Close() error }); ok {
+			_ = c.Close()
+		}
+	}
 }

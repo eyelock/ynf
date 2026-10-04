@@ -25,6 +25,7 @@ import (
 	"github.com/eyelock/ynf/internal/store/s3store"
 	"github.com/eyelock/ynf/internal/store/sqlite"
 	"github.com/eyelock/ynf/internal/tracker"
+	"github.com/eyelock/ynf/internal/tracker/mcptracker"
 	"github.com/eyelock/ynf/internal/workspace"
 	"github.com/oklog/ulid/v2"
 )
@@ -143,6 +144,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return ExitUsage
 	}
 	if a.eng != nil {
+		a.eng.CloseTrackers()
 		_ = a.eng.Store.Close()
 	}
 	if a.logClose != nil {
@@ -311,6 +313,7 @@ func (a *app) engine() (*engine.Engine, error) {
 		Trackers:          map[string]tracker.Tracker{fg.Host(): forge.IssueTracker(fg)},
 		Git:               workspace.Workspace{Root: c.WorkPath(), Token: token, Author: workspace.Author{Name: name, Email: email}},
 		NewForge:          newForge(c.WorkPath(), workspace.Author{Name: name, Email: email}, githubAPI),
+		NewTracker:        newTracker,
 		Executor:          a.executor,
 		BuildImage:        imageBuilder(),
 		ImageCapabilities: imageCapabilities,
@@ -387,5 +390,24 @@ func newForge(root string, author workspace.Author, api func(host string) string
 			return "https://" + host + "/" + strings.TrimPrefix(repo, host+"/") + ".git"
 		}}
 		return engine.ForgeInstance{Host: host, Forge: fg, Git: ws, Tracker: forge.IssueTracker(fg)}, nil
+	}
+}
+
+// newTracker builds a tracker the configuration repository declares (ADR-003). GitHub's issues
+// come with its forge (forges:), so a tracker here is one that is not a forge.
+func newTracker(name string, cfg map[string]any) (string, tracker.Tracker, error) {
+	switch p, _ := cfg["provider"].(string); p {
+	case "mcp":
+		c, err := mcptracker.Parse(cfg)
+		if err != nil {
+			return "", nil, err
+		}
+		t, err := mcptracker.New(c)
+		if err != nil {
+			return "", nil, err
+		}
+		return t.Host(), t, nil
+	default:
+		return "", nil, fmt.Errorf("provider %q: trackers here are mcp; GitHub's issues come with its forge", p)
 	}
 }

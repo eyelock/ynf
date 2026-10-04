@@ -1604,3 +1604,97 @@ func TestASecondForge(t *testing.T) {
 		t.Fatalf("a forge that cannot be built: %v", err)
 	}
 }
+
+// memTracker is a tracker that is not a forge, such as JIRA, held in memory.
+type memTracker struct {
+	mu       sync.Mutex
+	tickets  map[string]facts.Ticket
+	comments []string
+}
+
+func (m *memTracker) Get(_ context.Context, key string) (facts.Ticket, tracker.Text, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.tickets[key]
+	if !ok {
+		return facts.Ticket{}, tracker.Text{}, tracker.ErrNotFound
+	}
+	return t, tracker.Text{Title: "Tidy " + key, Body: "Run gofmt."}, nil
+}
+
+func (m *memTracker) Comment(_ context.Context, key, marker, body string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.comments = append(m.comments, key+": "+body)
+	return nil
+}
+
+func (m *memTracker) Label(_ context.Context, key string, add, remove []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t := m.tickets[key]
+	t.Labels = append(slices.DeleteFunc(t.Labels, func(l string) bool { return slices.Contains(remove, l) }), add...)
+	m.tickets[key] = t
+	return nil
+}
+
+// TestATicketFromATrackerThatIsNotAForge: a tracker the configuration repository declares carries
+// a ticket whose code goes to a GitHub repository: named references, the pull request linked back
+// by URL, labels on the ticket, and a ticket that names another repository refused (ADR-002).
+func TestATicketFromATrackerThatIsNotAForge(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	jira := &memTracker{tickets: map[string]facts.Ticket{
+		"PLAT-1": {Key: "PLAT-1", State: "open", Labels: []string{"ynf:agent"}},
+		"PLAT-2": {Key: "PLAT-2", State: "open", Repo: "github.com/o/elsewhere"},
+		"PLAT-3": {Key: "PLAT-3", State: "open", Repo: "github.com/o/r"},
+	}}
+	h.e.Repos = nil
+	h.e.ConfigRepo = "acme/factory"
+	h.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\ntrackers:\n  jira:\n    provider: mcp\n    site: https://acme.atlassian.net\n    server: {command: [jira-mcp]}\n    get: {tool: get}\n    comment: {tool: comment}\n    label: {tool: label}\n    fields: {title: result.t, labels: result.l, status: result.s}\n"))
+	h.f.setFile("acme/factory", ".agents/factory/lanes.yaml", nil)
+	h.e.NewTracker = func(name string, cfg map[string]any) (string, tracker.Tracker, error) {
+		return "acme.atlassian.net", jira, nil
+	}
+	if host, err := h.e.TrackerHost(ctx, "jira"); err != nil || host != "acme.atlassian.net" {
+		t.Fatalf("%q %v", host, err)
+	}
+	if _, err := h.e.TrackerHost(ctx, "linear"); err == nil {
+		t.Fatal("an unconfigured tracker name")
+	}
+	ref := tracker.Ref{Host: "acme.atlassian.net", Key: "PLAT-1"}
+	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: ref, Lane: "agent"}); err == nil || !strings.Contains(err.Error(), "say which repository") {
+		t.Fatalf("a JIRA ticket needs --repo: %v", err)
+	}
+	it, err := h.e.Start(ctx, engine.StartRequest{Ref: ref, Repo: "o/r", Lane: "agent"})
+	if err != nil || it.State != item.Proposed || it.Key != "item/acme.atlassian.net/PLAT-1" || it.Branch != "ynf/plat-1" {
+		t.Fatalf("%+v %v", it, err)
+	}
+	if body := h.f.opened[0].Body; !strings.HasPrefix(body, "For acme.atlassian.net/PLAT-1.") {
+		t.Fatal(body)
+	}
+	if !slices.ContainsFunc(jira.comments, func(c string) bool { return strings.Contains(c, "proposed https://github.com/o/r/pull/") }) {
+		t.Fatalf("the pull request is linked on the ticket: %v", jira.comments)
+	}
+	if got := strings.Join(jira.tickets["PLAT-1"].Labels, ","); got != "ynf:proposed" {
+		t.Fatalf("labels on the ticket: %s", got)
+	}
+	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "acme.atlassian.net", Key: "PLAT-2"}, Repo: "o/r", Lane: "agent"}); err == nil || !strings.Contains(err.Error(), "says its code goes to github.com/o/elsewhere, not o/r") {
+		t.Fatalf("a ticket that names another repository: %v", err)
+	}
+	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "acme.atlassian.net", Key: "PLAT-3"}, Repo: "o/r", Lane: "agent"}); err != nil {
+		t.Fatalf("a ticket that agrees: %v", err)
+	}
+
+	bad := newHarness(t)
+	bad.e.ConfigRepo = "acme/factory"
+	bad.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\ntrackers:\n  jira:\n    provider: mcp\n    site: https://acme.atlassian.net\n    server: {command: [jira-mcp]}\n    get: {tool: get}\n    comment: {tool: comment}\n    label: {tool: label}\n    fields: {title: result.t, labels: result.l, status: result.s}\n"))
+	if _, err := bad.e.Enrolled(ctx); err == nil || !strings.Contains(err.Error(), "cannot add trackers") {
+		t.Fatalf("no way to add trackers: %v", err)
+	}
+	bad.e.ResetPolicies()
+	bad.e.NewTracker = func(string, map[string]any) (string, tracker.Tracker, error) { return "", nil, errors.New("no server") }
+	if _, err := bad.e.Enrolled(ctx); err == nil || !strings.Contains(err.Error(), "tracker jira: no server") {
+		t.Fatalf("a tracker that cannot be built: %v", err)
+	}
+}
