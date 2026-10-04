@@ -6,15 +6,14 @@ lives in [`sandbox/`](../../sandbox/README.md).
 
 | File | What it manages |
 |---|---|
-| `repository.tf` | The repository: description, topics, visibility, features, merge options |
+| `repository.tf` | The repository: description, topics, visibility, features, merge options; and the docs site, GitHub Pages from `/docs` on `main` |
 | `branches.tf` | Protection on `main`: pull request required with the `check` job green, admins included, linear history, no force-push or delete |
 | `labels.tf` | Issue and PR labels, authoritatively: a label not listed is removed |
 | `actions.tf` | Actions permissions, the read-only default `GITHUB_TOKEN`, and that the `RELEASE_TOKEN` secret exists |
 | `security.tf` | Dependabot alerts and security updates |
 | `imports.tf` | Import blocks that adopt the live repository into a fresh state |
 
-Not managed here: anything committed to the repository (`.github/`), GitHub Pages, which is
-added once `docs/` is on `main`, and the value of `RELEASE_TOKEN`: GitHub never returns it, so
+Not managed here: anything committed to the repository (`.github/`), and the value of `RELEASE_TOKEN`: GitHub never returns it, so
 Terraform only tracks that the secret exists.
 
 ## The release token

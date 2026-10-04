@@ -1,7 +1,8 @@
 resource "github_repository" "ynf" {
-  name        = var.repository
-  description = "Your named factory: the event-driven outer loop around agent runs. Intake, lanes, claims, containment."
-  visibility  = var.visibility
+  name         = var.repository
+  description  = "Your named factory: the event-driven outer loop around agent runs. Intake, lanes, claims, containment."
+  homepage_url = "https://eyelock.github.io/ynf/"
+  visibility   = var.visibility
   topics = [
     "agent-orchestration",
     "ai-agents",
@@ -39,3 +40,16 @@ resource "github_repository" "ynf" {
 
 # GitHub Pages for docs/ is added once docs/ is on main: the schemas' $id URLs
 # (https://eyelock.github.io/ynf/schema/...) resolve from it.
+
+# The docs site, built by GitHub from /docs on main: docsify renders the Markdown in the browser,
+# so there is no build step. It is public even while the repository is private, as ynm's is; the
+# JSON schemas' $id URLs resolve here too.
+resource "github_repository_pages" "ynf" {
+  repository = github_repository.ynf.name
+  build_type = "legacy"
+
+  source {
+    branch = "main"
+    path   = "/docs"
+  }
+}
