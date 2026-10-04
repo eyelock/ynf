@@ -45,6 +45,9 @@ type Job struct {
 	// Secrets reach the run by name only: docker reads each value from its own environment, so a
 	// secret never appears in a command line or a process listing.
 	Secrets map[string]string
+	// Share are folders the run needs beside its own, such as the repository mirror a worktree
+	// shares; the inline executor hands them to the run user too.
+	Share []string
 }
 
 // Output is how the command ended.
@@ -281,6 +284,11 @@ func (Process) Run(ctx context.Context, j Job) (Output, error) {
 }
 
 func run(ctx context.Context, timeout time.Duration, dir, name string, args, env []string) (Output, error) {
+	return runAs(ctx, timeout, dir, name, args, env, nil)
+}
+
+// runAs runs a command, with prepare adjusting it before it starts (such as which user it runs as).
+func runAs(ctx context.Context, timeout time.Duration, dir, name string, args, env []string, prepare func(*exec.Cmd)) (Output, error) {
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
@@ -288,6 +296,9 @@ func run(ctx context.Context, timeout time.Duration, dir, name string, args, env
 	}
 	c := exec.CommandContext(ctx, name, args...)
 	c.Dir, c.Env = dir, env
+	if prepare != nil {
+		prepare(c)
+	}
 	var stdout, stderr bytes.Buffer
 	c.Stdout, c.Stderr = &stdout, &stderr
 	err := c.Run()

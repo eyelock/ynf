@@ -45,7 +45,11 @@ type Config struct {
 		CI     string `yaml:"ci"`
 		Review string `yaml:"review"`
 	} `yaml:"poll"`
-	Images struct {
+	// Executor inline declares this instance runs inside containment the operator provides, such
+	// as the factory image as a job (ADR-007): every run is inline, as InlineUser.
+	Executor   string `yaml:"executor"`
+	InlineUser string `yaml:"inline_user"`
+	Images     struct {
 		Build *bool `yaml:"build"`
 	} `yaml:"images"`
 	Memory *struct {

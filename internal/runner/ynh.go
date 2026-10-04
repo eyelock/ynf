@@ -72,9 +72,9 @@ func (y YnhRunner) Command(s Spec) ([]string, error) {
 	}
 	// Approval prompts are only safe to switch off inside containment ynf owns (ADR-007).
 	switch {
-	case s.InImage && y.Cfg.AutoApprove != "":
+	case (s.InImage || s.Contained) && y.Cfg.AutoApprove != "":
 		argv = append(argv, "--auto-approve", y.Cfg.AutoApprove)
-	case !s.InImage && s.HostAutoApprove != "":
+	case !s.InImage && !s.Contained && s.HostAutoApprove != "":
 		argv = append(argv, "--auto-approve", s.HostAutoApprove)
 	}
 	if b := y.Cfg.Budgets; b != nil {

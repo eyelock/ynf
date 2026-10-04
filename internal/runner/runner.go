@@ -35,6 +35,9 @@ type Spec struct {
 	// InImage is set when the run happens in an image built by `ynh image --entrypoint agent`,
 	// whose entrypoint is already `ynh agent run --harness local/<name>`.
 	InImage bool
+	// Contained is set when the run is contained (ADR-007): in an image, or inline in a container
+	// the operator provides.
+	Contained bool
 	// Focus is the lane's focus, resolved from the harness: its prompt is already in the task.
 	Focus *Focus
 	// HostAutoApprove is --auto-approve asked for by the person who started the work, for a run on

@@ -23,6 +23,8 @@ type Focus struct {
 // Harness is what ynf reads from a ynh harness manifest: from the image that runs it (ADR-012),
 // or from the folder ynh runs it from on the host.
 type Harness struct {
+	// ID is the installed harness's id, when it was read from an installed ynh (an image's).
+	ID      string           `json:"-"`
 	Focuses map[string]Focus `json:"focuses"`
 	// EnvPassthrough is every variable ynh lets reach the agent worker. ynh strips everything
 	// else, deliberately, model credentials and proxy settings included.

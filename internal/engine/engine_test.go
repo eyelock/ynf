@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -1762,5 +1763,53 @@ func TestALaneIsHeldToItsImagesHarness(t *testing.T) {
 	_ = h.e.Sweep(context.Background())
 	if it := h.item(t, 1); it.LastRun == nil || !strings.Contains(it.LastRun.Detail, "read the harness in ynf-harness:abc: no ynh in it") {
 		t.Fatalf("%+v", it.LastRun)
+	}
+}
+
+// TestInlineRunsTheInstalledHarness: in the factory image, a run is inline: the harness installed
+// there runs by its id, the mirror is handed to the run user with the run's folders, and a lane's
+// auto_approve applies once this ynh supports it (ADR-007, ADR-009).
+func TestInlineRunsTheInstalledHarness(t *testing.T) {
+	if _, err := user.Lookup("nobody"); err != nil {
+		t.Skip("no nobody user here")
+	}
+	for _, caps := range []string{"0.9.0", "0.8.0"} {
+		h := newHarness(t)
+		calls := fakeYnh(t)
+		var handed []string
+		h.e.Interactive = false
+		h.e.Executor = func(string) (executor.Executor, error) {
+			return executor.Inline{User: "nobody",
+				Chown:      func(p string, _, _ int) error { handed = append(handed, p); return nil },
+				Credential: func(*exec.Cmd, uint32, uint32) {}}, nil
+		}
+		h.e.ImageHarness = func(_ context.Context, image, want string) (runner.Harness, error) {
+			if image != "" || want != "" {
+				t.Errorf("read %q %q, want the harness installed here", image, want)
+			}
+			hs, err := runner.ParseManifest([]byte(testManifest))
+			hs.ID = "local/h"
+			return hs, err
+		}
+		h.e.HostCapabilities = func(context.Context) (string, error) { return caps, nil }
+		h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "k"}[k] }
+		h.f.labels[1] = []string{"ynf:approved"}
+		if err := h.e.Sweep(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		it := h.item(t, 1)
+		b, _ := os.ReadFile(calls)
+		if caps == "0.8.0" {
+			if it.LastRun == nil || !strings.Contains(it.LastRun.Detail, "this image's ynh has 0.8.0") || strings.Contains(string(b), "agent run") {
+				t.Errorf("an old ynh: %+v\n%s", it.LastRun, b)
+			}
+			continue
+		}
+		if it.State != item.Proposed || !strings.Contains(string(b), "agent run --harness local/h") || !strings.Contains(string(b), "--auto-approve edits") {
+			t.Fatalf("%s %+v\n%s", it.State, it.LastRun, b)
+		}
+		if !slices.ContainsFunc(handed, func(p string) bool { return strings.Contains(p, filepath.Join("repos", "o", "r")) }) {
+			t.Errorf("the mirror was not handed to the run user: %v", handed)
+		}
 	}
 }

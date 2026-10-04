@@ -18,6 +18,10 @@ var (
 
 // executor returns the named executor; docker gets a linux ynf to run as its egress proxy.
 func (a *app) executor(name string) (executor.Executor, error) {
+	// An instance inside containment the operator provides runs everything inline (ADR-007).
+	if a.cfg != nil && a.cfg.Executor == "inline" {
+		return executor.Inline{User: a.cfg.InlineUser}, nil
+	}
 	e, err := executor.For(name)
 	if err != nil {
 		return nil, err
