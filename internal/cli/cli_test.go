@@ -168,6 +168,7 @@ func TestLanesShowSweepItemsReplay(t *testing.T) {
 	if code, out, _ := e.run("replay", "item/127.0.0.1/o/r/issues/5", "--policy", pol); code != cli.ExitDifferences || !strings.Contains(out, "DIFF") {
 		t.Fatalf("replay under another policy: %d %s", code, out)
 	}
+	setState(t, e.dir, "item/127.0.0.1/o/r/issues/5", item.Escalated)
 	if code, out, _ := e.run("items", "retry", "o/r#5"); code != 0 || !strings.Contains(out, "back to ready") {
 		t.Fatalf("retry: %d %s", code, out)
 	}
@@ -245,6 +246,7 @@ func TestRetryRefusesALiveLease(t *testing.T) {
 	if code, _, _ := e.run("sweep"); code != 0 {
 		t.Fatal("sweep")
 	}
+	setState(t, e.dir, item.IssueKey("127.0.0.1", "o/r", 5), item.Escalated)
 	st, _ := sqlite.Open(filepath.Join(e.dir, "state.db"))
 	if _, err := lease.Claim(context.Background(), st, item.IssueKey("127.0.0.1", "o/r", 5), "other", "s", time.Hour, time.Now); err != nil {
 		t.Fatal(err)
@@ -252,6 +254,59 @@ func TestRetryRefusesALiveLease(t *testing.T) {
 	_ = st.Close()
 	if code, _, stderr := e.run("items", "retry", "o/r#5"); code != cli.ExitAdapter || !strings.Contains(stderr, "being worked on by other") {
 		t.Fatalf("%d %s", code, stderr)
+	}
+}
+
+// setState rewrites an item's state and counters in the store, as a run would have left them.
+func setState(t *testing.T, dir, k string, state item.State) {
+	t.Helper()
+	ctx := context.Background()
+	st, err := sqlite.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	doc, v, err := st.Get(ctx, k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var it item.Item
+	if err := json.Unmarshal(doc, &it); err != nil {
+		t.Fatal(err)
+	}
+	it.State, it.Attempts, it.Counters = state, 3, map[string]int{"ci": 2}
+	b, _ := json.Marshal(it)
+	if _, err := st.Put(ctx, k, b, v); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRetryIsOnlyForEscalatedOrQuarantined(t *testing.T) {
+	e := setup(t)
+	if code, _, _ := e.run("sweep"); code != 0 {
+		t.Fatal("sweep")
+	}
+	k := item.IssueKey("127.0.0.1", "o/r", 5)
+	for _, state := range []item.State{item.Ignored, item.InReview, item.Done, item.Proposed} {
+		setState(t, e.dir, k, state)
+		code, _, stderr := e.run("items", "retry", "o/r#5")
+		if code != cli.ExitUsage || !strings.Contains(stderr, "is "+string(state)+"; retry is only for escalated or quarantined items") {
+			t.Fatalf("%s: %d %s", state, code, stderr)
+		}
+		_, out, _ := e.run("--format", "json", "items", "show", "o/r#5")
+		if !strings.Contains(out, `"state": "`+string(state)+`"`) || !strings.Contains(out, `"attempts": 3`) || !strings.Contains(out, `"ci": 2`) {
+			t.Fatalf("%s was touched:\n%s", state, out)
+		}
+	}
+	for _, state := range []item.State{item.Escalated, item.Quarantined} {
+		setState(t, e.dir, k, state)
+		if code, out, stderr := e.run("items", "retry", "o/r#5"); code != 0 || !strings.Contains(out, "back to ready") {
+			t.Fatalf("%s: %d %s %s", state, code, out, stderr)
+		}
+		_, out, _ := e.run("--format", "json", "items", "show", "o/r#5")
+		if !strings.Contains(out, `"state": "ready"`) || strings.Contains(out, `"attempts": 3`) {
+			t.Fatalf("%s not reset:\n%s", state, out)
+		}
 	}
 }
 

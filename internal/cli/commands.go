@@ -400,6 +400,9 @@ func (a *app) human(ctx context.Context, e *engine.Engine, k, what string) error
 		return err
 	}
 	if what == "retry" {
+		if it.State != item.Escalated && it.State != item.Quarantined {
+			return withCode(ExitUsage, fmt.Errorf("%s is %s; retry is only for escalated or quarantined items", k, it.State))
+		}
 		if it.Lease.Held(e.Now()) {
 			return fmt.Errorf("%s is being worked on by %s; release it first if that is stale", k, it.Lease.Owner)
 		}
