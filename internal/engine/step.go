@@ -354,13 +354,36 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		return fail(runner.Error, err)
 	}
 
+	job, inImage, err := s.job(lane, r, ex, wt, runDir)
+	if err != nil {
+		return fail(runner.OperatorError, err)
+	}
+	// The harness the lane is held to is the one that will run: inside the image, or in the
+	// folder ynh runs on the host (ADR-012).
 	var focus *runner.Focus
-	if y, ok := r.(runner.YnhRunner); ok && y.Cfg.Focus != "" {
-		f, err := runner.ResolveFocus(filepath.Join(wt, filepath.FromSlash(y.Cfg.Harness)), y.Cfg.Focus)
+	if y, ok := r.(runner.YnhRunner); ok {
+		h, known, err := s.harness(y, job.Image, inImage, lane.Run.Image == "", wt)
 		if err != nil {
 			return fail(runner.OperatorError, err)
 		}
-		focus = &f
+		if known {
+			if err := s.checkPassthrough(lane, y, h, ex.Contained() && len(job.Egress) > 0); err != nil {
+				return fail(runner.OperatorError, err)
+			}
+			if err := h.CheckLane(y.Cfg); err != nil {
+				return fail(runner.OperatorError, err)
+			}
+		}
+		if y.Cfg.Focus != "" {
+			if !known {
+				return fail(runner.OperatorError, fmt.Errorf("focus %q: the harness %s cannot be read, so its focus cannot be resolved", y.Cfg.Focus, y.Cfg.Harness))
+			}
+			f, err := h.Focus(y.Cfg.Focus)
+			if err != nil {
+				return fail(runner.OperatorError, fmt.Errorf("focus %q: %w", y.Cfg.Focus, err))
+			}
+			focus = &f
+		}
 	}
 	body := task(it, s.text, feedback, s.recall(it))
 	if focus != nil {
@@ -368,10 +391,6 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	}
 	if err := os.WriteFile(filepath.Join(runDir, "task.md"), []byte(body), 0o644); err != nil {
 		return fail(runner.Error, err)
-	}
-	job, inImage, err := s.job(lane, r, ex, wt, runDir)
-	if err != nil {
-		return fail(runner.OperatorError, err)
 	}
 	_, cr := ex.Paths(job)
 	labels := []string(nil)
@@ -438,9 +457,6 @@ func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, wt, 
 	if !isYnh {
 		return job, false, nil
 	}
-	if err := s.checkPassthrough(lane, y, wt, ex.Contained() && len(job.Egress)+len(runner.ModelHosts[y.Vendor()]) > 0); err != nil {
-		return job, false, err
-	}
 	if !ex.Contained() {
 		if y.Cfg.AutoApprove != "" && e.HostAutoApprove == "" {
 			e.log().Warn("auto_approve applies only inside containment; this run keeps its approval prompts", "lane", lane.Name, "executor", ex.Name())
@@ -458,7 +474,7 @@ func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, wt, 
 	}
 	if job.Image == "" {
 		if e.BuildImage == nil {
-			return job, false, fmt.Errorf("lane %s runs ynh in a container, which needs ynh on PATH to build the agent image, or run.image", lane.Name)
+			return job, false, fmt.Errorf("lane %s names no published image (run.image), and this instance does not build one: that needs ynh on PATH and images.build not false", lane.Name)
 		}
 		img, err := e.BuildImage(s.ctx, wt, y.Cfg)
 		if err != nil {
@@ -512,20 +528,50 @@ var proxyVars = []string{"HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"}
 // worker only the variables the harness lists in env_passthrough, deliberately, so a lane's
 // run.env (the model key) or the egress proxy's variables that the harness does not list never
 // arrive, and the run fails in a way that looks like the agent being stuck.
-func (s *step) checkPassthrough(lane policy.Lane, y runner.YnhRunner, wt string, behindProxy bool) error {
-	h, err := runner.ReadHarness(filepath.Join(wt, filepath.FromSlash(y.Cfg.Harness)))
-	if err != nil {
-		return nil // an installed harness id: ynh reports its own manifest problems
-	}
+func (s *step) checkPassthrough(lane policy.Lane, y runner.YnhRunner, h runner.Harness, behindProxy bool) error {
 	need := append([]string(nil), lane.Run.Env...)
 	if behindProxy {
 		need = append(need, proxyVars...)
 	}
 	if missing := h.NotPassed(need); len(missing) > 0 {
 		return fmt.Errorf("harness %s does not pass %s to its agent worker: ynh gives the worker only what env_passthrough lists, so without them the agent cannot log in or reach the egress proxy; add them to env_passthrough in the harness manifest",
-			y.Cfg.Harness, strings.Join(missing, ", "))
+			harnessName(y), strings.Join(missing, ", "))
 	}
 	return nil
+}
+
+// harness reads what the harness that will run declares: from the image's own ynh, or from the
+// harness folder ynh runs on the host. known is false for an installed harness id on the host,
+// whose manifest ynh reads and reports on itself.
+func (s *step) harness(y runner.YnhRunner, image string, inImage, built bool, wt string) (h runner.Harness, known bool, err error) {
+	if inImage {
+		if s.e.ImageHarness == nil {
+			return h, false, nil
+		}
+		// An image ynf built from a harness folder carries exactly that harness; a published one
+		// is held to the harness the lane names, if it names one.
+		want := y.Cfg.Harness
+		if built {
+			want = ""
+		}
+		h, err = s.e.ImageHarness(s.ctx, image, want)
+		if err != nil {
+			return h, false, fmt.Errorf("read the harness in %s: %w", image, err)
+		}
+		return h, true, nil
+	}
+	if y.Cfg.Harness == "" {
+		return h, false, errors.New("a ynh lane on the host needs ynh.harness, the harness to run")
+	}
+	h, err = runner.ReadHarness(filepath.Join(wt, filepath.FromSlash(y.Cfg.Harness)))
+	return h, err == nil, nil
+}
+
+func harnessName(y runner.YnhRunner) string {
+	if y.Cfg.Harness == "" {
+		return "in the image"
+	}
+	return y.Cfg.Harness
 }
 
 // openPR gates, commits, pushes and opens (or reuses) the pull request for this step's change.

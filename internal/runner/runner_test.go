@@ -176,3 +176,33 @@ func TestReadHarnessPassthrough(t *testing.T) {
 		t.Fatalf("%v", got)
 	}
 }
+
+// TestALaneOnlyTightensItsHarness: budgets may only tighten the harness's own, and a sensor scope
+// may only name a sensor the harness declares (ADR-006).
+func TestALaneOnlyTightensItsHarness(t *testing.T) {
+	h, err := runner.ParseManifest([]byte(`{"agent":{"max_turns":12,"max_tokens":1000,"max_wall":"30m"},"sensors":{"lint":{},"test":{}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok := policy.Ynh{Budgets: &policy.Budgets{MaxTurns: 6, MaxTokens: 1000, MaxWall: "10m"}, SensorScope: map[string]string{"lint": "x"}}
+	if err := h.CheckLane(ok); err != nil {
+		t.Fatalf("a tighter lane refused: %v", err)
+	}
+	loose := policy.Ynh{Budgets: &policy.Budgets{MaxTurns: 20, MaxTokens: 2000, MaxWall: "1h"}, SensorScope: map[string]string{"docs": "x", "lint": "y"}}
+	err = h.CheckLane(loose)
+	for _, want := range []string{"max_turns 20 loosens the harness's 12", "max_tokens 2000 loosens the harness's 1000", "max_wall 1h loosens the harness's 30m", `sensor_scope names "docs"`} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%v lacks %q", err, want)
+		}
+	}
+	if err := h.CheckLane(policy.Ynh{Budgets: &policy.Budgets{MaxWall: "soon"}}); err == nil || !strings.Contains(err.Error(), "not a duration") {
+		t.Errorf("a bad duration: %v", err)
+	}
+	var open runner.Harness // a harness without caps: any lane cap tightens it
+	if err := open.CheckLane(policy.Ynh{Budgets: &policy.Budgets{MaxTurns: 99, MaxWall: "2h"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.ParseManifest([]byte(`{`)); err == nil {
+		t.Fatal("a broken manifest parsed")
+	}
+}

@@ -45,6 +45,9 @@ type Config struct {
 		CI     string `yaml:"ci"`
 		Review string `yaml:"review"`
 	} `yaml:"poll"`
+	Images struct {
+		Build *bool `yaml:"build"`
+	} `yaml:"images"`
 	Memory *struct {
 		Provider            string `yaml:"provider"`
 		Namespace           string `yaml:"namespace"`

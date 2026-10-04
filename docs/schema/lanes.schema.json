@@ -328,13 +328,10 @@
         "ynh": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "harness"
-          ],
           "properties": {
             "harness": {
               "type": "string",
-              "description": "A path to a harness folder in the repository ('.' for its own .agents/harness), from which ynf builds the run's image with `ynh image --entrypoint agent`; or an installed id, with run.image naming a prebuilt agent image."
+              "description": "A path to a harness folder in the repository ('.' for its own .agents/harness), from which ynf builds the run's image with `ynh image --entrypoint agent` when the lane names no published image. With run.image it is optional: the image carries its harness, and this picks one by id or name when it carries several."
             },
             "focus": {
               "type": "string"
@@ -451,7 +448,26 @@
             ]
           }
         }
-      ]
+      ],
+      "if": {
+        "required": [
+          "ynh"
+        ],
+        "not": {
+          "required": [
+            "image"
+          ]
+        }
+      },
+      "then": {
+        "properties": {
+          "ynh": {
+            "required": [
+              "harness"
+            ]
+          }
+        }
+      }
     },
     "egress": {
       "type": "object",
