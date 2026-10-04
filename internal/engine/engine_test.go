@@ -522,6 +522,14 @@ func TestUncontainedExecutorRefusedUnattended(t *testing.T) {
 	if it.State != item.Escalated || it.LastRun.Outcome != "operator_error" || !strings.Contains(it.LastRun.Detail, "not contained") {
 		t.Fatalf("%s %+v", it.State, it.LastRun)
 	}
+	// A refused run still records what it would have used.
+	entries, _ := h.e.Store.Log(ctx, "item/github.com/o/r/issues/1")
+	if !slices.ContainsFunc(entries, func(en store.LogEntry) bool {
+		var rec engine.RunRecord
+		return en.Kind == "run" && json.Unmarshal(en.Body, &rec) == nil && rec.Runner == "command" && rec.Executor == "process" && rec.Outcome == "operator_error"
+	}) {
+		t.Fatalf("a refused run lacks its runner or executor: %+v", entries)
+	}
 }
 
 func TestHeldLeaseIsSkipped(t *testing.T) {
@@ -1882,6 +1890,15 @@ func TestStatsByModel(t *testing.T) {
 	stats, _ = h.e.Stats(ctx)
 	if i := slices.IndexFunc(stats, func(s engine.Stats) bool { return s.Lane == "fmt" }); i < 0 || len(stats[i].Models) != 1 || stats[i].Models[0].Model != "none (command)" {
 		t.Fatalf("a command lane: %+v", stats)
+	}
+	// A run recorded with no runner, as a refused one once was, is labelled without a stray space.
+	bare := store.LogEntry{ID: "Zbare", Time: time.Now(), Kind: "run", Body: json.RawMessage(`{"run_id":"R","outcome":"operator_error"}`)}
+	if err := h.e.Store.Append(ctx, "item/github.com/o/r/issues/2", bare); err != nil {
+		t.Fatal(err)
+	}
+	stats, _ = h.e.Stats(ctx)
+	if i := slices.IndexFunc(stats, func(s engine.Stats) bool { return s.Lane == "fmt" }); i < 0 || !slices.ContainsFunc(stats[i].Models, func(m engine.ModelStats) bool { return m.Model == "unknown (model not reported)" }) {
+		t.Fatalf("a run with no runner: %+v", stats)
 	}
 }
 

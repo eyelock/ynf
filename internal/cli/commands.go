@@ -441,7 +441,11 @@ func summarise(en store.LogEntry) string {
 	case "run":
 		var r engine.RunRecord
 		if json.Unmarshal(en.Body, &r) == nil {
-			return fmt.Sprintf("%s %s via %s: %s %s, %d changed (%s)", r.RunID, r.Runner, r.Executor, r.Outcome, r.Detail, len(r.Changed), r.Duration)
+			via := ""
+			if r.Executor != "" {
+				via = " via " + r.Executor
+			}
+			return fmt.Sprintf("%s %s%s: %s %s, %d changed (%s)", r.RunID, r.Runner, via, r.Outcome, r.Detail, len(r.Changed), r.Duration)
 		}
 	case "action":
 		var r engine.ActionRecord

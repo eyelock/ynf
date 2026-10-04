@@ -271,6 +271,8 @@ func (e *Engine) addModelStats(ctx context.Context, s *Stats, it item.Item) erro
 			model = r.Backend + " (model not reported)" // the vendor's default, which it did not name
 		case r.Runner == "command":
 			model = "none (command)"
+		case r.Runner == "":
+			model = "unknown (model not reported)" // a record from before runs named their runner
 		default:
 			model = r.Runner + " (model not reported)"
 		}
