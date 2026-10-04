@@ -6,7 +6,9 @@
 # The ynh lanes run in an agent image ynf builds from this repository's own harness on
 # ynf-sandbox-agent:latest (sandbox/images/agent, `make agent-image`), which has the Go toolchain
 # and golangci-lint the sensors need. ANTHROPIC_API_KEY is passed in by name; api.anthropic.com is
-# allowed through the egress proxy without being listed.
+# allowed through the egress proxy without being listed. They run with ynh's --auto-approve edits:
+# inside the container the worker edits without asking, and still cannot run commands; ynh's
+# sensors check its work between turns. The base needs a ynh with capabilities 0.9.0.
 # Lint gets a cache inside the worktree: golangci-lint's shared cache attributes findings to
 # whichever copy of identical code it saw first, and --new-from-merge-base then drops them.
 version: 1
@@ -31,6 +33,7 @@ lanes:
         harness: .
         base: ynf-sandbox-agent:latest
         focus: tidy
+        auto_approve: edits
         sensor_scope:
           lint: 'GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run ./{label.pkg}/...'
           test: 'go test -count=1 ./{label.pkg}/...'
@@ -59,6 +62,7 @@ lanes:
         harness: .
         base: ynf-sandbox-agent:latest
         focus: docs
+        auto_approve: edits
         sensor_scope:
           lint: 'GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run ./{label.pkg}/...'
           test: 'go test -count=1 ./{label.pkg}/...'
@@ -123,6 +127,7 @@ lanes:
         harness: .
         base: ynf-sandbox-agent:latest
         focus: fix-ci
+        auto_approve: edits
         sensor_scope:
           lint: 'GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run --config .golangci.ci.yml --new-from-merge-base=origin/main ./{label.pkg}/...'
           test: 'go test -count=1 ./{label.pkg}/...'

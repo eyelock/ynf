@@ -70,6 +70,10 @@ func (y YnhRunner) Command(s Spec) ([]string, error) {
 	if y.Cfg.Sandbox != "" {
 		argv = append(argv, "--sandbox", y.Cfg.Sandbox)
 	}
+	// Approval prompts are only safe to switch off inside containment ynf owns (ADR-007).
+	if y.Cfg.AutoApprove != "" && s.InImage {
+		argv = append(argv, "--auto-approve", y.Cfg.AutoApprove)
+	}
 	if b := y.Cfg.Budgets; b != nil {
 		if b.MaxTurns > 0 {
 			argv = append(argv, "--max-turns", strconv.Itoa(b.MaxTurns))

@@ -56,6 +56,15 @@ with ynf's trailers (ADR-010), pushes, opens or updates the pull request, and co
 the GitHub App and JIRA credentials only ynf holds. A prompt-injected agent can at worst produce
 a bad diff, which a human reviews.
 
+**Approval prompts are switched off only inside containment.** A worker with no one to approve
+its edits changes nothing. ynh passes no permission flag unless asked; a lane asks with
+`run.ynh.auto_approve: edits | all`, which ynf passes to `ynh agent run --auto-approve` only for a
+contained run, and only after asking the agent image's own ynh, which runs the agent, for its
+capabilities (0.9.0 or later). An older image is refused before anything runs. A run on the host
+keeps its prompts, with a warning. `edits` approves file edits and still refuses commands, with
+ynh's sensors checking the work between turns; lanes use the narrowest level that works. The
+vendor-specific part, which mode each vendor CLI needs and when the vendor refuses it, is ynh's.
+
 **A diff gate before every push.** ynf refuses to push, and escalates, when the diff:
 
 - touches paths outside the lane's `allowed_paths` (all paths by default)

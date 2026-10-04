@@ -5,11 +5,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/eyelock/ynf/internal/policy"
 )
@@ -35,7 +37,12 @@ func buildHarnessImage(ctx context.Context, wt string, cfg policy.Ynh) (string, 
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256([]byte(strings.TrimSpace(head) + "\x00" + cfg.Harness + "\x00" + cfg.Base))
+	// The base's image id, not just its name: a rebuilt base (a newer ynh, say) is a new image.
+	var baseID string
+	if cfg.Base != "" {
+		baseID, _ = output(ctx, "", "docker", "image", "inspect", "--format", "{{.Id}}", cfg.Base)
+	}
+	sum := sha256.Sum256([]byte(strings.TrimSpace(head) + "\x00" + cfg.Harness + "\x00" + cfg.Base + "\x00" + strings.TrimSpace(baseID)))
 	tag := "ynf-harness:" + hex.EncodeToString(sum[:])[:16]
 	if _, err := output(ctx, "", "docker", "image", "inspect", tag); err == nil {
 		return tag, nil
@@ -48,6 +55,33 @@ func buildHarnessImage(ctx context.Context, wt string, cfg policy.Ynh) (string, 
 		return "", fmt.Errorf("ynh image: %w\n%s", err, tailLines(out, 10))
 	}
 	return tag, nil
+}
+
+var (
+	capsMu    sync.Mutex
+	capsCache = map[string]string{}
+)
+
+// imageCapabilities asks the ynh inside an agent image for its capabilities version, once per
+// image: the image's ynh runs the agent, not the host's.
+func imageCapabilities(ctx context.Context, image string) (string, error) {
+	capsMu.Lock()
+	defer capsMu.Unlock()
+	if v, ok := capsCache[image]; ok {
+		return v, nil
+	}
+	out, err := output(ctx, "", "docker", "run", "--rm", "--network", "none", "--entrypoint", "ynh", image, "version", "--format", "json")
+	if err != nil {
+		return "", err
+	}
+	var v struct {
+		Capabilities string `json:"capabilities"`
+	}
+	if err := json.Unmarshal([]byte(out), &v); err != nil || v.Capabilities == "" {
+		return "", fmt.Errorf("ynh version in %s: %q", image, tailLines(out, 3))
+	}
+	capsCache[image] = v.Capabilities
+	return v.Capabilities, nil
 }
 
 func isHarness(dir string) bool {
