@@ -8,6 +8,8 @@
 #   make e2e        rebuild the sandbox, run ynf against it until everything settles, and check
 #                   each fixture's expect block (tests the factory; LANES=gofmt,deps,reclaim by default)
 #   make e2e-only   the same, without the rebuild
+#   make reset also empties the sandbox's ynm namespace (factory/eyelock/ynf-sandbox), so every
+#   e2e run starts from the same memory; e2e checks each item that ran left its memories
 #   make agent-image  build ynf-sandbox-agent:latest, the base the ynh lanes' harness images use
 #                   (YNH_SRC=path to a ynh checkout; its origin/develop is built into the image)
 # Deleting needs the delete_repo scope: gh auth refresh -s delete_repo
@@ -39,6 +41,7 @@ down: init
 	$(TF) destroy -auto-approve
 
 reset: down up
+	cd e2e && go run . -forget-memory
 
 calibrate:
 	cd calibrate && go run . -root ..
