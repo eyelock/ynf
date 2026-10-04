@@ -45,14 +45,17 @@ harness is published in two flavours that differ only in their base (ADR-009): o
 developers, and on ynf's factory image for a job runner. ynf reads what the image's harness
 declares from the image itself (ADR-012).
 
-Every run gets its own worktree, step directory and **tool caches**. A cache shared between
-worktrees is a correctness problem, not only a containment one. golangci-lint's analysis cache
+Every run gets its own checkout, step directory and **tool caches**. The checkout is a local
+clone of ynf's mirror, not a `git worktree`: its `.git` is a real folder inside it, so the one
+mount gives the run a working repository (`git diff`, `origin/main`) and nothing of ynf's, none of
+the mirror's other branches. A cache shared between
+checkouts is a correctness problem, not only a containment one. golangci-lint's analysis cache
 attributes a finding to whichever copy of identical code it saw first, so a sensor scoped with
-`--new-from-merge-base` in a second worktree silently drops it. Go's test cache replays a flaky
+`--new-from-merge-base` in a second checkout silently drops it. Go's test cache replays a flaky
 test's one pass forever, so the run can never look stuck. Contained executors start each run with
 empty caches; the `process` executor points `XDG_CACHE_HOME` and the common tool cache variables
 into the step directory. Separately, a sensor that judges a run should not read results from a
-cache at all (`go test -count=1`). Worktree paths are resolved to their real path before use: on
+cache at all (`go test -count=1`). Checkout paths are resolved to their real path before use: on
 macOS the temp directory is under `/var`, a symlink to `/private/var`, and when git and a linter
 disagree about a file's path, `--new-from-merge-base` matches nothing and the sensor passes.
 
@@ -61,7 +64,7 @@ checkpoint (ynh only checkpoints when given a real emit path).
 
 **The agent never holds forge or tracker write credentials.** The worker receives only what the
 harness's `env_passthrough` declares: model credentials and, where needed, read-only tokens. When
-the run ends, ynf itself reads the worktree (`base_commit` and `changed_files` from the result),
+the run ends, ynf itself reads the checkout (`base_commit` and `changed_files` from the result),
 commits with ynf's trailers (ADR-010), pushes, opens or updates the pull request, comments and
 labels, using the forge and tracker credentials only ynf holds (ADR-003). A prompt-injected agent
 can at worst produce a bad diff, which a human reviews.

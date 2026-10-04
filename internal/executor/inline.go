@@ -18,7 +18,7 @@ import (
 // dropped capabilities); ynf keeps its credentials from the run by running it as another user.
 //
 // ynf runs as root in the container with only SETUID, SETGID and CHOWN. Before a run it hands the
-// run's folders, and the repository mirror its worktree shares, to the run user; it starts the run
+// run's folders to the run user; it starts the run
 // as that user with only the run's own environment; afterwards it takes the folders back. The run
 // cannot read ynf's environment or memory (another user, no SYS_PTRACE) or its token.
 type Inline struct {

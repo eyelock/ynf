@@ -30,8 +30,8 @@ import (
 // Git is what the engine needs from the workspace.
 type Git interface {
 	Mirror(ctx context.Context, repo string) (string, error)
-	Worktree(ctx context.Context, mirror, ref, dir string) (string, error)
-	RemoveWorktree(ctx context.Context, mirror, dir string) error
+	Checkout(ctx context.Context, mirror, ref, dir string) (string, error)
+	RemoveCheckout(dir string) error
 	RemoteHas(ctx context.Context, mirror, branch string) bool
 	Changed(ctx context.Context, wt string) ([]string, error)
 	Commit(ctx context.Context, wt, message string) (string, error)

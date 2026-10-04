@@ -1,4 +1,4 @@
-// Package workspace is ynf's git: a mirror per repository, a worktree per step, and the commit and
+// Package workspace is ynf's git: a mirror per repository, a checkout per step, and the commit and
 // push that only ynf (never the agent) performs (ADR-007). The token reaches git through
 // environment configuration, so it never appears in a process listing.
 package workspace
@@ -17,7 +17,7 @@ import (
 // Author is the git identity of ynf's commits.
 type Author struct{ Name, Email string }
 
-// Workspace manages mirrors and worktrees under Root.
+// Workspace manages mirrors and checkouts under Root.
 type Workspace struct {
 	Root   string
 	Token  string
@@ -47,9 +47,17 @@ func (w Workspace) Mirror(ctx context.Context, repo string) (string, error) {
 	return filepath.EvalSymlinks(dir)
 }
 
-// Worktree adds a detached worktree at origin/<ref> and returns its real path. Real, because a
-// symlinked path makes git and linters disagree about which files changed (ADR-007).
-func (w Workspace) Worktree(ctx context.Context, mirror, ref, dir string) (string, error) {
+// Checkout makes a self-contained clone of the mirror at origin/<ref>, detached, and returns its
+// real path. Real, because a symlinked path makes git and linters disagree about which files
+// changed (ADR-007).
+//
+// A clone rather than a git worktree: a worktree's .git is a file pointing into the mirror by
+// absolute host path, so a container that mounts only the checkout has no repository. Here .git is
+// a real folder inside dir, and the one mount is enough. --local hardlinks the mirror's objects
+// (no copy on the same filesystem); --shared would not do, as its alternates file points back
+// into the mirror. The clone keeps the mirror's remote-tracking branch as origin/<ref>, so
+// `--new-from-merge-base=origin/main` works in the run.
+func (w Workspace) Checkout(ctx context.Context, mirror, ref, dir string) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
 		return "", err
 	}
@@ -58,16 +66,27 @@ func (w Workspace) Worktree(ctx context.Context, mirror, ref, dir string) (strin
 		return "", err
 	}
 	dir = filepath.Join(parent, filepath.Base(dir))
-	if _, err := w.git(ctx, mirror, "worktree", "add", "-q", "--detach", dir, "origin/"+ref); err != nil {
+	if _, err := w.git(ctx, "", "clone", "-q", "--local", "--no-checkout", "--no-tags", mirror, dir); err != nil {
+		_ = os.RemoveAll(dir)
 		return "", err
+	}
+	// A clone copies the mirror's branches; the mirror keeps the forge's as remote-tracking refs.
+	remote := "refs/remotes/origin/" + ref
+	for _, args := range [][]string{
+		{"fetch", "-q", "--no-tags", "origin", "+" + remote + ":" + remote},
+		{"checkout", "-q", "--detach", "origin/" + ref},
+	} {
+		if _, err := w.git(ctx, dir, args...); err != nil {
+			_ = os.RemoveAll(dir)
+			return "", err
+		}
 	}
 	return dir, nil
 }
 
-// RemoveWorktree removes a worktree and its registration.
-func (w Workspace) RemoveWorktree(ctx context.Context, mirror, dir string) error {
-	_, err := w.git(ctx, mirror, "worktree", "remove", "--force", dir)
-	return err
+// RemoveCheckout deletes a checkout. It is a whole repository, so there is no registration to undo.
+func (w Workspace) RemoveCheckout(dir string) error {
+	return os.RemoveAll(dir)
 }
 
 // RemoteHas reports whether origin has the branch (after the last fetch).
@@ -104,7 +123,7 @@ func (w Workspace) Commit(ctx context.Context, wt, message string) (string, erro
 	return strings.TrimSpace(out), err
 }
 
-// Head returns the worktree's HEAD commit.
+// Head returns the checkout's HEAD commit.
 func (w Workspace) Head(ctx context.Context, wt string) (string, error) {
 	out, err := w.git(ctx, wt, "rev-parse", "HEAD")
 	return strings.TrimSpace(out), err

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/eyelock/ynf/internal/executor"
+	"github.com/eyelock/ynf/internal/workspace"
 )
 
 func TestFor(t *testing.T) {
@@ -274,5 +275,80 @@ func TestDockerImageUser(t *testing.T) {
 	s := strings.Join(args, " ")
 	if strings.Contains(s, "--user") || strings.Contains(s, "-e HOME=") || !strings.Contains(s, "-e GOCACHE=") {
 		t.Fatalf("an agent image keeps its own user and home, but still gets fresh caches: %s", s)
+	}
+}
+
+// gitImage returns a local image with git, or skips: the test must not pull. The test overrides
+// the image's entrypoint with a shell, as an agent image's is its own runner.
+func gitImage(t *testing.T) string {
+	t.Helper()
+	if err := exec.Command("docker", "info").Run(); err != nil {
+		t.Skip("docker is not available")
+	}
+	for _, image := range []string{"alpine/git", "ynf-sandbox-agent:latest"} {
+		if exec.Command("docker", "image", "inspect", image).Run() != nil {
+			continue
+		}
+		if exec.Command("docker", "run", "--rm", "--entrypoint", "sh", image, "-c", "git --version").Run() == nil {
+			return image
+		}
+	}
+	t.Skip("no local image with git")
+	return ""
+}
+
+// TestDockerGitInsideTheCheckout: with only the checkout mounted, as a run has it, git sees a whole
+// repository (#59), though the files belong to a user the container does not know.
+func TestDockerGitInsideTheCheckout(t *testing.T) {
+	image := gitImage(t)
+	root := t.TempDir()
+	src, bare := filepath.Join(root, "src"), filepath.Join(root, "remote.git")
+	host := func(dir string, args ...string) {
+		t.Helper()
+		c := exec.Command("git", args...)
+		c.Dir = dir
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	host("", "init", "-q", "--bare", "-b", "main", bare)
+	host("", "init", "-q", "-b", "main", src)
+	if err := os.WriteFile(filepath.Join(src, "a.go"), []byte("package a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	host(src, "add", "-A")
+	host(src, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "seed")
+	host(src, "push", "-q", bare, "main")
+
+	ctx := context.Background()
+	w := workspace.Workspace{Root: filepath.Join(root, "ws"), RemoteURL: func(string) string { return bare }}
+	mirror, err := w.Mirror(ctx, "o/r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := w.Checkout(ctx, mirror, "main", filepath.Join(root, "step", "wt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rd, _ := filepath.EvalSymlinks(t.TempDir())
+	if err := os.WriteFile(filepath.Join(wt, "b.go"), []byte("package a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The executor's own command line (mounts, user, environment), with a shell as the entrypoint.
+	args, err := executor.Docker{Bin: "docker"}.Args(executor.Job{
+		Argv:     []string{"-c", "git -C /work status --porcelain && git -C /work rev-parse origin/main"},
+		Worktree: wt, RunDir: rd, Image: image,
+	}, "ynf-test-"+filepath.Base(root), "none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	args = slices.Insert(args, slices.Index(args, image), "--entrypoint", "sh")
+	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git in the container: %v\n%s", err, out)
+	}
+	head, _ := w.Head(ctx, wt)
+	if got := string(out); !strings.Contains(got, "?? b.go") || !strings.Contains(got, head) {
+		t.Fatalf("git in the container saw:\n%s", got)
 	}
 }
