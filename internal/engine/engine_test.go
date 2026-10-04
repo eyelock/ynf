@@ -1186,9 +1186,21 @@ func TestALiveHoldersHeartbeatKeepsItsItem(t *testing.T) {
 	h.e.Heartbeat = 20 * time.Millisecond
 	gate, done := startSlow(t, h)
 	b := another(t, h)
+	key := "item/github.com/o/r/issues/1"
 	for range 5 {
 		h.advance(30 * time.Second) // 2.5 lease TTLs in all
-		time.Sleep(100 * time.Millisecond)
+		// Wait for the heartbeat to renew at the new time, rather than sleeping and hoping: on a
+		// busy machine a fixed sleep can end before it has.
+		for i := 0; ; i++ {
+			due, _ := h.e.Store.Due(context.Background(), h.e.Now(), 10)
+			if !slices.Contains(due, key) {
+				break
+			}
+			if i > 500 {
+				t.Fatal("the heartbeat never moved the item's timer past now")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 		if n, err := b.RunDue(context.Background()); err != nil || n != 0 {
 			if n != 0 {
 				_ = os.WriteFile(gate, nil, 0o644)
