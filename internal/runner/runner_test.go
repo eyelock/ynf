@@ -206,3 +206,17 @@ func TestALaneOnlyTightensItsHarness(t *testing.T) {
 		t.Fatal("a broken manifest parsed")
 	}
 }
+
+// TestYnhUsage: what a ynh run spent and on what is read from its result, for comparing models
+// and effort (ADR-011).
+func TestYnhUsage(t *testing.T) {
+	out := []byte(`{"exit_code":10,"reason":"turn cap reached (12/12)","backend":"claude","model":"opus","effort":"high","ynh_version":"0.9.0",
+		"auto_approve":"edits","bound_by":"turns","cost_usd":0.42,"harness":{"name":"lint","version":"1.4.0","sha":"abc"},
+		"consumed":{"turns":12,"tokens":13261,"wall_ms":300000}}`)
+	r := runner.YnhRunner{}.Interpret(10, out, "")
+	u := r.Usage
+	if r.Outcome != runner.Budget || r.Model != "claude/opus" || u.Effort != "high" || u.Turns != 12 || u.Tokens != 13261 ||
+		u.CostUSD != 0.42 || u.BoundBy != "turns" || u.Harness != "lint@1.4.0" || u.HarnessSHA != "abc" || u.RunnerVersion != "0.9.0" || u.AutoApprove != "edits" {
+		t.Fatalf("%+v", r)
+	}
+}

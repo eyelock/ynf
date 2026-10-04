@@ -86,7 +86,18 @@ interval.
 
 **Stats** computes ynh's factory numbers per lane: yield `y`, review time `r`, break-even
 `y* = r / h` when the lane declares `h`, attempts per item, cost per merged change, and the top
-failure signatures with ynm's reflective summaries.
+failure signatures with ynm's reflective summaries. It breaks each lane down by **model and
+effort** (which can do the work, at what cost): runs, how many converged, turns and tokens per
+run, cost where the runner reports it, and the proposals, merges and rejections of the model whose
+change was proposed. That answers "does this lane need a bigger model, or could it use a smaller
+one or less effort", and replay then tests a cheaper policy against the recorded steps.
+
+**Every run's record says what it ran on and spent:** the model, effort, turns, tokens, cost, the
+cap that bound it, the harness's name, version and commit (a harness change is a confounder, not a
+model effect), the runner's version and the approval level. It is read from the runner's result:
+ynh's, or a command's result file. ynf records what the runner reports and never prices tokens
+itself. These records live in ynf's own store, the run history; memory holds only failure
+patterns (ADR-008).
 
 **Observability:** structured logs as they happen, to stderr and with `--log-file` to a file, as
 text or one JSON object per line: every decision, every run's start, progress and finish, and every

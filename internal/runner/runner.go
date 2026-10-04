@@ -51,6 +51,23 @@ type Result struct {
 	Detail  string `json:"detail,omitempty"`
 	Model   string `json:"model,omitempty"`   // backend/model, when the runner reports one
 	Session string `json:"session,omitempty"` // runner session id (ynh: session_id)
+	Usage
+}
+
+// Usage is what a run spent and on what, when its runner reports it, so outcomes can be compared
+// by model and effort (ADR-011). A command runner's result file may report it too.
+type Usage struct {
+	Effort  string  `json:"effort,omitempty"`   // reasoning effort, when the runner reports it
+	Turns   int     `json:"turns,omitempty"`    // agent turns
+	Tokens  int     `json:"tokens,omitempty"`   // tokens consumed
+	CostUSD float64 `json:"cost_usd,omitempty"` // when the runner reports it; ynf never prices tokens
+	BoundBy string  `json:"bound_by,omitempty"` // the cap that ended the run, if one did
+	// Harness is name@version, and HarnessSHA the commit it was installed from: a harness change is
+	// a confounder when comparing models, not a model effect.
+	Harness       string `json:"harness,omitempty"`
+	HarnessSHA    string `json:"harness_sha,omitempty"`
+	RunnerVersion string `json:"runner_version,omitempty"` // ynh's version
+	AutoApprove   string `json:"auto_approve,omitempty"`
 }
 
 // Runner builds the command a lane runs and interprets how it ended.

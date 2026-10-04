@@ -23,7 +23,7 @@ the FR/NFR ids from ADR-000 it satisfies.
 | [005](005-claims-leases-fencing.md) | Exclusive claims: leases with an epoch, heartbeats, fencing, capped retries, restart on reclaim |
 | [006](006-decider-and-lane-policy.md) | A fixed state machine in code, lanes in YAML with CEL guards; lanes reference ynh focuses and never redefine them |
 | [007](007-executor-and-containment.md) | Executor port; images pulled, built only as a fallback; the agent never holds forge or tracker write credentials; containment mandatory for unattended work |
-| [008](008-memory-with-ynm.md) | ynm as shared memory through a git remote, failure signatures as subjects, memory advisory only and never relayed into tasks |
+| [008](008-memory-with-ynm.md) | ynf's store is the run history; ynm holds failure occurrences, by signature, over HTTP for shared stores; advisory only, never relayed into tasks |
 | [009](009-hosts-and-language.md) | One Go binary, four hosts: developer machine, worker pool, job runner, CI; ynf publishes the factory image |
 | [010](010-governance-and-stop-conditions.md) | Attribution trailers, run capture, retention, stop conditions and auto-pause |
 | [011](011-interface-and-observability.md) | The `ynf` CLI (`start` and `handle`), references, replay, shadow mode, stats, logs and traces |

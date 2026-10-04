@@ -126,6 +126,24 @@ type Stats struct {
 	Signatures map[string]int `json:"signatures"`
 	Paused     bool           `json:"paused"`
 	Reason     string         `json:"reason,omitempty"`
+	// Models breaks the lane's runs down by model and effort (ADR-011): which can do the work,
+	// at what cost. Read from ynf's own run records.
+	Models []ModelStats `json:"models,omitempty"`
+}
+
+// ModelStats is one model and effort's share of a lane's runs. Proposals, merges and rejections
+// are attributed to the model of the run whose change was proposed.
+type ModelStats struct {
+	Model     string  `json:"model"`
+	Effort    string  `json:"effort,omitempty"`
+	Runs      int     `json:"runs"`
+	Converged int     `json:"converged"`
+	Turns     int     `json:"turns"`  // total, over runs that reported them
+	Tokens    int     `json:"tokens"` // total
+	CostUSD   float64 `json:"cost_usd,omitempty"`
+	Proposed  int     `json:"proposed"`
+	Merged    int     `json:"merged"`
+	Rejected  int     `json:"rejected"`
 }
 
 // Stats computes every lane's numbers from its items. Every lane of every enrolled repository is
@@ -176,6 +194,9 @@ func (e *Engine) Stats(ctx context.Context) ([]Stats, error) {
 				s.Signatures[name] += n
 			}
 		}
+		if err := e.addModelStats(ctx, s, it); err != nil {
+			return nil, err
+		}
 	}
 	out := make([]Stats, 0, len(by))
 	for _, k := range slices.Sorted(maps.Keys(by)) {
@@ -215,5 +236,56 @@ func (e *Engine) checkStops(ctx context.Context, repo string, lane policy.Lane, 
 			return e.SetPaused(ctx, repo, lane.Name, true, reason, "ynf")
 		}
 	}
+	return nil
+}
+
+// addModelStats adds an item's runs to its lane's breakdown by model and effort.
+func (e *Engine) addModelStats(ctx context.Context, s *Stats, it item.Item) error {
+	entries, err := e.Store.Log(ctx, it.Key)
+	if err != nil {
+		return err
+	}
+	find := func(model, effort string) *ModelStats {
+		for i := range s.Models {
+			if s.Models[i].Model == model && s.Models[i].Effort == effort {
+				return &s.Models[i]
+			}
+		}
+		s.Models = append(s.Models, ModelStats{Model: model, Effort: effort})
+		return &s.Models[len(s.Models)-1]
+	}
+	var last *ModelStats // the model of the latest converged run: the one whose change was proposed
+	for _, en := range entries {
+		if en.Kind != "run" {
+			continue
+		}
+		var r RunRecord
+		if json.Unmarshal(en.Body, &r) != nil {
+			continue
+		}
+		model := r.Model
+		if model == "" {
+			model = r.Runner // a command, or a runner that reports no model
+		}
+		m := find(model, r.Effort)
+		m.Runs++
+		m.Turns += r.Turns
+		m.Tokens += r.Tokens
+		m.CostUSD += r.CostUSD
+		if r.Outcome == "converged" {
+			m.Converged++
+			last = m
+		}
+	}
+	if last != nil && (it.PR > 0 || it.Kind == "adopt") {
+		last.Proposed++
+		switch it.State {
+		case item.Done:
+			last.Merged++
+		case item.Closed:
+			last.Rejected++
+		}
+	}
+	slices.SortFunc(s.Models, func(a, b ModelStats) int { return strings.Compare(a.Model+"\x00"+a.Effort, b.Model+"\x00"+b.Effort) })
 	return nil
 }

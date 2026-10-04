@@ -77,6 +77,10 @@ type RunRecord struct {
 	Denied   []string `json:"denied,omitempty"` // hosts the egress proxy refused
 	StepDir  string   `json:"step_dir"`
 	Duration string   `json:"duration"`
+	// Model and Usage are what the runner reports, for comparing outcomes and cost by model and
+	// effort (ADR-011). ynf's own store is the run history; memory holds only failure patterns.
+	Model string `json:"model,omitempty"`
+	runner.Usage
 }
 
 // ActionRecord is the log entry for a forge action.
@@ -434,6 +438,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	default:
 		s.result = r.Interpret(out.Exit, out.Stdout, runDir)
 		rec.Exit, rec.Outcome, rec.Detail = out.Exit, s.result.Outcome, s.result.Detail
+		rec.Model, rec.Usage = s.result.Model, s.result.Usage
 		if rec.Outcome == runner.Error && len(out.Stderr) > 0 && !strings.Contains(rec.Detail, ":") {
 			rec.Detail += ": " + tail(string(out.Stderr))
 		}
@@ -443,7 +448,8 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		rec.Outcome, rec.Detail = runner.Error, err.Error()
 	}
 	log.Info("run finished", "outcome", rec.Outcome, "exit", rec.Exit, "duration", rec.Duration,
-		"changed", len(rec.Changed), "denied", strings.Join(rec.Denied, ","), "detail", oneLine(rec.Detail, 200))
+		"changed", len(rec.Changed), "denied", strings.Join(rec.Denied, ","), "model", rec.Model, "turns", rec.Turns, "tokens", rec.Tokens,
+		"detail", oneLine(rec.Detail, 200))
 	return finished(rec)
 }
 

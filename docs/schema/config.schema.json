@@ -148,6 +148,30 @@
         "cwd": {
           "type": "string",
           "description": "The directory ynm runs as if from, which picks its store; relative to the config file. Default: where ynf runs."
+        },
+        "transport": {
+          "enum": [
+            "cli",
+            "http"
+          ],
+          "description": "cli (default): the ynm CLI, whose store memory.cwd picks. http: a hosted ynm's MCP endpoint, the shared store for a pool of workers or CI, where many writers go through one server (ADR-008)."
+        },
+        "endpoint": {
+          "type": "string",
+          "pattern": "^https?://",
+          "description": "The hosted ynm's MCP endpoint, for transport http."
+        },
+        "token_env": {
+          "type": "string",
+          "pattern": "^[A-Z_][A-Z0-9_]*$",
+          "description": "The variable holding the bearer token for transport http, such as a machine token from the identity provider's client-credentials grant: its subject is the writer in ynm's audit log."
+        },
+        "level": {
+          "enum": [
+            "personal",
+            "distributed"
+          ],
+          "description": "The level ynf writes at. personal is one person's store; distributed is shared. Over http it defaults to distributed, since a hosted store keeps nothing at the personal level."
         }
       }
     }

@@ -23,9 +23,18 @@ as a hosted service.
 | Writer | What | Type | Namespace and subject |
 |---|---|---|---|
 | ynh run, via ynm's plugin, when its harness wants memory | in-run learnings and scratch | `working`, promoted to `episodic` | `session/<id>`, the repository's namespace |
-| ynf, per step | decision, exit code, `bound_by`, failing sensors, CI result, review outcome | `episodic`, `dataSchema: ynf.step.v1` | `factory/<host>/<org>/<repo>`, subject = the item key |
-| ynf, per failure | one record per distinct failure in the step | `episodic`, `dataSchema: ynf.failure.v1` | `factory/<host>/<org>/<repo>`, subject = the failure signature |
+| ynf, per occurrence of a failure | one record each time a signature occurs, its text naming the item, run, step and time | `episodic`, `dataSchema: ynf.failure.v1`, tagged `ynf.failure.v1` | `factory/<host>/<org>/<repo>`, subject = the failure signature |
 | ynm dream | "this keeps happening" | `reflective`, and `procedural` on promote | the same signature subject |
+
+**ynf's own store is the run history; memory holds the patterns.** Every decision, run and action
+is already in the item's log in ynf's store (ADR-004): what `ynf replay` reads and what `ynf stats`
+counts, by model and effort (ADR-011). ynf does not copy steps into ynm. ynm's consolidation is
+built to merge and supersede: its dedupe pass merges episodic memories it judges to state the same
+fact, and its contradiction pass, grouping by subject, retires an older memory a newer one
+supersedes. Step records sharing an item as their subject ("attempt 1 failed", "attempt 2
+converged") would be pruned into a history that was never true. Failure occurrences are what ynm
+is for, so ynf writes those, and makes each one's text its own (the item, run, step and time), so
+the dedupe pass never takes two occurrences for one fact and the reflect pass sees every one.
 
 **Failure signatures are the subject.** A signature is deterministic and normalised, so the same
 failure clusters without a model:
@@ -59,10 +68,12 @@ summaries, and a recurring signature can open an issue on the harness's reposito
 sensor, a focus change or a quarantine. ynf proposes harness changes; it never makes them. An
 agent sees ynf's records only if its harness connects to the same store and namespace.
 
-**ynf owns its schemas.** `ynf.step.v1` and `ynf.failure.v1` are ynf's, published from this
-repository as JSON schemas under `docs/schema/memory/`. ynm stores them as it stores any record:
-`data` is an object it does not interpret, `dataSchema` a label it filters on. ynm needs no
-change, no registry entry and no knowledge of ynf to hold them.
+**ynf owns its schema.** `ynf.failure.v1` is ynf's, published from this repository as a JSON
+schema under `docs/schema/memory/`. ynm stores it as it stores any record: `data` is an object it
+does not interpret, and `dataSchema` a label it keeps but does not filter on. ynm's filters are
+text, type, level, namespace prefix, subject, tags, a `data` key and time, so each record is also
+tagged with its schema, `ynf.failure.v1`, and selected by that tag and the `factory/` namespace.
+ynm needs no change, no registry entry and no knowledge of ynf to hold it.
 
 **Loosely coupled, configured by ynf.** ynm is detected with no configuration when installed
 (ADR-012), and optional: with no `memory` block ynf runs without it, and only its records and the
@@ -73,11 +84,12 @@ expecting ynm to know about it:
 ```yaml
 memory:
   provider: ynm
-  transport: cli                    # or http
-  cwd: /srv/factory/memory          # the folder ynm runs from, which picks its store (cli)
-  # endpoint: https://ynm.internal/mcp, token_env: YNF_YNM_TOKEN   (http)
+  transport: http                   # or cli
+  endpoint: https://ynm.internal/mcp
+  token_env: YNF_YNM_TOKEN          # a machine token; its subject is the writer in ynm's audit log
+  level: distributed                # http's default: a hosted store keeps nothing personal
   namespace: "factory/{repo}"       # {repo} is host/org/repo
-  write: { steps: true, failures: true }
+  # cwd: /srv/factory/memory        # cli: the folder ynm runs from, which picks its store
 ```
 
 ynf may drive ynm on its own behalf, such as triggering `memory_consolidate` after a lane's batch
@@ -85,12 +97,16 @@ of steps so reflections are current, but only through the same public surfaces, 
 writing ynm's config files or stores directly. `ynf doctor` checks the endpoint, the token and
 that a test write and recall round-trip.
 
-**Transport and store.** The CLI with `--json`, run from a folder whose ynm configuration picks the
-store. On a developer's machine that is their own store. Wherever memory must outlive the process
-or be shared, on a worker in a pool, a job runner or CI, the store is a git remote that ynm pulls
-from and pushes to, so no service is needed. A hosted `ynm serve --http` is the alternative where
-writes should be serialised through one writer (ynm ADR-009). The factory image carries ynm
-(ADR-009); the agent's own memory, if any, is the harness's configuration.
+**Transport, store and level.** On a developer's machine, the CLI with `--json`, run from a folder
+whose ynm configuration picks the store: their own. Wherever memory is shared, a pool of workers,
+a job runner or CI, many writers at once is the case ynm's hosted server is for: ynf writes over
+its MCP HTTP endpoint with `memory_remember`, authenticated with a machine token from the identity
+provider's client-credentials grant (an Auth0 machine-to-machine application, a Keycloak service
+account), whose subject is the writer in ynm's audit log. A git remote that ynm pushes to also
+works where writers are few. ynm is personal by default and a hosted store keeps nothing at the
+personal level, so a write to a shared store sets `level: distributed` explicitly; over http that is
+the default. The factory image carries ynm for the CLI path (ADR-009); the agent's own memory, if
+any, is the harness's configuration.
 
 ## Alternatives
 
@@ -108,8 +124,6 @@ writes should be serialised through one writer (ynm ADR-009). The factory image 
 
 ## Open questions
 
-- A shared store through a git remote, written from a container with a token and from several
-  workers at once: how ynm reconciles concurrent pushes to the same notes, before it is relied on.
 - Should the `memory` port admit providers other than ynm? The block has a `provider` key so it
   can, but nothing needs it yet.
 

@@ -23,12 +23,17 @@ the folder the file is in.
 | `poll.review` | `5m` | How often an item in review is probed for merge, close or review. |
 | `memory.provider` | detected | `ynm`, or `none` to switch memory off. Without a `memory` block, ynf uses ynm when it is on PATH (ADR-012). ynf writes what only it can see (each step's outcome, and failures recurring across runs) and never puts memory into an agent's task: a harness that wants memory connects its agent to ynm itself (ADR-008). |
 | `memory.namespace` | `factory/{repo}` | Where a repository's memories go; `{repo}` is `host/owner/name`, so the same `owner/name` on two forges never share one. |
-| `memory.cwd` | where ynf runs | The directory ynm runs as if from, which decides its store: your own on a laptop; a shared one, such as a git remote ynm pushes to, wherever memory must outlive the process or be shared. |
+| `memory.cwd` | where ynf runs | With `transport: cli`, the directory ynm runs as if from, which decides its store: your own on a laptop. |
+| `memory.transport` | `cli` | `cli`, the ynm CLI; or `http`, a hosted ynm's MCP endpoint, the shared store for a pool of workers or CI, where many writers go through one server (ADR-008). |
+| `memory.endpoint` | none | The hosted ynm's MCP endpoint, for `transport: http`. |
+| `memory.token_env` | none | The variable holding the bearer token for `transport: http`, such as a machine token from your identity provider's client-credentials grant; its subject is the writer in ynm's audit log. ynf refuses to start without it. |
+| `memory.level` | `personal`; `distributed` over http | The level ynf writes at. A shared store keeps nothing at the personal level, so writes to one say `distributed`. |
 
 What ynf writes to memory, and why it never decides anything with it, is in
-[Learning from failure](../explanation/learning-from-failure.md); the data shapes are
-[`ynf.step.v1`](../schema/memory/ynf.step.v1.schema.json) and
-[`ynf.failure.v1`](../schema/memory/ynf.failure.v1.schema.json).
+[Learning from failure](../explanation/learning-from-failure.md): one
+[`ynf.failure.v1`](../schema/memory/ynf.failure.v1.schema.json) record per occurrence of a failure
+signature, tagged `ynf.failure.v1`. Each run's model, effort, turns, tokens and cost stay in ynf's
+own store, where `ynf stats` reads them.
 
 ## The configuration repository
 

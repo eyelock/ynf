@@ -56,6 +56,14 @@ type Config struct {
 		Provider  string `yaml:"provider"`
 		Namespace string `yaml:"namespace"`
 		Cwd       string `yaml:"cwd"`
+		// Transport is cli (the ynm CLI, a store chosen by cwd) or http (a hosted ynm at
+		// Endpoint, with the bearer token in TokenEnv): the shared store for a pool or CI.
+		Transport string `yaml:"transport"`
+		Endpoint  string `yaml:"endpoint"`
+		TokenEnv  string `yaml:"token_env"`
+		// Level is personal or distributed; over http it defaults to distributed, since a hosted
+		// store keeps nothing at the personal level.
+		Level string `yaml:"level"`
 	} `yaml:"memory"`
 
 	Path     string   `yaml:"-"` // the file it was loaded from
@@ -200,4 +208,22 @@ func (c *Config) MemorySettings() (enabled *bool, namespace, cwd string) {
 		cwd = c.rel(m.Cwd)
 	}
 	return enabled, namespace, cwd
+}
+
+// MemoryTransport returns how ynf reaches ynm (cli or http), the endpoint and token variable for
+// http, and the level it writes at.
+func (c *Config) MemoryTransport() (transport, endpoint, tokenEnv, level string) {
+	transport = "cli"
+	m := c.Memory
+	if m == nil {
+		return transport, "", "", ""
+	}
+	if m.Transport != "" {
+		transport = m.Transport
+	}
+	level = m.Level
+	if transport == "http" && level == "" {
+		level = "distributed"
+	}
+	return transport, m.Endpoint, m.TokenEnv, level
 }
