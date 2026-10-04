@@ -51,12 +51,14 @@ func (e *Engine) Start(ctx context.Context, req StartRequest) (item.Item, error)
 		ref = tracker.Ref{Host: AdhocHost, Key: strings.ToLower(e.NewID())}
 	}
 
+	// A GitHub issue's code goes to its own repository, on the same forge.
 	repo := req.Repo
-	if r, _, err := forge.ParseIssueKey(ref.Key); err == nil && ref.Host == e.forgeHost() {
-		if repo != "" && repo != r {
-			return item.Item{}, refuse("%s is an issue in %s, not %s", ref, r, repo)
+	if r, _, err := forge.ParseIssueKey(ref.Key); err == nil && e.isForge(ref.Host) {
+		own := e.qualify(ref.Host, r)
+		if repo != "" && repo != own {
+			return item.Item{}, refuse("%s is an issue in %s, not %s", ref, own, repo)
 		}
-		repo = r
+		repo = own
 	}
 	if repo == "" {
 		return item.Item{}, refuse("%s: say which repository its code goes to, with --repo", ref)
@@ -65,11 +67,16 @@ func (e *Engine) Start(ctx context.Context, req StartRequest) (item.Item, error)
 	if err != nil {
 		return item.Item{}, err
 	}
+	host, name := e.splitRepo(repo)
 	if !slices.Contains(enrolled, repo) {
-		return item.Item{}, refuse("%s/%s is not an enrolled repository", e.forgeHost(), repo)
+		return item.Item{}, refuse("%s/%s is not an enrolled repository", host, name)
 	}
-	if _, err := e.Forge.DefaultBranch(ctx, repo); err != nil {
-		return item.Item{}, refuse("%s/%s cannot be reached: %v", e.forgeHost(), repo, err)
+	fg, _, err := e.forgeFor(repo)
+	if err != nil {
+		return item.Item{}, refuse("%v", err)
+	}
+	if _, err := fg.DefaultBranch(ctx, name); err != nil {
+		return item.Item{}, refuse("%s/%s cannot be reached: %v", host, name, err)
 	}
 
 	lane, err := e.startLane(ctx, repo, req.Lane)
@@ -94,7 +101,7 @@ func (e *Engine) Start(ctx context.Context, req StartRequest) (item.Item, error)
 	now := e.Now()
 	it := item.Item{
 		Key: item.Key(ref), Kind: "originate", Lane: lane.Name, Ticket: ref,
-		Forge: e.forgeHost(), Repo: repo, State: item.Intake, Created: now, Updated: now,
+		Forge: host, Repo: name, State: item.Intake, Created: now, Updated: now,
 	}
 	if _, n, err := forge.ParseIssueKey(ref.Key); err == nil {
 		it.Number = n

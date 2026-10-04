@@ -1509,7 +1509,7 @@ lanes:
 	bad := newHarness(t)
 	bad.e.ConfigRepo = "acme/factory"
 	bad.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [ghe.acme.internal/o/r]\n"))
-	if _, err := bad.e.Enrolled(ctx); err == nil || !strings.Contains(err.Error(), "this ynf works with the forge at github.com") {
+	if _, err := bad.e.Enrolled(ctx); err == nil || !strings.Contains(err.Error(), "ghe.acme.internal, which is not a configured forge") {
 		t.Fatalf("another forge: %v", err)
 	}
 	missing := newHarness(t)
@@ -1532,5 +1532,75 @@ lanes:
 	none.f.setFile("o/r", ".agents/factory/lanes.yaml", nil)
 	if _, err := none.e.Policy(ctx, "o/r"); err == nil || !strings.Contains(err.Error(), "no configuration repository gives it lanes") {
 		t.Fatalf("no lanes anywhere: %v", err)
+	}
+}
+
+// TestASecondForge: a forge the configuration repository declares, such as a GitHub Enterprise
+// Server, carries its own repositories end to end: enrolment, keys, the run, the pull request on
+// that forge and not the default, mirrors kept apart by host, and webhooks from it.
+func TestASecondForge(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	ghe := newForge()
+	ghe.labels[1] = []string{"ynf:agent"}
+	h.e.Repos = nil
+	h.e.ConfigRepo = "acme/factory"
+	h.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r, ghe.acme.internal/acme/x]\nforges:\n  ghe: {provider: github, url: https://ghe.acme.internal, token_env: GHE_TOKEN}\n"))
+	h.f.setFile("acme/factory", ".agents/factory/lanes.yaml", nil)
+	gheGit := workspace.Workspace{Root: filepath.Join(h.e.WorkDir), RemoteURL: func(string) string { return h.remote }}
+	var asked map[string]any
+	h.e.NewForge = func(name string, cfg map[string]any) (engine.ForgeInstance, error) {
+		asked = cfg
+		return engine.ForgeInstance{Host: "ghe.acme.internal", Forge: ghe, Git: gheGit, Tracker: forge.IssueTracker(ghe)}, nil
+	}
+	enrolled, err := h.e.Enrolled(ctx)
+	if err != nil || strings.Join(enrolled, ",") != "o/r,ghe.acme.internal/acme/x" || asked["token_env"] != "GHE_TOKEN" {
+		t.Fatalf("%v %v %v", enrolled, err, asked)
+	}
+	it, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "ghe.acme.internal", Key: "acme/x#1"}, Lane: "agent"})
+	if err != nil || it.State != item.Proposed || it.Key != "item/ghe.acme.internal/acme/x/issues/1" || it.Forge != "ghe.acme.internal" || it.Repo != "acme/x" {
+		t.Fatalf("%+v %v", it, err)
+	}
+	if len(ghe.opened) != 1 || len(h.f.opened) != 0 {
+		t.Fatalf("the pull request belongs on the second forge: there %d, default %d", len(ghe.opened), len(h.f.opened))
+	}
+	if _, err := os.Stat(filepath.Join(h.e.WorkDir, "repos", "ghe.acme.internal", "acme", "x")); err != nil {
+		t.Fatalf("the second forge's mirror should be under its host: %v", err)
+	}
+	if strings.Join(ghe.labels[1], ",") != "ynf:proposed" {
+		t.Fatalf("labels go on the second forge's issue: %v", ghe.labels[1])
+	}
+	body := []byte(`{"repository":{"full_name":"acme/x","html_url":"https://ghe.acme.internal/acme/x"},"issue":{"number":1}}`)
+	touched, err := h.e.HandleGitHubEvent(ctx, "issues", body)
+	if err != nil || touched.Host != "ghe.acme.internal" {
+		t.Fatalf("a webhook from the second forge: %+v %v", touched, err)
+	}
+	stranger := []byte(`{"repository":{"full_name":"acme/x","html_url":"https://elsewhere.example/acme/x"},"issue":{"number":1}}`)
+	if _, err := h.e.HandleGitHubEvent(ctx, "issues", stranger); err == nil || !strings.Contains(err.Error(), "not a configured forge") {
+		t.Fatalf("a webhook from an unknown forge: %v", err)
+	}
+	if _, err := h.e.Start(ctx, engine.StartRequest{Prompt: "p", Repo: "ghe.acme.internal/acme/x", Lane: "agent"}); err != nil {
+		t.Fatalf("a prompt for the second forge's repository: %v", err)
+	}
+	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "ghe.acme.internal", Key: "acme/x#1"}, Repo: "o/r", Lane: "agent"}); err == nil || !strings.Contains(err.Error(), "is an issue in ghe.acme.internal/acme/x") {
+		t.Fatalf("a forge's issue sent elsewhere: %v", err)
+	}
+	stats, err := h.e.Stats(ctx)
+	if err != nil || !slices.ContainsFunc(stats, func(s engine.Stats) bool { return s.Repo == "ghe.acme.internal/acme/x" && s.Proposed == 2 }) {
+		t.Fatalf("stats name the second forge's repository: %+v %v", stats, err)
+	}
+
+	broken := newHarness(t)
+	broken.e.ConfigRepo = "acme/factory"
+	broken.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\nforges:\n  ghe: {provider: github, url: https://ghe.acme.internal, token_env: GHE_TOKEN}\n"))
+	if _, err := broken.e.Enrolled(ctx); err == nil || !strings.Contains(err.Error(), "cannot add forges") {
+		t.Fatalf("no way to add forges: %v", err)
+	}
+	broken.e.ResetPolicies()
+	broken.e.NewForge = func(string, map[string]any) (engine.ForgeInstance, error) {
+		return engine.ForgeInstance{}, errors.New("no token")
+	}
+	if _, err := broken.e.Enrolled(ctx); err == nil || !strings.Contains(err.Error(), "forge ghe: no token") {
+		t.Fatalf("a forge that cannot be built: %v", err)
 	}
 }

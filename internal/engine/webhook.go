@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"slices"
 	"strings"
 
@@ -39,6 +40,7 @@ func VerifyGitHubSignature(secret, header string, body []byte) error {
 type githubPayload struct {
 	Repository struct {
 		FullName string `json:"full_name"`
+		HTMLURL  string `json:"html_url"`
 	} `json:"repository"`
 	Issue *struct {
 		Number      int  `json:"number"`
@@ -61,7 +63,10 @@ type githubPayload struct {
 
 // Touched is what a webhook is about.
 type Touched struct {
-	Repo   string `json:"repo"`
+	Repo string `json:"repo"`
+	// Host is the forge the event came from, read from the payload: github.com and an Enterprise
+	// Server can share one endpoint. Empty when the payload does not say.
+	Host   string `json:"host,omitempty"`
 	Issues []int  `json:"issues,omitempty"`
 	PRs    []int  `json:"prs,omitempty"`
 }
@@ -73,6 +78,9 @@ func ParseGitHubEvent(name string, body []byte) (Touched, error) {
 		return Touched{}, fmt.Errorf("%s payload: %w", name, err)
 	}
 	t := Touched{Repo: p.Repository.FullName}
+	if u, err := url.Parse(p.Repository.HTMLURL); err == nil {
+		t.Host = u.Hostname()
+	}
 	if t.Repo == "" {
 		return t, fmt.Errorf("%s payload has no repository", name)
 	}
@@ -107,8 +115,16 @@ func (e *Engine) HandleGitHubEvent(ctx context.Context, name string, body []byte
 	if err != nil {
 		return t, err
 	}
-	if !slices.Contains(enrolled, t.Repo) {
-		return t, fmt.Errorf("%s is not enrolled", t.Repo)
+	host := t.Host
+	if host == "" {
+		host = e.forgeHost()
+	}
+	if !e.isForge(host) {
+		return t, fmt.Errorf("an event from %s, which is not a configured forge", host)
+	}
+	repo := e.qualify(host, t.Repo)
+	if !slices.Contains(enrolled, repo) {
+		return t, fmt.Errorf("%s is not enrolled", repo)
 	}
 	items, err := e.allItems(ctx)
 	if err != nil {
@@ -116,7 +132,7 @@ func (e *Engine) HandleGitHubEvent(ctx context.Context, name string, body []byte
 	}
 	var keys []string
 	for _, it := range items {
-		if it.Repo != t.Repo || !e.wantLane(it.Lane) {
+		if e.repoOf(it) != repo || !e.wantLane(it.Lane) {
 			continue
 		}
 		if slices.Contains(t.Issues, it.Number) && it.Kind != "adopt" || slices.Contains(t.PRs, it.PR) && it.PR > 0 {
@@ -125,7 +141,7 @@ func (e *Engine) HandleGitHubEvent(ctx context.Context, name string, body []byte
 	}
 	var errs []error
 	if len(t.Issues) > 0 || len(t.PRs) > 0 {
-		errs = append(errs, e.SweepRepos(ctx, []string{t.Repo}))
+		errs = append(errs, e.SweepRepos(ctx, []string{repo}))
 	}
 	for _, k := range keys {
 		it, _, err := loadItem(ctx, e, k)

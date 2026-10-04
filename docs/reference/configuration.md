@@ -37,6 +37,10 @@ read from its default branch at a resolved commit (ADR-006). In its factory fold
 
 - `factory.yaml`, validated against [`docs/schema/factory.schema.json`](../schema/factory.schema.json):
   `version: 1`, the enrolled `repos`, and the `trackers` and `forges` the factory works with.
+  A forge besides the default one, such as a GitHub Enterprise Server, is declared by name with
+  `provider: github`, its `url` and the `token_env` holding ynf's token for it; its repositories
+  are enrolled as `host/owner/name`, and everything about them (searches, clones, pushes, pull
+  requests, labels, webhooks) goes to that forge with that token.
   These are declared only here: they carry credentials and decide which repositories ynf
   touches, so a target repository can never declare or change them.
 - `lanes.yaml`, optional: lanes and defaults for every enrolled repository. A target repository's
