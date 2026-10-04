@@ -46,7 +46,7 @@ const usage = `ynf: the outer loop around agent runs
 Usage:
   ynf version
   ynf doctor
-  ynf lanes validate [--file lanes.yaml]
+  ynf lanes validate [--file lanes.yaml] [--repo owner/name]
   ynf lanes show --repo owner/name [lane]
   ynf sweep [--until-settled] [--timeout 20m] [--interval 15s] [--lane name]...
   ynf serve [--interval 1m] [--listen :8080 [--webhook-secret-env YNF_WEBHOOK_SECRET] [--start-token-env YNF_START_TOKEN]] [--lane name]...

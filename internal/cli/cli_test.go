@@ -524,6 +524,74 @@ func TestAConfigurationRepository(t *testing.T) {
 	}
 }
 
+// TestLanesValidateRepo: a repository's lanes.yaml is checked merged over the configuration
+// repository's, as ynf reads it, so a layer that fails alone can be valid, and one that is wrong
+// merged is still refused. Without --repo the file stands alone, as it always did.
+func TestLanesValidateRepo(t *testing.T) {
+	e := setup(t)
+	layer := filepath.Join(e.dir, "layer.yaml")
+	if err := os.WriteFile(layer, []byte("version: 1\nlanes:\n  fmt:\n    enabled: false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, _ := e.run("lanes", "validate", "--file", layer); code != cli.ExitPolicy {
+		t.Fatalf("a layer alone: %d", code)
+	}
+	// No configuration repository: the file is the whole policy, with or without --repo.
+	if code, _, _ := e.run("lanes", "validate", "--repo", "o/r", "--file", layer); code != cli.ExitPolicy {
+		t.Fatalf("a layer with nothing under it: %d", code)
+	}
+	whole := filepath.Join(e.dir, "whole.yaml")
+	_ = os.WriteFile(whole, []byte(lanes), 0o644)
+	if code, out, stderr := e.run("lanes", "validate", "--repo", "o/r", "--file", whole); code != 0 || !strings.Contains(out, "valid, 2 lanes") || strings.Contains(out, "merged over") {
+		t.Fatalf("a whole file with no configuration repository: %d %s %s", code, out, stderr)
+	}
+	empty := filepath.Join(e.dir, "empty.yaml")
+	_ = os.WriteFile(empty, nil, 0o644)
+	if code, _, _ := e.run("lanes", "validate", "--repo", "o/r", "--file", empty); code != cli.ExitPolicy {
+		t.Fatalf("an empty file with nothing under it: %d", code)
+	}
+
+	if err := os.WriteFile(e.cfg, []byte("version: 1\nfactory: {repo: o/r}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, stderr := e.run("lanes", "validate", "--repo", "o/r", "--file", layer)
+	if code != 0 || !strings.Contains(out, "valid, 2 lanes (fmt, off)") || !strings.Contains(out, "merged over config@c0ffee of o/r") {
+		t.Fatalf("a layer merged: %d %s %s", code, out, stderr)
+	}
+	if code, out, _ := e.run("--format", "json", "lanes", "validate", "--repo", "o/r", "--file", layer); code != 0 || !strings.Contains(out, `"sha": "c0ffee"`) || !strings.Contains(out, `"valid": true`) {
+		t.Fatalf("json: %d %s", code, out)
+	}
+	if code, _, _ := e.run("lanes", "validate", "--file", layer); code != cli.ExitPolicy {
+		t.Fatalf("without --repo the layer still stands alone: %d", code)
+	}
+	wrong := filepath.Join(e.dir, "wrong.yaml")
+	_ = os.WriteFile(wrong, []byte("version: 1\nlanes:\n  fmt:\n    kind: nonsense\n"), 0o644)
+	if code, _, stderr := e.run("lanes", "validate", "--repo", "o/r", "--file", wrong); code != cli.ExitPolicy || !strings.Contains(stderr, "/lanes/fmt/kind") {
+		t.Fatalf("a layer wrong merged: %d %s", code, stderr)
+	}
+	unreadable := filepath.Join(e.dir, "tabs.yaml")
+	_ = os.WriteFile(unreadable, []byte("lanes: [\n"), 0o644)
+	if code, _, _ := e.run("lanes", "validate", "--repo", "o/r", "--file", unreadable); code != cli.ExitPolicy {
+		t.Fatalf("a layer that is not YAML: %d", code)
+	}
+
+	// replay takes a layer too: it fails alone, so it is merged for the item's repository.
+	if code, out, _ := e.run("sweep"); code != 0 {
+		t.Fatalf("sweep: %d %s", code, out)
+	}
+	on := filepath.Join(e.dir, "on-layer.yaml")
+	_ = os.WriteFile(on, []byte("version: 1\nlanes:\n  off:\n    enabled: true\n"), 0o644)
+	if code, out, stderr := e.run("replay", "o/r#5", "--policy", on); code != cli.ExitDifferences || !strings.Contains(out, "DIFF") {
+		t.Fatalf("replay under a layer: %d %s %s", code, out, stderr)
+	}
+	if code, _, _ := e.run("replay", "o/r#5", "--policy", wrong); code != cli.ExitPolicy {
+		t.Fatalf("replay under a layer that is wrong merged: %d", code)
+	}
+	if code, _, _ := e.run("replay", "o/r#6", "--policy", on); code != cli.ExitPolicy {
+		t.Fatalf("replay of an item that is not there: %d", code)
+	}
+}
+
 // TestInspect: forges and trackers are listed and checked, a ticket reads without starting
 // anything, and harness says how each lane runs.
 func TestInspect(t *testing.T) {

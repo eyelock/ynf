@@ -147,12 +147,16 @@ func (a *app) lanesCmd(ctx context.Context, args []string) error {
 	case "validate":
 		fs := a.flags("lanes validate")
 		file := fs.String("file", ".agents/factory/lanes.yaml", "")
+		repo := fs.String("repo", "", "")
 		if err := fs.Parse(args[1:]); err != nil {
 			return withCode(ExitUsage, err)
 		}
 		doc, err := os.ReadFile(*file)
 		if err != nil {
 			return withCode(ExitPolicy, err)
+		}
+		if *repo != "" {
+			return a.validateMerged(ctx, *repo, *file, doc)
 		}
 		f, err := policy.Load(doc)
 		if err != nil {
@@ -479,6 +483,27 @@ func summarise(en store.LogEntry) string {
 	return string(en.Body)
 }
 
+// validateMerged checks a repository's lanes.yaml as ynf would use it: laid over the configuration
+// repository's lanes, which a layer alone may depend on, and validated as a whole.
+func (a *app) validateMerged(ctx context.Context, repo, file string, doc []byte) error {
+	e, err := a.engine()
+	if err != nil {
+		return err
+	}
+	rp, err := e.PolicyWithLayer(ctx, repo, doc)
+	if err != nil {
+		return withCode(ExitPolicy, err)
+	}
+	names := rp.File.Names()
+	out := map[string]any{"valid": true, "file": file, "repo": repo, "lanes": names}
+	text := fmt.Sprintf("%s: valid, %d lanes (%s)", file, len(names), strings.Join(names, ", "))
+	if rp.Config != nil {
+		out["config"] = map[string]string{"repo": rp.Config.Repo, "sha": rp.Config.SHA}
+		text += fmt.Sprintf("\nmerged over config@%s of %s", short(rp.Config.SHA), rp.Config.Repo)
+	}
+	return a.out(out, text)
+}
+
 func (a *app) replay(ctx context.Context, args []string) error {
 	fs := a.flags("replay")
 	pol := fs.String("policy", "", "")
@@ -502,7 +527,7 @@ func (a *app) replay(ctx context.Context, args []string) error {
 		if err != nil {
 			return withCode(ExitPolicy, err)
 		}
-		if override, err = policy.Load(doc); err != nil {
+		if override, err = replayPolicy(ctx, e, k, doc); err != nil {
 			return withCode(ExitPolicy, err)
 		}
 	}
@@ -531,6 +556,29 @@ func (a *app) replay(ctx context.Context, args []string) error {
 		return withCode(ExitDifferences, fmt.Errorf("%d decisions differ", differ))
 	}
 	return nil
+}
+
+// replayPolicy loads the --policy file. One that fails alone may be a repository's layer, so when
+// there is a configuration repository it is laid over that for the item's repository, as ynf
+// would; the file's own error is reported when the item cannot say which repository that is.
+func replayPolicy(ctx context.Context, e *engine.Engine, k string, doc []byte) (*policy.File, error) {
+	f, err := policy.Load(doc)
+	if err == nil || e.ConfigRepo == "" {
+		return f, err
+	}
+	stored, _, gerr := e.Store.Get(ctx, k)
+	if gerr != nil {
+		return nil, err
+	}
+	var it item.Item
+	if json.Unmarshal(stored, &it) != nil {
+		return nil, err
+	}
+	rp, merr := e.PolicyWithLayer(ctx, e.ItemRepo(it), doc)
+	if merr != nil {
+		return nil, merr
+	}
+	return rp.File, nil
 }
 
 // onlyRepo is the enrolled repository when there is exactly one, so commands can default to it.

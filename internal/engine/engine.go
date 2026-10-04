@@ -261,11 +261,9 @@ func (e *Engine) Policy(ctx context.Context, repo string) (*RepoPolicy, error) {
 		return nil, fmt.Errorf("%s: %w", repo, err)
 	}
 	own := files[policy.LanesFile]
-	doc := own
-	if fp != nil && len(fp.Lanes) > 0 {
-		if doc, err = policy.MergeLanes(fp.Lanes, own); err != nil {
-			return nil, fmt.Errorf("%s: %w", repo, err)
-		}
+	doc, err := layered(fp, own)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", repo, err)
 	}
 	if len(doc) == 0 {
 		return nil, fmt.Errorf("%s has no %s in any of %v, and no configuration repository gives it lanes", repo, policy.LanesFile, policy.FactoryDirs)
@@ -288,6 +286,40 @@ func (e *Engine) Policy(ctx context.Context, repo string) (*RepoPolicy, error) {
 	e.mu.Unlock()
 	return rp, nil
 }
+
+// layered lays own, a repository's lanes.yaml, over the configuration repository's lanes when
+// there are any. The result is not yet validated.
+func layered(fp *FactoryPolicy, own []byte) ([]byte, error) {
+	if fp == nil || len(fp.Lanes) == 0 {
+		return own, nil
+	}
+	return policy.MergeLanes(fp.Lanes, own)
+}
+
+// PolicyWithLayer is Policy for a repository's lanes.yaml given as bytes, such as a local file not
+// yet pushed, instead of the one on the forge. It is laid over the configuration repository's
+// lanes and validated as Policy does; nothing is cached. SHA and Dir are empty.
+func (e *Engine) PolicyWithLayer(ctx context.Context, repo string, own []byte) (*RepoPolicy, error) {
+	fp, err := e.Factory(ctx)
+	if err != nil {
+		return nil, err
+	}
+	doc, err := layered(fp, own)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", repo, err)
+	}
+	if len(doc) == 0 {
+		return nil, fmt.Errorf("%s: the lanes file is empty, and no configuration repository gives it lanes", repo)
+	}
+	f, err := policy.Load(doc)
+	if err != nil {
+		return nil, err
+	}
+	return &RepoPolicy{Repo: repo, File: f, Config: fp, Own: own}, nil
+}
+
+// ItemRepo is the item's code repository, qualified as Policy takes it.
+func (e *Engine) ItemRepo(it item.Item) string { return e.repoOf(it) }
 
 func (e *Engine) laneFor(ctx context.Context, it item.Item) (*RepoPolicy, policy.Lane, error) {
 	rp, err := e.Policy(ctx, e.repoOf(it))
