@@ -40,13 +40,20 @@ the dedupe pass never takes two occurrences for one fact and the reflect pass se
 failure clusters without a model:
 
 ```
-sig/ci-diverges/golangci-lint/errcheck          converged in the loop, failed in real CI
-sig/stuck/sensor:unit-tests/test:TestFoo        exit 13 on the same failing test
-sig/budget/turns/harness:ynh-lint@1.4           repeatedly hits max_turns
-sig/review/rejected/lane:lint-paydown           humans keep rejecting this lane's proposals
-sig/tamper/baseline                             exit 14
-sig/egress/denied/registry.npmjs.org            the harness needed a host the lane does not allow
+sig/ci-diverges/golangci-lint                    converged in the loop, failed in real CI
+sig/ci/golangci-lint                             failed in CI where the loop had not converged first
+sig/stuck/sensor:unit-tests                      the run ended with this sensor still failing
+sig/budget/turns/harness:local/ynf-sandbox@0.1.0 the harness repeatedly hits its turn cap
+sig/outcome/error                                any other failed run, so nothing goes uncounted
+sig/egress/denied/registry.npmjs.org             the harness needed a host the lane does not allow
 ```
+
+Each is built from what the run or the pull request reported. Free text is lower-cased with
+spaces turned to `-`, a signature stops at 200 characters (a ynm subject's limit), and one failure
+is counted under its specific signatures or, when it has none, under `sig/outcome/<outcome>`, never
+both. A run ends on a cap, `turns`, `tokens` or `wall`, as `budget/<cap>/harness:<name>@<version>`,
+and each sensor still failing is a `stuck` signature of its own. When CI fails, each failed check
+is one signature.
 
 `ci-diverges` is the class only ynf can see. It points at drift between the harness's sensors and
 the real gate, which is what ynh's `version_command` and `--calibrate` exist to catch.

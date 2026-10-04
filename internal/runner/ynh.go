@@ -142,6 +142,10 @@ func (y YnhRunner) Interpret(exit int, stdout []byte, _ string) Result {
 		Harness     struct {
 			Name, Version, SHA string
 		} `json:"harness"`
+		Sensors []struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"sensors"`
 		Consumed struct {
 			Turns           int     `json:"turns"`
 			Tokens          int     `json:"tokens"`
@@ -160,6 +164,13 @@ func (y YnhRunner) Interpret(exit int, stdout []byte, _ string) Result {
 			Effort: res.Effort, Turns: res.Consumed.Turns, Tokens: res.Consumed.Tokens, CostUSD: res.Consumed.CostUSD,
 			InputTokens: res.Consumed.InputTokens, OutputTokens: res.Consumed.OutputTokens, CacheReadTokens: res.Consumed.CacheReadTokens,
 			Backend: res.Backend, BoundBy: res.BoundBy, HarnessSHA: res.Harness.SHA, RunnerVersion: res.YnhVersion, AutoApprove: res.AutoApprove,
+		}
+		// Only "fail" is a sensor that failed: ynh also reports reported, deferred, skipped and
+		// known (failing, but every failure already in the baseline), none of them a live failure.
+		for _, sn := range res.Sensors {
+			if sn.Status == "fail" && sn.Name != "" {
+				r.FailedSensors = append(r.FailedSensors, sn.Name)
+			}
 		}
 		if res.Harness.Name != "" {
 			r.Harness = res.Harness.Name + "@" + res.Harness.Version

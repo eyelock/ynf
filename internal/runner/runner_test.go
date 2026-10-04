@@ -222,6 +222,22 @@ func TestYnhUsage(t *testing.T) {
 	}
 }
 
+// TestYnhFailedSensors: only sensors ynh reports as failed are kept, in its order; the other
+// statuses (pass, reported, deferred, skipped, known) are not failures.
+func TestYnhFailedSensors(t *testing.T) {
+	out := []byte(`{"exit_code":1,"sensors":[
+		{"name":"lint","kind":"command","status":"pass","exit_code":0},
+		{"name":"unit-tests","kind":"command","status":"fail","exit_code":13},
+		{"name":"docs","status":"known"},{"name":"review","status":"deferred"},
+		{"name":"vet","status":"fail","exit_code":2}]}`)
+	if got := (runner.YnhRunner{}).Interpret(1, out, "").FailedSensors; !slices.Equal(got, []string{"unit-tests", "vet"}) {
+		t.Fatalf("%v", got)
+	}
+	if got := (runner.YnhRunner{}).Interpret(1, []byte(`{"exit_code":1}`), "").FailedSensors; got != nil {
+		t.Fatalf("%v", got)
+	}
+}
+
 // TestYnhWithNoModel: a run on the vendor's default model reports its backend but no model, so
 // ynf records no model rather than guessing one.
 func TestYnhWithNoModel(t *testing.T) {

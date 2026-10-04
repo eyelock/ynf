@@ -74,7 +74,9 @@ type Usage struct {
 	Harness       string `json:"harness,omitempty"`
 	HarnessSHA    string `json:"harness_sha,omitempty"`
 	RunnerVersion string `json:"runner_version,omitempty"` // ynh's version
-	AutoApprove   string `json:"auto_approve,omitempty"`
+	// FailedSensors names the sensors that had failed when the run ended, in the runner's order.
+	FailedSensors []string `json:"failed_sensors,omitempty"`
+	AutoApprove   string   `json:"auto_approve,omitempty"`
 }
 
 // Runner builds the command a lane runs and interprets how it ended.
