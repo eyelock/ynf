@@ -3,6 +3,7 @@ package engine_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -1262,5 +1263,118 @@ func TestAutoApproveIsNeverPassedOutsideContainment(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "auto_approve applies only inside containment") {
 		t.Errorf("no warning: %s", buf.String())
+	}
+}
+
+// TestStartTakesOnOneItem: an instruction names one item, creates it and steps it until it waits
+// on something outside ynf (ADR-003); starting it again nudges what is there.
+func TestStartTakesOnOneItem(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:agent"}
+	it, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "github.com", Key: "o/r#1"}, Lane: "agent"})
+	if err != nil || it.State != item.Proposed || it.PR == 0 || it.Key != "item/github.com/o/r/issues/1" {
+		t.Fatalf("%s %+v %v", it.State, it, err)
+	}
+	if again, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "github.com", Key: "o/r#1"}, Lane: "agent"}); err != nil || again.Key != it.Key {
+		t.Fatalf("starting it again: %+v %v", again, err)
+	}
+	var refused *engine.RefusedError
+	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "github.com", Key: "o/r#1"}, Lane: "noop"}); !errors.As(err, &refused) || !strings.Contains(err.Error(), "already in lane agent") {
+		t.Fatalf("another lane: %v", err)
+	}
+}
+
+// TestStartFromAPrompt: ad hoc work has no ticket; the prompt is the task, the branch is named
+// for it, and the pull request names it rather than closing anything.
+func TestStartFromAPrompt(t *testing.T) {
+	h := newHarness(t)
+	it, err := h.e.Start(context.Background(), engine.StartRequest{Prompt: "Tidy internal/format\n\nRun gofmt over it.", Repo: "o/r", Lane: "agent"})
+	if err != nil || it.State != item.Proposed || !strings.HasPrefix(it.Key, "item/adhoc/") || !strings.HasPrefix(it.Branch, "ynf/adhoc-") {
+		t.Fatalf("%s %+v %v", it.State, it, err)
+	}
+	pr := h.f.opened[len(h.f.opened)-1]
+	if !strings.Contains(pr.Body, "For "+it.Ref()+".") || strings.Contains(pr.Body, "Closes") || !strings.Contains(pr.Title, "Tidy internal/format") {
+		t.Fatalf("%+v", pr)
+	}
+}
+
+// TestStartRefusesBeforeCreatingAnything: every check fails loudly, and nothing is left behind.
+func TestStartRefusesBeforeCreatingAnything(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	gh := tracker.Ref{Host: "github.com", Key: "o/r#2"}
+	for _, c := range []struct {
+		req  engine.StartRequest
+		want string
+	}{
+		{engine.StartRequest{}, "a ticket reference or a prompt"},
+		{engine.StartRequest{Ref: gh, Prompt: "p"}, "a ticket reference or a prompt"},
+		{engine.StartRequest{Ref: gh, Repo: "o/other", Lane: "agent"}, "is an issue in o/r, not o/other"},
+		{engine.StartRequest{Prompt: "p", Lane: "agent"}, "say which repository"},
+		{engine.StartRequest{Prompt: "p", Repo: "x/y", Lane: "agent"}, "github.com/x/y is not an enrolled repository"},
+		{engine.StartRequest{Ref: tracker.Ref{Host: "acme.atlassian.net", Key: "PLAT-1"}, Repo: "o/r", Lane: "agent"}, "no tracker is configured for acme.atlassian.net"},
+		{engine.StartRequest{Ref: tracker.Ref{Host: "github.com", Key: "o/r#404"}, Lane: "agent"}, "github.com/o/r#404 cannot be read"},
+		{engine.StartRequest{Ref: gh}, "lanes that take tickets; name one with --lane"},
+		{engine.StartRequest{Ref: gh, Lane: "nope"}, "has no lane nope"},
+		{engine.StartRequest{Ref: gh, Lane: "adopt"}, "adopts pull requests"},
+		{engine.StartRequest{Ref: gh, Lane: "off"}, "switched off"},
+	} {
+		_, err := h.e.Start(ctx, c.req)
+		var refused *engine.RefusedError
+		if !errors.As(err, &refused) || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%+v: %v, want %q", c.req, err, c.want)
+		}
+	}
+	if keys, _ := h.e.Store.Keys(ctx, "item/"); len(keys) != 0 {
+		t.Fatalf("a refusal left items behind: %v", keys)
+	}
+}
+
+// TestStartDetached only records the item and makes it due, for a running ynf serve.
+func TestStartDetached(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.f.labels[3] = []string{"ynf:agent"}
+	it, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "github.com", Key: "o/r#3"}, Lane: "agent", Detach: true})
+	if err != nil || it.State != item.Intake {
+		t.Fatalf("%+v %v", it, err)
+	}
+	if due, _ := h.e.Store.Due(ctx, h.e.Now(), 10); !slices.Contains(due, it.Key) {
+		t.Fatalf("not due: %v", due)
+	}
+	if n, err := h.e.RunDue(ctx); err != nil || n != 1 {
+		t.Fatalf("serve's loop: %d %v", n, err)
+	}
+	if got := h.item(t, 3); got.State != item.Proposed {
+		t.Fatalf("%s", got.State)
+	}
+}
+
+// TestAutoApproveOnTheHostOnlyWhenThePersonAsks: outside containment a lane's auto_approve is
+// ignored; the person who started the work can ask for it, and the host's ynh must support it.
+func TestAutoApproveOnTheHostOnlyWhenThePersonAsks(t *testing.T) {
+	for _, c := range []struct {
+		asked, caps string
+		flag        bool
+		refused     bool
+	}{{"", "0.9.0", false, false}, {"edits", "0.9.0", true, false}, {"all", "0.8.0", false, true}} {
+		h := newHarness(t)
+		calls := fakeYnh(t)
+		h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "k"}[k] }
+		h.e.HostAutoApprove = c.asked
+		h.e.HostCapabilities = func(context.Context) (string, error) { return c.caps, nil }
+		h.f.labels[1] = []string{"ynf:approved"}
+		it, err := h.e.Start(context.Background(), engine.StartRequest{Ref: tracker.Ref{Host: "github.com", Key: "o/r#1"}, Lane: "approved"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := os.ReadFile(calls)
+		if got := strings.Contains(string(b), "--auto-approve "+c.asked) && c.asked != ""; got != c.flag {
+			t.Errorf("%q: flag passed %v:\n%s", c.asked, got, b)
+		}
+		if c.refused && (it.LastRun == nil || !strings.Contains(it.LastRun.Detail, "this machine's ynh has 0.8.0")) {
+			t.Errorf("%q on an old ynh: %+v", c.asked, it.LastRun)
+		}
 	}
 }

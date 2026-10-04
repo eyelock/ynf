@@ -30,12 +30,13 @@ import (
 
 // Exit codes (ADR-011).
 const (
-	ExitOK          = 0
-	ExitUsage       = 2
-	ExitAdapter     = 20 // the forge, git, docker or the store failed
-	ExitPolicy      = 30 // config or lanes invalid
-	ExitUnsettled   = 31 // sweep --until-settled timed out
-	ExitDifferences = 32 // replay found decisions that differ
+	ExitOK           = 0
+	ExitUsage        = 2
+	ExitAdapter      = 20 // the forge, git, docker or the store failed
+	ExitPolicy       = 30 // config or lanes invalid
+	ExitUnsettled    = 31 // sweep --until-settled timed out
+	ExitDifferences  = 32 // replay found decisions that differ
+	ExitStartRefused = 33 // start refused the item before creating anything
 )
 
 const usage = `ynf: the outer loop around agent runs
@@ -46,8 +47,10 @@ Usage:
   ynf lanes validate [--file lanes.yaml]
   ynf lanes show --repo owner/name [lane]
   ynf sweep [--until-settled] [--timeout 20m] [--interval 15s] [--lane name]...
-  ynf serve [--interval 1m] [--listen :8080 [--webhook-secret-env YNF_WEBHOOK_SECRET]] [--lane name]...
-  ynf step --github-event <file> --github-event-name <name>      (CI: GITHUB_EVENT_PATH, GITHUB_EVENT_NAME)
+  ynf serve [--interval 1m] [--listen :8080 [--webhook-secret-env YNF_WEBHOOK_SECRET] [--start-token-env YNF_START_TOKEN]] [--lane name]...
+  ynf start <ref> [--repo host/owner/name] [--lane name] [--auto-approve edits|all] [--detach]
+  ynf start --prompt <text> --repo owner/name [--lane name] [--auto-approve edits|all] [--detach]
+  ynf handle --github-event <file> --github-event-name <name>    (CI: GITHUB_EVENT_PATH, GITHUB_EVENT_NAME)
   ynf items ls
   ynf items show|log|retry|release <owner/name#number | key>
   ynf replay <owner/name#number | key> [--policy lanes.yaml]
@@ -121,8 +124,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = a.items(ctx, rest)
 	case "replay":
 		err = a.replay(ctx, rest)
-	case "step":
-		err = a.step(ctx, rest)
+	case "start":
+		err = a.start(ctx, rest)
+	case "handle":
+		err = a.handle(ctx, rest)
 	case "pause", "resume":
 		err = a.pause(ctx, cmd, rest)
 	case "stats":
@@ -307,6 +312,7 @@ func (a *app) engine() (*engine.Engine, error) {
 		Executor:          a.executor,
 		BuildImage:        imageBuilder(),
 		ImageCapabilities: imageCapabilities,
+		HostCapabilities:  hostCapabilities,
 		Repos:             c.Repos,
 		Lanes:             a.lanes,
 		WorkDir:           c.WorkPath(),

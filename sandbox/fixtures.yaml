@@ -10,7 +10,8 @@
 #              This tests the fixture, not the factory.
 #   expect     what ynf should do with the fixture end to end: the acceptance test for the
 #              factory (`make e2e`). With crash: true, e2e kills ynf as the fixture's run starts
-#              and checks a fresh ynf restarts it.
+#              and checks a fresh ynf restarts it. With start: true, nothing searches for it:
+#              e2e starts it with ynf start.
 version: 1
 
 fixtures:
@@ -156,6 +157,21 @@ fixtures:
       checks:
         - e2e kills ynf (SIGKILL) as this item's run starts, then starts a fresh ynf
         - "the item's timer fires about one lease TTL later, not two hours: the run is restarted (\"did not finish\"), not resumed, and a draft pull request follows"
+
+  - id: start-format
+    kind: issue
+    title: internal/format is not gofmt-clean, started by hand
+    body: fixtures/start-format.md
+    labels: ["pkg:internal/format"]
+    lane: gofmt
+    calibrate:
+      command: { deterministic: true }
+    expect:
+      result: in_review
+      start: true
+      checks:
+        - no lane label, so no search finds it; e2e starts it with ynf start --lane gofmt
+        - it ends like any found ticket, a draft pull request in review
 
   - id: deps-bump
     kind: issue

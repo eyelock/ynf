@@ -117,6 +117,10 @@
               ],
               "description": "The work item's state once ynf has nothing more to do without a human. A list when more than one ending is legitimate, such as a fixture with a deliberately flaky test: any of them passes, and e2e reports which one happened."
             },
+            "start": {
+              "type": "boolean",
+              "description": "make e2e starts this fixture with ynf start --lane <lane> instead of letting a search find it."
+            },
             "crash": {
               "type": "boolean",
               "description": "make e2e kills ynf (SIGKILL) as this fixture's run starts, starts a fresh ynf, and checks the item was restarted."
