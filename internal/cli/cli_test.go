@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -438,5 +439,29 @@ func TestInspect(t *testing.T) {
 	}
 	if code, out, _ := e.run("--format", "json", "doctor"); !strings.Contains(out, `"forge default"`) {
 		t.Fatalf("doctor: %d %s", code, out)
+	}
+}
+
+// TestDoctorNeedsDockerOnlyForDockerLanes: inside the factory image every run is inline, so a
+// missing docker is not a problem there; where a lane runs in docker, it is.
+func TestDoctorNeedsDockerOnlyForDockerLanes(t *testing.T) {
+	e := setup(t)
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not on PATH")
+	}
+	bin := t.TempDir()
+	if err := os.Symlink(gitBin, filepath.Join(bin, "git")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	if code, out, _ := e.run("doctor"); code == 0 || !strings.Contains(out, "FAIL  docker") {
+		t.Fatalf("docker lanes with no docker: %d %s", code, out)
+	}
+	if err := os.WriteFile(e.cfg, []byte("version: 1\nrepos: [o/r]\nexecutor: inline\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, out, _ := e.run("doctor"); code != 0 || !strings.Contains(out, "--    docker                   not needed") {
+		t.Fatalf("inline: %d %s", code, out)
 	}
 }
