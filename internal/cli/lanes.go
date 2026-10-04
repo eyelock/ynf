@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/user"
 	"slices"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 )
@@ -124,7 +125,7 @@ func (a *app) stats(ctx context.Context, args []string) error {
 		}
 		fmt.Fprintf(&b, "\n%s %s, by model and effort:\n", s.Repo, s.Lane)
 		mw := tabwriter.NewWriter(&b, 0, 4, 2, ' ', 0)
-		_, _ = fmt.Fprintln(mw, "  MODEL\tEFFORT\tRUNS\tCONVERGED\tTURNS/RUN\tTOKENS/RUN\tCOST\tPROPOSED\tMERGED\tREJECTED")
+		_, _ = fmt.Fprintln(mw, "  MODEL\tEFFORT\tRUNS\tCONVERGED\tTURNS/RUN\tTOKENS/RUN\tCACHED/RUN\tCOST\tPROPOSED\tMERGED\tREJECTED")
 		for _, m := range s.Models {
 			effort, cost := m.Effort, "-"
 			if effort == "" {
@@ -133,8 +134,12 @@ func (a *app) stats(ctx context.Context, args []string) error {
 			if m.CostUSD > 0 {
 				cost = fmt.Sprintf("$%.2f", m.CostUSD)
 			}
-			_, _ = fmt.Fprintf(mw, "  %s\t%s\t%d\t%d\t%.1f\t%d\t%s\t%d\t%d\t%d\n", m.Model, effort, m.Runs, m.Converged,
-				float64(m.Turns)/float64(m.Runs), m.Tokens/m.Runs, cost, m.Proposed, m.Merged, m.Rejected)
+			cached := "-"
+			if m.CacheRead > 0 {
+				cached = strconv.Itoa(m.CacheRead / m.Runs)
+			}
+			_, _ = fmt.Fprintf(mw, "  %s\t%s\t%d\t%d\t%.1f\t%d\t%s\t%s\t%d\t%d\t%d\n", m.Model, effort, m.Runs, m.Converged,
+				float64(m.Turns)/float64(m.Runs), m.Tokens/m.Runs, cached, cost, m.Proposed, m.Merged, m.Rejected)
 		}
 		_ = mw.Flush()
 	}

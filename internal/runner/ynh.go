@@ -126,9 +126,12 @@ func (y YnhRunner) Interpret(exit int, stdout []byte, _ string) Result {
 			Name, Version, SHA string
 		} `json:"harness"`
 		Consumed struct {
-			Turns   int     `json:"turns"`
-			Tokens  int     `json:"tokens"`
-			CostUSD float64 `json:"cost_usd"`
+			Turns           int     `json:"turns"`
+			Tokens          int     `json:"tokens"`
+			InputTokens     int     `json:"input_tokens"`
+			OutputTokens    int     `json:"output_tokens"`
+			CacheReadTokens int     `json:"cache_read_tokens"`
+			CostUSD         float64 `json:"cost_usd"`
 		} `json:"consumed"`
 	}
 	if json.Unmarshal(stdout, &res) == nil {
@@ -138,7 +141,8 @@ func (y YnhRunner) Interpret(exit int, stdout []byte, _ string) Result {
 		}
 		r.Usage = Usage{
 			Effort: res.Effort, Turns: res.Consumed.Turns, Tokens: res.Consumed.Tokens, CostUSD: res.Consumed.CostUSD,
-			BoundBy: res.BoundBy, HarnessSHA: res.Harness.SHA, RunnerVersion: res.YnhVersion, AutoApprove: res.AutoApprove,
+			InputTokens: res.Consumed.InputTokens, OutputTokens: res.Consumed.OutputTokens, CacheReadTokens: res.Consumed.CacheReadTokens,
+			Backend: res.Backend, BoundBy: res.BoundBy, HarnessSHA: res.Harness.SHA, RunnerVersion: res.YnhVersion, AutoApprove: res.AutoApprove,
 		}
 		if res.Harness.Name != "" {
 			r.Harness = res.Harness.Name + "@" + res.Harness.Version

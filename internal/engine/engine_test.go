@@ -1857,6 +1857,15 @@ func TestStatsByModel(t *testing.T) {
 	}) {
 		t.Fatal("the run record lacks its model")
 	}
+	// A command reports no model, and says so rather than borrowing the runner's name.
+	h.f.labels[2] = []string{"pkg:internal/format"}
+	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "github.com", Key: "o/r#2"}, Lane: "fmt"}); err != nil {
+		t.Fatal(err)
+	}
+	stats, _ = h.e.Stats(ctx)
+	if i := slices.IndexFunc(stats, func(s engine.Stats) bool { return s.Lane == "fmt" }); i < 0 || len(stats[i].Models) != 1 || stats[i].Models[0].Model != "none (command)" {
+		t.Fatalf("a command lane: %+v", stats)
+	}
 }
 
 // TestLaneRuns: each lane says how it runs. A harness in a published image is read and held to its

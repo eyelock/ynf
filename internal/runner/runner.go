@@ -57,9 +57,16 @@ type Result struct {
 // Usage is what a run spent and on what, when its runner reports it, so outcomes can be compared
 // by model and effort (ADR-011). A command runner's result file may report it too.
 type Usage struct {
-	Effort  string  `json:"effort,omitempty"`   // reasoning effort, when the runner reports it
-	Turns   int     `json:"turns,omitempty"`    // agent turns
-	Tokens  int     `json:"tokens,omitempty"`   // tokens consumed
+	Effort string `json:"effort,omitempty"` // reasoning effort, when the runner reports it
+	Turns  int    `json:"turns,omitempty"`  // agent turns
+	Tokens int    `json:"tokens,omitempty"` // tokens consumed: input and output
+	// The split, when the runner reports it. Cache reads are not in Tokens, and are often most of
+	// what a long session costs.
+	InputTokens     int `json:"input_tokens,omitempty"`
+	OutputTokens    int `json:"output_tokens,omitempty"`
+	CacheReadTokens int `json:"cache_read_tokens,omitempty"`
+	// Backend is the vendor CLI that ran, such as claude: what is known when the model is not.
+	Backend string  `json:"backend,omitempty"`
 	CostUSD float64 `json:"cost_usd,omitempty"` // when the runner reports it; ynf never prices tokens
 	BoundBy string  `json:"bound_by,omitempty"` // the cap that ended the run, if one did
 	// Harness is name@version, and HarnessSHA the commit it was installed from: a harness change is
