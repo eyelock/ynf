@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/eyelock/ynf/internal/tracker"
 )
 
 // State is a work item's place in the state machine.
@@ -38,13 +40,17 @@ func (s State) Settled() bool {
 // Final reports whether the item is finished for good.
 func (s State) Final() bool { return s == Done || s == Closed || s == Ignored }
 
-// Item is the work item document.
+// Item is the work item document. It has two references (ADR-002): its ticket, what the work is,
+// and its code, where the change goes: a forge host, a repository, and its branch and pull request.
 type Item struct {
-	Key      string `json:"key"`
-	Kind     string `json:"kind"` // originate or adopt
-	Lane     string `json:"lane"`
-	Repo     string `json:"repo"` // owner/name
-	Number   int    `json:"number"`
+	Key    string      `json:"key"`
+	Kind   string      `json:"kind"` // originate or adopt
+	Lane   string      `json:"lane"`
+	Ticket tracker.Ref `json:"ticket"`
+	Forge  string      `json:"forge"` // the code's forge host: github.com
+	Repo   string      `json:"repo"`  // owner/name on Forge
+	// Number is the GitHub issue or pull request number when the ticket is one; 0 otherwise.
+	Number   int    `json:"number,omitempty"`
 	State    State  `json:"state"`
 	Reason   string `json:"reason,omitempty"`
 	Branch   string `json:"branch,omitempty"`
@@ -95,43 +101,55 @@ func (it *Item) Bump(name string) int {
 	return it.Counters[name]
 }
 
-// IssueKey is the store key for a GitHub issue's item.
-func IssueKey(repo string, number int) string {
-	return fmt.Sprintf("item/github/%s/issues/%d", repo, number)
-}
-
-// PRKey is the store key for an adopted GitHub pull request's item.
-func PRKey(repo string, number int) string {
-	return fmt.Sprintf("item/github/%s/pulls/%d", repo, number)
-}
-
-// Subject is the event subject for an item.
-func (it Item) Subject() string {
-	if it.Kind == "adopt" {
-		return fmt.Sprintf("github:pr:%s#%d", it.Repo, it.Number)
+// Key is the store key for an item: item/<host>/<the tracker's own key>, with a GitHub key as a
+// path, so identity is the system's own and never a configured name (ADR-002).
+func Key(t tracker.Ref) string {
+	if repo, n, ok := githubIssue(t.Key); ok {
+		return fmt.Sprintf("item/%s/%s/issues/%d", t.Host, repo, n)
 	}
-	return IssueSubject(it.Repo, it.Number)
+	return "item/" + t.Host + "/" + t.Key
 }
 
-// IssueSubject is the event subject for a GitHub issue.
-func IssueSubject(repo string, number int) string {
-	return fmt.Sprintf("github:issue:%s#%d", repo, number)
+// PRKey is the store key for an adopted pull request's item: the pull request is the work.
+func PRKey(host, repo string, number int) string {
+	return fmt.Sprintf("item/%s/%s/pulls/%d", host, repo, number)
 }
 
-// ParseIssueSubject is the inverse of IssueSubject.
-func ParseIssueSubject(s string) (repo string, number int, err error) {
-	rest, ok := strings.CutPrefix(s, "github:issue:")
-	if !ok {
-		return "", 0, fmt.Errorf("not an issue subject: %q", s)
+// Subject is the event subject for an item: its ticket's reference.
+func (it Item) Subject() string { return it.Ticket.String() }
+
+// Ref is how people name the item: github.com/eyelock/ynh#77.
+func (it Item) Ref() string { return it.Ticket.String() }
+
+// BranchName is the deterministic branch ynf uses for an originated item (ADR-005: idempotent side
+// effects): ynf/issue-77 for a GitHub issue, ynf/plat-881 for a key from elsewhere.
+func (it Item) BranchName() string {
+	if _, n, ok := githubIssue(it.Ticket.Key); ok {
+		return fmt.Sprintf("ynf/issue-%d", n)
 	}
-	repo, n, ok := strings.Cut(rest, "#")
-	if !ok {
-		return "", 0, fmt.Errorf("not an issue subject: %q", s)
+	var b strings.Builder
+	for _, r := range strings.ToLower(it.Ticket.Key) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
 	}
-	number, err = strconv.Atoi(n)
-	return repo, number, err
+	return "ynf/" + strings.Trim(b.String(), "-.")
 }
 
-// BranchFor is the deterministic branch ynf uses for an originated item (ADR-005: idempotent
-// side effects).
-func BranchFor(number int) string { return fmt.Sprintf("ynf/issue-%d", number) }
+// githubIssue reads an owner/name#number key.
+func githubIssue(key string) (repo string, number int, ok bool) {
+	repo, num, found := strings.Cut(key, "#")
+	if !found || strings.Count(repo, "/") != 1 {
+		return "", 0, false
+	}
+	n, err := strconv.Atoi(num)
+	return repo, n, err == nil && n > 0
+}
+
+// IssueKey is the store key for a GitHub issue's item on the forge at host.
+func IssueKey(host, repo string, number int) string {
+	return Key(tracker.Ref{Host: host, Key: fmt.Sprintf("%s#%d", repo, number)})
+}

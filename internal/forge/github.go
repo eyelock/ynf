@@ -62,7 +62,31 @@ func (g *GitHub) Search(ctx context.Context, query string) ([]Hit, error) {
 	}
 }
 
-// Ticket implements Forge.
+// Host is the forge instance's host, as item keys name it: github.com for the public service.
+func (g *GitHub) Host() string {
+	if h := g.c.BaseURL.Hostname(); h != "api.github.com" {
+		return h
+	}
+	return "github.com"
+}
+
+// SetLabels implements Issues: labels already present or already absent are left alone.
+func (g *GitHub) SetLabels(ctx context.Context, repo string, number int, add, remove []string) error {
+	o, r := split(repo)
+	if len(add) > 0 {
+		if _, _, err := g.c.Issues.AddLabelsToIssue(ctx, o, r, number, add); err != nil {
+			return err
+		}
+	}
+	for _, l := range remove {
+		if _, err := g.c.Issues.RemoveLabelForIssue(ctx, o, r, number, l); err != nil && !errors.Is(notFound(err), ErrNotFound) {
+			return err
+		}
+	}
+	return nil
+}
+
+// Ticket implements Issues.
 func (g *GitHub) Ticket(ctx context.Context, repo string, number int) (facts.Ticket, Text, error) {
 	o, r := split(repo)
 	is, _, err := g.c.Issues.Get(ctx, o, r, number)
@@ -175,7 +199,7 @@ func (g *GitHub) OpenPR(ctx context.Context, repo string, n NewPR) (int, error) 
 	return pr.GetNumber(), nil
 }
 
-// Comment implements Forge.
+// Comment implements Forge and Issues.
 func (g *GitHub) Comment(ctx context.Context, repo string, number int, marker, body string) error {
 	o, r := split(repo)
 	opt := &github.IssueListCommentsOptions{ListOptions: github.ListOptions{PerPage: 100}}

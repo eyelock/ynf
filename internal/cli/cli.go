@@ -23,6 +23,7 @@ import (
 	"github.com/eyelock/ynf/internal/store"
 	"github.com/eyelock/ynf/internal/store/s3store"
 	"github.com/eyelock/ynf/internal/store/sqlite"
+	"github.com/eyelock/ynf/internal/tracker"
 	"github.com/eyelock/ynf/internal/workspace"
 	"github.com/oklog/ulid/v2"
 )
@@ -300,7 +301,8 @@ func (a *app) engine() (*engine.Engine, error) {
 		Memory:          mem,
 		MemoryNamespace: ns,
 		MemoryBudget:    budget,
-		Store:           st, Forge: fg,
+		Store:           st, Forge: fg, ForgeHost: fg.Host(),
+		Trackers:          map[string]tracker.Tracker{fg.Host(): forge.IssueTracker(fg)},
 		Git:               workspace.Workspace{Root: c.WorkPath(), Token: token, Author: workspace.Author{Name: name, Email: email}},
 		Executor:          a.executor,
 		BuildImage:        imageBuilder(),

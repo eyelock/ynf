@@ -21,6 +21,7 @@ import (
 	"github.com/eyelock/ynf/internal/memory"
 	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/store"
+	"github.com/eyelock/ynf/internal/tracker"
 )
 
 // Git is what the engine needs from the workspace.
@@ -39,8 +40,12 @@ type Git interface {
 
 // Engine runs steps.
 type Engine struct {
-	Store    store.Store
-	Forge    forge.Forge
+	Store store.Store
+	Forge forge.Forge
+	// ForgeHost is Forge's host as item keys name it; default github.com.
+	ForgeHost string
+	// Trackers are the tracker instances by host (ADR-003).
+	Trackers map[string]tracker.Tracker
 	Git      Git
 	Executor func(name string) (executor.Executor, error)
 
@@ -221,12 +226,14 @@ func (e *Engine) sweepLane(ctx context.Context, repo string, lane policy.Lane) e
 // track creates the item for a new ticket and steps it; a ticket already tracked is left alone.
 func (e *Engine) track(ctx context.Context, lane policy.Lane, h forge.Hit) error {
 	now := e.Now()
+	// A GitHub issue's code goes to its own repository; an adopted pull request is its own ticket.
+	ref := tracker.Ref{Host: e.forgeHost(), Key: forge.IssueKey(h.Repo, h.Number)}
 	it := item.Item{
-		Key: item.IssueKey(h.Repo, h.Number), Kind: lane.Kind, Lane: lane.Name,
-		Repo: h.Repo, Number: h.Number, State: item.Intake, Created: now, Updated: now,
+		Key: item.Key(ref), Kind: lane.Kind, Lane: lane.Name, Ticket: ref,
+		Forge: e.forgeHost(), Repo: h.Repo, Number: h.Number, State: item.Intake, Created: now, Updated: now,
 	}
 	if lane.Kind == "adopt" {
-		it.Key, it.PR = item.PRKey(h.Repo, h.Number), h.Number
+		it.Key, it.PR = item.PRKey(e.forgeHost(), h.Repo, h.Number), h.Number
 	}
 	switch err := lease.Create(ctx, e.Store, it); {
 	case errors.Is(err, store.ErrConflict):
@@ -297,4 +304,19 @@ func (e *Engine) Settled(ctx context.Context) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+func (e *Engine) forgeHost() string {
+	if e.ForgeHost == "" {
+		return "github.com"
+	}
+	return e.ForgeHost
+}
+
+// tracker is the tracker instance an item's ticket lives on.
+func (e *Engine) tracker(t tracker.Ref) (tracker.Tracker, error) {
+	if tr, ok := e.Trackers[t.Host]; ok {
+		return tr, nil
+	}
+	return nil, fmt.Errorf("no tracker is configured for %s (%s)", t.Host, t)
 }

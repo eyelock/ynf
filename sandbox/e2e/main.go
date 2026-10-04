@@ -184,7 +184,7 @@ func run(root, repo string, lanes []string, timeout time.Duration) error {
 		if !ok {
 			return fmt.Errorf("no issue titled %q in the sandbox", f.Title)
 		}
-		key := fmt.Sprintf("item=item/github/%s/issues/%d ", repo, n)
+		key := fmt.Sprintf("item=item/github.com/%s/issues/%d ", repo, n)
 		killed, err := streamUntil(func(line string) bool {
 			return strings.Contains(line, `msg="run started"`) && strings.Contains(line, key)
 		}, ynf, args...)

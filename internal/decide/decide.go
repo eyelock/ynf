@@ -131,7 +131,7 @@ func (d *decider) intakeAdopted() {
 	it, lane, pr := &d.it, d.in.Lane, d.in.Facts.PR
 	switch {
 	case pr == nil:
-		d.escalate("pull request #%d is gone", it.Number)
+		d.escalate("pull request #%d is gone", it.PR)
 		return
 	case pr.Merged || pr.State == "closed":
 		d.to(item.Closed, "#%d is no longer open", pr.Number)

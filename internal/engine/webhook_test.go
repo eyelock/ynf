@@ -11,6 +11,7 @@ import (
 
 	"github.com/eyelock/ynf/internal/engine"
 	"github.com/eyelock/ynf/internal/item"
+	"github.com/eyelock/ynf/internal/tracker"
 )
 
 func sign(secret string, body []byte) string {
@@ -110,7 +111,7 @@ func TestAWebhookNeverRestartsARunningItem(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	h.f.labels[1] = []string{"ynf:fmt", "pkg:internal/format"}
-	it := item.Item{Key: item.IssueKey("o/r", 1), Lane: "fmt", Repo: "o/r", Number: 1, State: item.Running, Attempts: 1, Created: h.e.Now()}
+	it := item.Item{Key: item.IssueKey("github.com", "o/r", 1), Lane: "fmt", Ticket: tracker.Ref{Host: "github.com", Key: "o/r#1"}, Forge: "github.com", Repo: "o/r", Number: 1, State: item.Running, Attempts: 1, Created: h.e.Now()}
 	if err := leaseCreate(ctx, h, it); err != nil {
 		t.Fatal(err)
 	}

@@ -30,7 +30,7 @@ func lanes(t *testing.T) *policy.File {
 }
 
 func ev(typ string, data map[string]any) event.Event {
-	return event.New("e", "test", typ, item.IssueSubject("o/r", 1), t0, data)
+	return event.New("e", "test", typ, "github.com/o/r#1", t0, data)
 }
 
 func open() *facts.Ticket {
