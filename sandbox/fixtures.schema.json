@@ -47,8 +47,10 @@
         "kind": {
           "enum": [
             "issue",
-            "pull_request"
-          ]
+            "pull_request",
+            "ticket"
+          ],
+          "description": "issue and pull_request are created on eyelock/ynf-sandbox by Terraform; ticket is written into the sandbox's tracker that is not a forge by e2e."
         },
         "title": {
           "type": "string",
@@ -122,8 +124,18 @@
               "additionalProperties": false,
               "description": "The ticket's labels once the item settles: the lane's label reactions at work.",
               "properties": {
-                "present": { "type": "array", "items": { "type": "string" } },
-                "absent": { "type": "array", "items": { "type": "string" } }
+                "present": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "absent": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
               }
             },
             "start": {
@@ -151,6 +163,11 @@
               "description": "What a reviewer of the run confirms, in words."
             }
           }
+        },
+        "ticket": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$",
+          "description": "A ticket fixture's key in the sandbox tracker."
         }
       },
       "if": {

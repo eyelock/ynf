@@ -58,7 +58,7 @@ func (a *app) start(ctx context.Context, args []string) error {
 		return withCode(ExitStartRefused, err)
 	}
 	if refArg != "" {
-		if req.Ref, err = parseRef(refArg, e.ForgeHost); err != nil {
+		if req.Ref, err = parseRef(refArg, e.ForgeHost, trackerNames(ctx, e)); err != nil {
 			return withCode(ExitUsage, err)
 		}
 	}
@@ -125,7 +125,7 @@ func startRequest(e *engine.Engine, body []byte) (engine.StartRequest, error) {
 	}
 	if b.Ref != "" {
 		var ref tracker.Ref
-		if ref, err = parseRef(b.Ref, e.ForgeHost); err != nil {
+		if ref, err = parseRef(b.Ref, e.ForgeHost, trackerNames(context.Background(), e)); err != nil {
 			return req, err
 		}
 		req.Ref = ref

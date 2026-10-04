@@ -94,8 +94,17 @@ func (e *Engine) Start(ctx context.Context, req StartRequest) (item.Item, error)
 	if err != nil {
 		return item.Item{}, refuse("%v", err)
 	}
-	if _, _, err := tr.Get(ctx, ref.Key); err != nil {
+	ticket, _, err := tr.Get(ctx, ref.Key)
+	if err != nil {
 		return item.Item{}, refuse("%s cannot be read: %v", ref, err)
+	}
+	// A ticket that names its repository must agree with where its code is being sent: this
+	// catches the wrong ticket or a typo before anything runs (ADR-002). Free text never counts.
+	if ticket.Repo != "" {
+		th, tn := e.splitRepo(ticket.Repo)
+		if e.qualify(th, tn) != repo {
+			return item.Item{}, refuse("%s says its code goes to %s, not %s", ref, ticket.Repo, repo)
+		}
 	}
 
 	now := e.Now()

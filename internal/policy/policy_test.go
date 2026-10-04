@@ -261,11 +261,17 @@ lanes:
 }
 
 func TestLoadFactory(t *testing.T) {
-	f, err := policy.LoadFactory([]byte("version: 1\nrepos: [o/r, github.acme.internal/acme/x]\ntrackers:\n  jira: {provider: mcp}\n"))
+	f, err := policy.LoadFactory([]byte("version: 1\nrepos: [o/r, github.acme.internal/acme/x]\n" +
+		"forges:\n  ghe: {provider: github, url: https://github.acme.internal, token_env: GHE_TOKEN}\n" +
+		"trackers:\n  jira:\n    provider: mcp\n    site: https://acme.atlassian.net\n    server: {command: [jira-mcp], env: [JIRA_TOKEN]}\n" +
+		"    get: {tool: get, args: {issueKey: \"{key}\"}}\n    comment: {tool: comment}\n    label: {tool: label}\n" +
+		"    fields: {title: result.t, labels: result.l, status: result.s}\n"))
 	if err != nil || len(f.Repos) != 2 || f.Trackers["jira"]["provider"] != "mcp" {
 		t.Fatalf("%+v %v", f, err)
 	}
-	for _, bad := range []string{"version: 1\n", "version: 2\nrepos: [o/r]\n", "version: 1\nrepos: [not a repo]\n", "version: 1\nrepos: [o/r]\nextra: 1\n", "version: 1\nrepos: ["} {
+	for _, bad := range []string{"version: 1\n", "version: 2\nrepos: [o/r]\n", "version: 1\nrepos: [not a repo]\n", "version: 1\nrepos: [o/r]\nextra: 1\n", "version: 1\nrepos: [",
+		"version: 1\nrepos: [o/r]\ntrackers:\n  jira: {provider: mcp}\n",
+		"version: 1\nrepos: [o/r]\nforges:\n  ghe: {provider: gitlab, url: https://g.example, token_env: T}\n"} {
 		if _, err := policy.LoadFactory([]byte(bad)); err == nil {
 			t.Errorf("%q accepted", bad)
 		}

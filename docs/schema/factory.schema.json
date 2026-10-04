@@ -28,9 +28,104 @@
     },
     "trackers": {
       "type": "object",
-      "description": "Tracker instances by name (ADR-003), declared only here: they carry credentials and name servers ynf starts.",
+      "description": "Tracker instances by name (ADR-003), declared only here: they carry credentials and name servers ynf starts. A reference may use the name (jira/PLAT-881); items are stored by the tracker's host.",
       "additionalProperties": {
-        "type": "object"
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "site",
+          "server",
+          "get",
+          "comment",
+          "label",
+          "fields"
+        ],
+        "properties": {
+          "provider": {
+            "const": "mcp",
+            "description": "mcp: a tracker with an MCP server, called directly, with no model."
+          },
+          "site": {
+            "type": "string",
+            "pattern": "^https?://[^/]+/?$",
+            "description": "The tracker's web address; its host names it in item keys."
+          },
+          "server": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "The MCP server: a command that speaks MCP on stdio, or a URL.",
+            "properties": {
+              "command": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string"
+                },
+                "description": "Started with only PATH, HOME and the variables in env."
+              },
+              "env": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Z_][A-Z0-9_]*$"
+                },
+                "description": "ynf's credentials for this tracker, by name, passed to the command."
+              },
+              "url": {
+                "type": "string",
+                "pattern": "^https?://"
+              },
+              "token_env": {
+                "type": "string",
+                "pattern": "^[A-Z_][A-Z0-9_]*$",
+                "description": "The variable holding the URL's bearer token."
+              }
+            }
+          },
+          "get": {
+            "$ref": "#/$defs/call"
+          },
+          "comment": {
+            "$ref": "#/$defs/call"
+          },
+          "label": {
+            "$ref": "#/$defs/call"
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "title",
+              "labels",
+              "status"
+            ],
+            "description": "CEL over the get tool's result, bound to result.",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "body": {
+                "type": "string"
+              },
+              "labels": {
+                "type": "string",
+                "description": "A list of strings."
+              },
+              "status": {
+                "type": "string"
+              },
+              "repo": {
+                "type": "string",
+                "description": "The repository the ticket names for its code, from a structured field (a label, a component, a custom field), never its text. When set, it must agree with where the code is sent."
+              }
+            }
+          },
+          "closed_when": {
+            "type": "string",
+            "description": "CEL over status and labels: true means the ticket is closed."
+          }
+        }
       }
     },
     "forges": {
@@ -61,6 +156,26 @@
             "pattern": "^[A-Z_][A-Z0-9_]*$",
             "description": "The variable holding ynf's token for this forge, used for its API and its git remotes."
           }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "call": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool"
+      ],
+      "properties": {
+        "tool": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The tool to call."
+        },
+        "args": {
+          "type": "object",
+          "description": "Its arguments. A string that is exactly {add}, {remove} or {labels} becomes that list; {key} and {text} are replaced inside any string."
         }
       }
     }

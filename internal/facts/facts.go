@@ -20,9 +20,12 @@ type Lane struct {
 
 // Ticket is an issue's structured state.
 type Ticket struct {
-	Key    string   `json:"key"`              // the tracker's own key: owner/name#77, PLAT-881
-	Number int      `json:"number,omitempty"` // a GitHub issue's number; 0 elsewhere
-	State  string   `json:"state"`            // open, closed
+	Key    string `json:"key"`              // the tracker's own key: owner/name#77, PLAT-881
+	Number int    `json:"number,omitempty"` // a GitHub issue's number; 0 elsewhere
+	// Repo is the repository the ticket itself names for its code, from a structured field its
+	// tracker is configured to read; empty when it names none (ADR-002).
+	Repo   string   `json:"repo,omitempty"`
+	State  string   `json:"state"` // open, closed
 	Labels []string `json:"labels"`
 }
 

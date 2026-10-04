@@ -5,3 +5,24 @@
 version: 1
 repos:
   - github.com/eyelock/ynf-sandbox
+
+# A tracker that is not a forge: the sandbox's JIRA stand-in, ynf-sandbox-tracker, an MCP server
+# that keeps its tickets in the file YNF_SANDBOX_TRACKER_DATA names (sandbox/e2e/tracker). ynf
+# starts it only when a ticket of its is touched, and calls its tools with no model involved.
+trackers:
+  tracker:
+    provider: mcp
+    site: https://tracker.ynf-sandbox.invalid
+    server:
+      command: [ynf-sandbox-tracker]
+      env: [YNF_SANDBOX_TRACKER_DATA]
+    get: { tool: get_ticket, args: { key: "{key}" } }
+    comment: { tool: add_comment, args: { key: "{key}", body: "{text}" } }
+    label: { tool: set_labels, args: { key: "{key}", labels: "{labels}" } }
+    fields:
+      title: result.title
+      body: result.body
+      labels: result.labels
+      status: result.status
+      repo: result.repo
+    closed_when: 'status == "done"'

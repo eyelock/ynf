@@ -33,7 +33,9 @@ import (
 type fixture struct {
 	ID     string   `yaml:"id"`
 	Kind   string   `yaml:"kind"`
+	Ticket string   `yaml:"ticket"`
 	Title  string   `yaml:"title"`
+	Body   string   `yaml:"body"`
 	Labels []string `yaml:"labels"`
 	Lane   string   `yaml:"lane"`
 	Expect struct {
@@ -153,6 +155,30 @@ func run(root, repo, factory string, lanes []string, timeout time.Duration) erro
 	if out, err := shEnv(filepath.Dir(root), []string{"GOOS=linux", "GOARCH=" + arch, "CGO_ENABLED=0"}, "go", "build", "-o", ynf+"-linux-"+arch, "./cmd/ynf"); err != nil {
 		return fmt.Errorf("build linux ynf: %w\n%s", err, out)
 	}
+	// The sandbox tracker that is not a forge: its server goes on ynf's PATH, as an operator would
+	// install a tracker's MCP server, and its tickets are written fresh for every run.
+	if out, err := sh(filepath.Join(root, "e2e"), "go", "build", "-o", filepath.Join(tmp, "ynf-sandbox-tracker"), "./tracker"); err != nil {
+		return fmt.Errorf("build the sandbox tracker: %w\n%s", err, out)
+	}
+	trackerData := filepath.Join(tmp, "tracker.json")
+	tickets := map[string]trackerTicket{}
+	for _, f := range ff.Fixtures {
+		if f.Kind != "ticket" {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(root, f.Body))
+		if err != nil {
+			return err
+		}
+		tickets[f.Ticket] = trackerTicket{Title: f.Title, Body: string(body), Labels: f.Labels, Status: "open", Repo: "github.com/" + repo}
+	}
+	tb, _ := json.MarshalIndent(tickets, "", "  ")
+	if err := os.WriteFile(trackerData, tb, 0o644); err != nil {
+		return err
+	}
+	_ = os.Setenv("PATH", tmp+string(os.PathListSeparator)+os.Getenv("PATH"))
+	_ = os.Setenv("YNF_SANDBOX_TRACKER_DATA", trackerData)
+
 	cfg := filepath.Join(tmp, "config.yaml")
 	// A short lease so the crash test's restart comes about half a minute after the kill.
 	// Memory is explicit: ynm in the sandbox's namespace when it is installed, and checked;
@@ -183,16 +209,22 @@ func run(root, repo, factory string, lanes []string, timeout time.Duration) erro
 	}
 	fmt.Printf("running ynf %s\nynf log (also below as it happens): %s\n\n", strings.Join(lanes, ", "), logPath)
 	start := time.Now()
+	// Fixtures nothing searches for are started, as a person or an automation would: a GitHub
+	// issue with no lane label, and every ticket in the tracker that is not a forge.
 	for _, f := range ff.Fixtures {
-		if !f.Expect.Start || !slices.Contains(lanes, f.Lane) {
+		if !f.Expect.Start && f.Kind != "ticket" || !slices.Contains(lanes, f.Lane) {
 			continue
 		}
-		n, ok := numbers[f.Title]
-		if !ok {
-			return fmt.Errorf("no issue titled %q in the sandbox", f.Title)
+		ref, _, _, err := subject(f, numbers, repo)
+		if err != nil {
+			return err
 		}
-		fmt.Printf("ynf start %s#%d --lane %s (%s)\n", repo, n, f.Lane, f.ID)
-		if out, err := stream(ynf, "--config", cfg, "--log-file", logPath, "start", fmt.Sprintf("%s#%d", repo, n), "--lane", f.Lane); err != nil {
+		args := []string{"--config", cfg, "--log-file", logPath, "start", ref, "--lane", f.Lane}
+		if f.Kind == "ticket" {
+			args = append(args, "--repo", repo)
+		}
+		fmt.Printf("ynf %s (%s)\n", strings.Join(args[4:], " "), f.ID)
+		if out, err := stream(ynf, args...); err != nil {
 			return fmt.Errorf("ynf start %s: %w\n%s", f.ID, err, out)
 		}
 	}
@@ -239,10 +271,10 @@ func run(root, repo, factory string, lanes []string, timeout time.Duration) erro
 		if !slices.Contains(lanes, f.Lane) {
 			continue
 		}
-		detail, err := check(f, numbers, res.Items, repo, ynf, cfg)
+		detail, err := check(f, numbers, res.Items, repo, ynf, cfg, trackerData)
 		if err == nil && memoryOn {
 			var m string
-			if m, err = checkMemory(f, numbers, res.Items, memories); err == nil {
+			if m, err = checkMemory(f, numbers, res.Items, repo, memories); err == nil {
 				detail += m
 			}
 		}
@@ -260,18 +292,33 @@ func run(root, repo, factory string, lanes []string, timeout time.Duration) erro
 	return nil
 }
 
-func check(f fixture, numbers map[string]int, items []item, repo, ynf, cfg string) (string, error) {
+// trackerHost is the sandbox tracker's host, from its site in the configuration repository.
+const trackerHost = "tracker.ynf-sandbox.invalid"
+
+// subject is how ynf names a fixture's ticket (ref), its item's key, and how e2e reports it.
+func subject(f fixture, numbers map[string]int, repo string) (ref, key, name string, err error) {
+	if f.Kind == "ticket" {
+		return trackerHost + "/" + f.Ticket, "item/" + trackerHost + "/" + f.Ticket, f.Ticket, nil
+	}
 	n, ok := numbers[f.Title]
 	if !ok {
-		return "", fmt.Errorf("no issue titled %q in the sandbox", f.Title)
+		return "", "", "", fmt.Errorf("no issue titled %q in the sandbox", f.Title)
 	}
-	i := slices.IndexFunc(items, func(it item) bool { return it.Number == n })
+	return fmt.Sprintf("%s#%d", repo, n), fmt.Sprintf("item/github.com/%s/issues/%d", repo, n), fmt.Sprintf("#%d", n), nil
+}
+
+func check(f fixture, numbers map[string]int, items []item, repo, ynf, cfg, trackerData string) (string, error) {
+	ref, key, name, err := subject(f, numbers, repo)
+	if err != nil {
+		return "", err
+	}
+	i := slices.IndexFunc(items, func(it item) bool { return it.Key == key })
 	if i < 0 {
-		return "", fmt.Errorf("#%d was never tracked", n)
+		return "", fmt.Errorf("%s was never tracked", name)
 	}
 	it := items[i]
 	if !f.Expect.Result.accepts(it.State) {
-		msg := fmt.Sprintf("#%d ended %s (%s), expected %s", n, it.State, it.Reason, strings.Join(f.Expect.Result, " or "))
+		msg := fmt.Sprintf("%s ended %s (%s), expected %s", name, it.State, it.Reason, strings.Join(f.Expect.Result, " or "))
 		if r := it.LastRun; r != nil && r.Detail != "" {
 			msg += fmt.Sprintf("\n      last run %s: %s", r.ID, oneLine(r.Detail, 300))
 		}
@@ -287,7 +334,7 @@ func check(f fixture, numbers map[string]int, items []item, repo, ynf, cfg strin
 		}
 		return "", errors.New(msg)
 	}
-	detail := fmt.Sprintf("#%d %s", n, it.State)
+	detail := fmt.Sprintf("%s %s", name, it.State)
 	if len(f.Expect.Result) > 1 {
 		detail += fmt.Sprintf(" (one of %s)", strings.Join(f.Expect.Result, ", "))
 	}
@@ -319,7 +366,7 @@ func check(f fixture, numbers map[string]int, items []item, repo, ynf, cfg strin
 		detail += fmt.Sprintf(", draft #%d with trailers", it.PR)
 	}
 
-	rp, err := sh("", ynf, "--config", cfg, "--format", "json", "replay", fmt.Sprintf("%s#%d", repo, n))
+	rp, err := sh("", ynf, "--config", cfg, "--format", "json", "replay", ref)
 	if err != nil {
 		return "", fmt.Errorf("replay: %w\n%s", err, rp)
 	}
@@ -332,38 +379,55 @@ func check(f fixture, numbers map[string]int, items []item, repo, ynf, cfg strin
 	}
 	detail += fmt.Sprintf(", %d decisions replay the same", len(r.Decisions))
 	// Every decision records the configuration repository's commit beside the repository's.
-	logged, err := sh("", ynf, "--config", cfg, "--format", "json", "items", "log", fmt.Sprintf("%s#%d", repo, n))
+	logged, err := sh("", ynf, "--config", cfg, "--format", "json", "items", "log", ref)
 	if err != nil {
 		return "", fmt.Errorf("items log: %w", err)
 	}
 	if !strings.Contains(logged, `config_sha`) {
-		return "", fmt.Errorf("#%d's decisions do not record the configuration repository's commit", n)
+		return "", fmt.Errorf("%s's decisions do not record the configuration repository's commit", name)
+	}
+	var ticket *trackerTicket
+	if f.Kind == "ticket" {
+		if ticket, err = readTicket(trackerData, f.Ticket); err != nil {
+			return "", err
+		}
+		// The pull request is linked on the ticket, by URL: it is not a GitHub issue.
+		link := fmt.Sprintf("proposed https://github.com/%s/pull/%d", repo, it.PR)
+		if it.PR == 0 || !slices.ContainsFunc(ticket.Comments, func(c string) bool { return strings.Contains(c, link) }) {
+			return "", fmt.Errorf("%s: the pull request is not linked on the ticket: %v", name, ticket.Comments)
+		}
+		detail += ", linked on the ticket"
 	}
 	if want := f.Expect.Labels; len(want.Present)+len(want.Absent) > 0 {
-		out, err := sh("", "gh", "issue", "view", fmt.Sprint(n), "-R", repo, "--json", "labels", "-q", "[.labels[].name] | join(\",\")")
-		if err != nil {
-			return "", fmt.Errorf("#%d's labels: %w", n, err)
+		var have []string
+		if ticket != nil {
+			have = ticket.Labels
+		} else {
+			out, err := sh("", "gh", "issue", "view", strings.TrimPrefix(name, "#"), "-R", repo, "--json", "labels", "-q", "[.labels[].name] | join(\",\")")
+			if err != nil {
+				return "", fmt.Errorf("%s's labels: %w", name, err)
+			}
+			have = strings.Split(strings.TrimSpace(out), ",")
 		}
-		have := strings.Split(strings.TrimSpace(out), ",")
 		for _, l := range want.Present {
 			if !slices.Contains(have, l) {
-				return "", fmt.Errorf("#%d lacks the label %s: %v", n, l, have)
+				return "", fmt.Errorf("%s lacks the label %s: %v", name, l, have)
 			}
 		}
 		for _, l := range want.Absent {
 			if slices.Contains(have, l) {
-				return "", fmt.Errorf("#%d still has the label %s: %v", n, l, have)
+				return "", fmt.Errorf("%s still has the label %s: %v", name, l, have)
 			}
 		}
 		detail += ", labelled " + strings.Join(want.Present, ",")
 	}
 	if f.Expect.Crash {
-		log, err := sh("", ynf, "--config", cfg, "items", "log", fmt.Sprintf("%s#%d", repo, n))
+		log, err := sh("", ynf, "--config", cfg, "items", "log", ref)
 		if err != nil {
 			return "", fmt.Errorf("items log: %w", err)
 		}
 		if !strings.Contains(log, "did not finish") {
-			return "", fmt.Errorf("#%d: no restart after the crash in its log", n)
+			return "", fmt.Errorf("%s: no restart after the crash in its log", name)
 		}
 		detail += ", restarted after the crash"
 	}
@@ -432,8 +496,12 @@ func forgetMemory(repo string) error {
 
 // checkMemory checks an item that ran left its memories: a ynf.step.v1 memory for its last run,
 // and a ynf.failure.v1 memory for each failure signature it counted.
-func checkMemory(f fixture, numbers map[string]int, items []item, memories []memoryRecord) (string, error) {
-	i := slices.IndexFunc(items, func(it item) bool { return it.Number == numbers[f.Title] })
+func checkMemory(f fixture, numbers map[string]int, items []item, repo string, memories []memoryRecord) (string, error) {
+	_, key, _, err := subject(f, numbers, repo)
+	if err != nil {
+		return "", err
+	}
+	i := slices.IndexFunc(items, func(it item) bool { return it.Key == key })
 	if i < 0 || items[i].LastRun == nil {
 		return "", nil // nothing ran, so nothing to remember
 	}
@@ -460,6 +528,31 @@ func checkMemory(f fixture, numbers map[string]int, items []item, memories []mem
 		return ", its memory written", nil
 	}
 	return fmt.Sprintf(", its %d memories written", n), nil
+}
+
+// trackerTicket is a ticket in the sandbox tracker's data file (sandbox/e2e/tracker).
+type trackerTicket struct {
+	Title    string   `json:"title"`
+	Body     string   `json:"body"`
+	Labels   []string `json:"labels"`
+	Status   string   `json:"status"`
+	Repo     string   `json:"repo,omitempty"`
+	Comments []string `json:"comments,omitempty"`
+}
+
+func readTicket(path, key string) (*trackerTicket, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var ts map[string]*trackerTicket
+	if err := json.Unmarshal(b, &ts); err != nil {
+		return nil, err
+	}
+	if ts[key] == nil {
+		return nil, fmt.Errorf("the tracker has no %s", key)
+	}
+	return ts[key], nil
 }
 
 func oneLine(s string, max int) string {
