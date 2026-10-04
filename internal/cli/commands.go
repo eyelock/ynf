@@ -410,6 +410,13 @@ func (a *app) human(ctx context.Context, e *engine.Engine, k, what string) error
 		now := e.Now()
 		it.NextDue = &now
 	}
+	if what == "release" && !it.State.Settled() {
+		// The timer still stands at the dead holder's lease expiry, so clearing the lease alone
+		// would restart the work no sooner than waiting. Make it due now. A settled item has no
+		// work to restart, and its timer is a wake-up to look again, so it is left as it is.
+		now := e.Now()
+		it.NextDue = &now
+	}
 	it.Lease = nil
 	b, _ := json.Marshal(it)
 	if _, err := e.Store.Put(ctx, k, b, v); err != nil {
