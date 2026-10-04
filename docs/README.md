@@ -22,11 +22,11 @@ each with one job.
 
 | | |
 |---|---|
-| [How-to guides](how-to/README.md) | Run ynf locally; test it against the sandbox. |
+| [Tutorials](tutorial/README.md) | Two tracks of lessons on a sandbox of your own: ynf on its own, then ynh, ynm and ynf together as a factory. |
+| [How-to guides](how-to/README.md) | Run ynf locally; connect a tracker; run the factory image; test it against the sandbox. |
 | [Reference](reference/README.md) | The CLI, the configuration, and the lanes file. |
 | [Explanation](explanation/README.md) | Why ynf is shaped the way it is, starting with the outer loop. |
 | [Architecture decisions](adr/README.md) | Each decision, its alternatives and its consequences, with the requirements they cite. |
-| Tutorials | Ordered lessons that double as acceptance tests. Later. |
 
 ## The shape of it
 
