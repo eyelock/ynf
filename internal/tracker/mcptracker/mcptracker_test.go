@@ -45,7 +45,12 @@ func (f *fakeJira) server() *mcp.Server {
 		if f.failing || a.IssueKey == "NOPE-1" {
 			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: "Issue does not exist"}}}, nil, nil
 		}
+		posted := []any{}
+		for _, c := range f.comments {
+			posted = append(posted, map[string]any{"body": c})
+		}
 		return nil, map[string]any{"key": a.IssueKey, "fields": map[string]any{
+			"comment": map[string]any{"comments": posted},
 			"summary": "Fix the thing", "description": "It is broken.", "labels": slices.Clone(f.labels),
 			"status": map[string]any{"name": f.status}, "components": []any{map[string]any{"name": "github.com/acme/x"}},
 		}}, nil
@@ -170,6 +175,7 @@ func TestBadConfigsFailWhenRead(t *testing.T) {
 		"no get tool":     func(c *mcptracker.Config) { c.Get.Tool = "" },
 		"no status":       func(c *mcptracker.Config) { c.Fields.Status = "" },
 		"bad mapping":     func(c *mcptracker.Config) { c.Fields.Title = "result.(" },
+		"bad comments":    func(c *mcptracker.Config) { c.Fields.Comments = "result.(" },
 		"bad closed_when": func(c *mcptracker.Config) { c.ClosedWhen = "status ==" },
 	} {
 		c := good
@@ -216,5 +222,57 @@ func TestCheck(t *testing.T) {
 	c.Comment.Tool = "jira_add_coment"
 	if err := connect(t, f, c).Check(ctx); err == nil || !strings.Contains(err.Error(), "no tool jira_add_coment") {
 		t.Fatalf("a mistyped tool: %v", err)
+	}
+}
+
+// TestCommentOnceWhenCommentsAreMapped: with fields.comments mapped, a comment whose marker is
+// already on the ticket is not posted again, and one with another marker is.
+func TestCommentOnceWhenCommentsAreMapped(t *testing.T) {
+	ctx := context.Background()
+	f := &fakeJira{status: "To Do"}
+	c := config(t, map[string]any{"issueKey": "{key}", "labels": "{labels}"})
+	c.Fields.Comments = "result.fields.comment.comments.map(c, c.body)"
+	tr := connect(t, f, c)
+	for _, marker := range []string{"<!-- a -->", "<!-- a -->", "<!-- b -->"} {
+		if err := tr.Comment(ctx, "PLAT-881", marker, "proposed"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{"PLAT-881: proposed\n\n<!-- a -->", "PLAT-881: proposed\n\n<!-- b -->"}
+	if !slices.Equal(f.comments, want) {
+		t.Fatalf("%q", f.comments)
+	}
+	if err := tr.Comment(ctx, "NOPE-1", "<!-- c -->", "x"); err == nil || !strings.Contains(err.Error(), "Issue does not exist") {
+		t.Fatalf("a ticket that cannot be read: %v", err)
+	}
+}
+
+// TestCommentWithoutCommentsMapped: with no way to read comments, every Comment posts.
+func TestCommentWithoutCommentsMapped(t *testing.T) {
+	f := &fakeJira{status: "To Do"}
+	tr := connect(t, f, config(t, map[string]any{"issueKey": "{key}", "labels": "{labels}"}))
+	for range 2 {
+		if err := tr.Comment(context.Background(), "PLAT-881", "<!-- a -->", "proposed"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(f.comments) != 2 {
+		t.Fatalf("%q", f.comments)
+	}
+}
+
+// TestCommentsThatDoNotFit: a comments mapping that is not a list of strings is an error that
+// says so, and nothing is posted.
+func TestCommentsThatDoNotFit(t *testing.T) {
+	f := &fakeJira{status: "To Do"}
+	for name, expr := range map[string]string{"not a list": "result.fields.summary", "missing": "result.missing.x"} {
+		c := config(t, map[string]any{"issueKey": "{key}", "labels": "{labels}"})
+		c.Fields.Comments = expr
+		if err := connect(t, f, c).Comment(context.Background(), "PLAT-881", "<!-- a -->", "x"); err == nil || !strings.Contains(err.Error(), "fields.comments") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if len(f.comments) != 0 {
+		t.Fatalf("%q", f.comments)
 	}
 }

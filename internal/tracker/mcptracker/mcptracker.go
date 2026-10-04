@@ -42,13 +42,16 @@ type Config struct {
 	Comment Call `json:"comment"`
 	Label   Call `json:"label"`
 	// Fields are CEL over the get tool's result, bound to result: title, body, labels (a list of
-	// strings), status, and repo, the repository the ticket says its code goes to, if any.
+	// strings), status, repo, the repository the ticket says its code goes to, if any, and
+	// comments, the text of each of the ticket's comments, if mapped: it is how a retried step
+	// finds the marker of a comment already posted.
 	Fields struct {
-		Title  string `json:"title"`
-		Body   string `json:"body"`
-		Labels string `json:"labels"`
-		Status string `json:"status"`
-		Repo   string `json:"repo"`
+		Title    string `json:"title"`
+		Body     string `json:"body"`
+		Labels   string `json:"labels"`
+		Status   string `json:"status"`
+		Repo     string `json:"repo"`
+		Comments string `json:"comments"`
 	} `json:"fields"`
 	// ClosedWhen is CEL over status and labels; true means the ticket is closed.
 	ClosedWhen string `json:"closed_when"`
@@ -111,7 +114,7 @@ func New(c Config) (*Tracker, error) {
 	if err != nil {
 		return nil, err
 	}
-	for name, expr := range map[string]string{"title": c.Fields.Title, "body": c.Fields.Body, "labels": c.Fields.Labels, "status": c.Fields.Status, "repo": c.Fields.Repo} {
+	for name, expr := range map[string]string{"title": c.Fields.Title, "body": c.Fields.Body, "labels": c.Fields.Labels, "status": c.Fields.Status, "repo": c.Fields.Repo, "comments": c.Fields.Comments} {
 		if expr == "" {
 			continue
 		}
@@ -347,9 +350,27 @@ func (t *Tracker) Get(ctx context.Context, key string) (facts.Ticket, tracker.Te
 	return ft, txt, nil
 }
 
-// Comment implements tracker.Tracker. The marker goes in the comment; a tracker's MCP server
-// offers no reliable way to find an earlier one, so a retried step may comment twice.
+// Comment implements tracker.Tracker. The marker goes in the comment. With fields.comments
+// mapped, the comment is posted only if no existing one contains the marker, so a retried step
+// does not comment twice; without it there is no way to know, and it is always posted.
 func (t *Tracker) Comment(ctx context.Context, key, marker, body string) error {
+	if p, ok := t.fields["comments"]; ok {
+		res, err := t.call(ctx, t.cfg.Get, map[string]any{"key": key})
+		if err != nil {
+			return err
+		}
+		out, _, err := p.Eval(map[string]any{"result": res})
+		if err != nil {
+			return fmt.Errorf("fields.comments: %w", err)
+		}
+		raw, err := out.ConvertToNative(reflect.TypeFor[[]string]())
+		if err != nil {
+			return fmt.Errorf("fields.comments is not a list of strings: %w", err)
+		}
+		if slices.ContainsFunc(raw.([]string), func(c string) bool { return strings.Contains(c, marker) }) {
+			return nil
+		}
+	}
 	_, err := t.call(ctx, t.cfg.Comment, map[string]any{"key": key, "text": body + "\n\n" + marker})
 	return err
 }

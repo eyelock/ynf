@@ -25,4 +25,5 @@ trackers:
       labels: result.labels
       status: result.status
       repo: result.repo
+      comments: result.comments
     closed_when: 'status == "done"'

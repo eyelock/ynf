@@ -118,6 +118,10 @@
               "repo": {
                 "type": "string",
                 "description": "The repository the ticket names for its code, from a structured field (a label, a component, a custom field), never its text. When set, it must agree with where the code is sent."
+              },
+              "comments": {
+                "type": "string",
+                "description": "A list of strings: the text of each of the ticket's comments. When set, ynf posts a comment only if none already contains its marker, so a retried step never comments twice. Without it ynf cannot tell, and may comment twice."
               }
             }
           },
