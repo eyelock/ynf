@@ -25,7 +25,11 @@ an issue on GitHub Enterprise Server is `item/github.acme.internal/…`.
 | Command | Does |
 |---|---|
 | `ynf version` | Prints the version. |
-| `ynf doctor` | Checks the config, the store, each repository's lanes (and any shadowed factory folder), and git, docker, ynh and ynm. ynh and ynm are optional. |
+| `ynf doctor` | Checks the config, the store, each repository's lanes (and any shadowed factory folder), each forge and tracker, and git, docker, ynh and ynm. ynh and ynm are optional. |
+| `ynf forges` | Each forge ynf works with, checked by reaching an enrolled repository on it. |
+| `ynf trackers` | Each tracker: every forge's issues, and each declared tracker, whose MCP server is started and checked for the tools it is configured to call. |
+| `ynf ticket <ref>` | Reads a ticket exactly as `start` would, without starting anything: its title, state, labels, the repository it names, and its body. For checking a tracker's `fields`. |
+| `ynf harness [<repo>]...` | How each lane of each repository (default: every enrolled one) runs: its runner, executor and harness. A harness in a published image, or installed beside an inline ynf, is read and checked against its lane: budgets only tightened, sensors only scoped. Exits 30 if one can't be read or doesn't fit. |
 | `ynf lanes validate [--file <path>]` | Validates a lanes file against the schema. Default `.agents/factory/lanes.yaml`. |
 | `ynf lanes show [--repo <owner/name>] [<lane>]` | The lanes ynf reads from a repository's default branch, with defaults applied. |
 | `ynf start <ref> [--repo <host/owner/name>] [--lane <name>] [--auto-approve edits\|all] [--detach]` | An instruction: take on this one ticket now (ADR-003). It reads the ticket, checks its repository is enrolled and reachable and that a lane takes it (`--lane`, or the repository's only originate lane), and refuses with exit 33 before creating anything if any check fails. It then steps the item until it waits on something outside ynf (CI, a review, a person) and prints its state and pull request. Run from a terminal it is attended: the uncontained `process` executor is allowed, and only `--auto-approve` here switches off the agent's approval prompts on this machine (a lane's `auto_approve` applies only inside containment, ADR-007). `--detach` only records it, for a running `ynf serve` to step. A GitHub issue's code goes to its own repository; give `--repo` for any other ticket. |

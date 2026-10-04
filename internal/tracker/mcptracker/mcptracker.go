@@ -378,3 +378,36 @@ func strs(s []string) []any {
 	}
 	return out
 }
+
+// Check connects to the tracker's server and confirms it has every tool the tracker is configured
+// to call, so a mistyped tool name shows before any ticket is started.
+func (t *Tracker) Check(ctx context.Context) error {
+	t.mu.Lock()
+	if t.session == nil {
+		s, err := t.connect(ctx)
+		if err != nil {
+			t.mu.Unlock()
+			return fmt.Errorf("%s: connect to its MCP server: %w", t.host, err)
+		}
+		t.session = s
+	}
+	s := t.session
+	t.mu.Unlock()
+	have := map[string]bool{}
+	for tool, err := range s.Tools(ctx, nil) {
+		if err != nil {
+			return fmt.Errorf("%s: list its tools: %w", t.host, err)
+		}
+		have[tool.Name] = true
+	}
+	var missing []string
+	for _, c := range []Call{t.cfg.Get, t.cfg.Comment, t.cfg.Label} {
+		if !have[c.Tool] && !slices.Contains(missing, c.Tool) {
+			missing = append(missing, c.Tool)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("%s: its server has no tool %s", t.host, strings.Join(missing, ", "))
+	}
+	return nil
+}

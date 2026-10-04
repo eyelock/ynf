@@ -4,6 +4,8 @@
 * **How-to guides**
   * [How-to overview](/how-to/README.md)
   * [Run ynf locally](/how-to/run-ynf-locally.md)
+  * [Connect a tracker](/how-to/connect-a-tracker.md)
+  * [Run the factory image](/how-to/run-the-factory-image.md)
   * [Test against the sandbox](/how-to/test-against-the-sandbox.md)
 
 * **Reference**

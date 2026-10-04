@@ -111,6 +111,8 @@ type Engine struct {
 	factory  *FactoryPolicy
 	// trackerHosts maps a configured tracker's name to its host, for shorthand references.
 	trackerHosts map[string]string
+	// forgeNames maps a declared forge's name to its host, for listing.
+	forgeNames map[string]string
 }
 
 // RepoPolicy is a repository's lane policy, read from its default branch.
@@ -546,6 +548,10 @@ func (e *Engine) addForges(f *policy.Factory) error {
 			e.Forges = map[string]ForgeInstance{}
 		}
 		e.Forges[inst.Host] = inst
+		if e.forgeNames == nil {
+			e.forgeNames = map[string]string{}
+		}
+		e.forgeNames[name] = inst.Host
 		if e.Trackers == nil {
 			e.Trackers = map[string]tracker.Tracker{}
 		}

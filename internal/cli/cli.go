@@ -58,6 +58,10 @@ Usage:
   ynf replay <owner/name#number | key> [--policy lanes.yaml]
   ynf pause|resume <lane> --reason <text> [--repo owner/name]
   ynf stats [--lane name]...
+  ynf forges                    the forges ynf works with, each checked
+  ynf trackers                  the trackers ynf works with, each checked
+  ynf ticket <ref>              read a ticket as start would, without starting it
+  ynf harness [repo]...         how each lane runs, and the harness it is held to
   ynf egress-proxy --allow host,*.domain [--listen :3128] [--log file]   (run inside a container)
 
 Global flags (before the command):
@@ -134,6 +138,14 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = a.pause(ctx, cmd, rest)
 	case "stats":
 		err = a.stats(ctx, rest)
+	case "forges":
+		err = a.connections(ctx, "forge", rest)
+	case "trackers":
+		err = a.connections(ctx, "tracker", rest)
+	case "ticket":
+		err = a.ticket(ctx, rest)
+	case "harness":
+		err = a.harness(ctx, rest)
 	case "egress-proxy":
 		err = a.egressProxy(ctx, rest)
 	case "help", "-h", "--help":
