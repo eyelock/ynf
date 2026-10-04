@@ -1,4 +1,6 @@
-# The ynf sandbox: a private GitHub repository rebuilt from this folder.
+# The ynf sandbox: private GitHub repositories rebuilt from this folder. eyelock/ynf-sandbox, from
+# seed/, holds the fixtures; eyelock/ynf-sandbox-factory, from factory-seed/, is the factory's
+# configuration repository, which enrols the sandbox and gives it default lanes (ADR-006).
 #   make up      create it (or bring it in line with this folder)
 #   make reset   delete it and create it again from scratch
 #   make down    delete it

@@ -87,6 +87,7 @@ type item struct {
 func main() {
 	root := flag.String("root", ".", "the sandbox/ directory")
 	repo := flag.String("repo", "eyelock/ynf-sandbox", "the sandbox repository")
+	factory := flag.String("factory", "eyelock/ynf-sandbox-factory", "the configuration repository, which enrols the sandbox")
 	lanes := flag.String("lanes", "gofmt,deps", "lanes to run and check")
 	timeout := flag.Duration("timeout", 15*time.Minute, "how long to wait for items to settle")
 	forget := flag.Bool("forget-memory", false, "empty the sandbox's ynm namespace and exit")
@@ -98,13 +99,13 @@ func main() {
 		}
 		return
 	}
-	if err := run(*root, *repo, strings.Split(*lanes, ","), *timeout); err != nil {
+	if err := run(*root, *repo, *factory, strings.Split(*lanes, ","), *timeout); err != nil {
 		fmt.Fprintln(os.Stderr, "e2e:", err)
 		os.Exit(1)
 	}
 }
 
-func run(root, repo string, lanes []string, timeout time.Duration) error {
+func run(root, repo, factory string, lanes []string, timeout time.Duration) error {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return err
@@ -164,7 +165,8 @@ func run(root, repo string, lanes []string, timeout time.Duration) error {
 	} else {
 		fmt.Println("memory not checked: ynm is not installed")
 	}
-	if err := os.WriteFile(cfg, fmt.Appendf(nil, "version: 1\nrepos: [%s]\npoll: {ci: 15s, review: 1m}\nlease: {ttl: 30s, heartbeat: 10s}\n%s", repo, mem), 0o644); err != nil {
+	// Enrolment comes from the configuration repository, as a deployed factory's does (ADR-006).
+	if err := os.WriteFile(cfg, fmt.Appendf(nil, "version: 1\nfactory: {repo: %s}\npoll: {ci: 15s, review: 1m}\nlease: {ttl: 30s, heartbeat: 10s}\n%s", factory, mem), 0o644); err != nil {
 		return err
 	}
 	// Memories written before this run are not evidence for it (e2e-only skips the reset).
@@ -329,6 +331,14 @@ func check(f fixture, numbers map[string]int, items []item, repo, ynf, cfg strin
 		return "", err
 	}
 	detail += fmt.Sprintf(", %d decisions replay the same", len(r.Decisions))
+	// Every decision records the configuration repository's commit beside the repository's.
+	logged, err := sh("", ynf, "--config", cfg, "--format", "json", "items", "log", fmt.Sprintf("%s#%d", repo, n))
+	if err != nil {
+		return "", fmt.Errorf("items log: %w", err)
+	}
+	if !strings.Contains(logged, `config_sha`) {
+		return "", fmt.Errorf("#%d's decisions do not record the configuration repository's commit", n)
+	}
 	if want := f.Expect.Labels; len(want.Present)+len(want.Absent) > 0 {
 		out, err := sh("", "gh", "issue", "view", fmt.Sprint(n), "-R", repo, "--json", "labels", "-q", "[.labels[].name] | join(\",\")")
 		if err != nil {

@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=https://eyelock.github.io/ynf/schema/lanes.schema.json
+#
+# Lanes every enrolled repository gets. Each repository's own lanes lie over these key by key and
+# win. eyelock/ynf-sandbox switches deps off with one key, enabled: false, which is what the
+# acceptance test checks: deps-bump ends ignored.
+version: 1
+lanes:
+  deps:
+    # Dependency bumps fail ynh's factory-pattern test on blast radius.
+    kind: originate
+    intake:
+      - github.search: 'repo:eyelock/ynf-sandbox is:issue is:open label:"ynf:deps"'
+        every: 1h
+    run:
+      runner: ynh
+      ynh: { harness: ., focus: tidy }
+    when:
+      converged: open_pr

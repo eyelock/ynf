@@ -16,9 +16,19 @@ import (
 
 var t0 = time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
 
+// lanes is the sandbox's lanes as ynf reads them: its own laid over its configuration
+// repository's.
 func lanes(t *testing.T) *policy.File {
 	t.Helper()
-	doc, err := os.ReadFile("../../sandbox/seed/.agents/factory/lanes.yaml")
+	own, err := os.ReadFile("../../sandbox/seed/.agents/factory/lanes.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := os.ReadFile("../../sandbox/factory-seed/.agents/factory/lanes.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := policy.MergeLanes(config, own)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,8 +8,28 @@ import (
 	"github.com/eyelock/ynf/internal/policy"
 )
 
+// TestSandboxLanesLoad loads the sandbox's lanes as ynf does: its own laid over its configuration
+// repository's, which enrols it.
 func TestSandboxLanesLoad(t *testing.T) {
-	doc, err := os.ReadFile("../../sandbox/seed/.agents/factory/lanes.yaml")
+	own, err := os.ReadFile("../../sandbox/seed/.agents/factory/lanes.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := os.ReadFile("../../sandbox/factory-seed/.agents/factory/lanes.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fy, err := os.ReadFile("../../sandbox/factory-seed/.agents/factory/factory.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fac, err := policy.LoadFactory(fy); err != nil || strings.Join(fac.Repos, ",") != "github.com/eyelock/ynf-sandbox" {
+		t.Fatalf("the sandbox factory: %+v %v", fac, err)
+	}
+	if _, err := policy.Load(own); err == nil {
+		t.Fatal("the sandbox's lanes alone should need the configuration repository's")
+	}
+	doc, err := policy.MergeLanes(config, own)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -20,6 +40,9 @@ func TestSandboxLanesLoad(t *testing.T) {
 	got := strings.Join(f.Names(), ",")
 	if got != "deps,doc-drift,fix-ci,gofmt,lint-paydown,reclaim" {
 		t.Fatalf("lanes %s", got)
+	}
+	if d := f.Lanes["deps"]; d.On() || d.Kind != "originate" || len(d.Intake) != 1 {
+		t.Fatalf("deps comes from the configuration repository and is switched off here: %+v", d)
 	}
 	g := f.Lanes["gofmt"]
 	if g.Run.Runner != "command" || g.Run.Executor != "docker" || g.Attempts != 3 {
