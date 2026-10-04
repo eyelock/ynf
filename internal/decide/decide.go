@@ -24,6 +24,9 @@ const (
 	Quarantine = "quarantine"  // tell a human the item was taken out of rotation
 	Comment    = "comment"
 	Close      = "close"
+	// Label is the lane's labels for a state the item enters; the engine writes them as the item
+	// moves, so they follow the decision without being one.
+	Label = "label"
 )
 
 // Poll is how often waiting states are re-probed. It is an input, recorded with the decision.

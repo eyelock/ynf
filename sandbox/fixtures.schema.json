@@ -117,6 +117,15 @@
               ],
               "description": "The work item's state once ynf has nothing more to do without a human. A list when more than one ending is legitimate, such as a fixture with a deliberately flaky test: any of them passes, and e2e reports which one happened."
             },
+            "labels": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The ticket's labels once the item settles: the lane's label reactions at work.",
+              "properties": {
+                "present": { "type": "array", "items": { "type": "string" } },
+                "absent": { "type": "array", "items": { "type": "string" } }
+              }
+            },
             "start": {
               "type": "boolean",
               "description": "make e2e starts this fixture with ynf start --lane <lane> instead of letting a search find it."

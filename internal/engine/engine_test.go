@@ -26,6 +26,7 @@ import (
 	"github.com/eyelock/ynf/internal/lease"
 	"github.com/eyelock/ynf/internal/memory"
 	"github.com/eyelock/ynf/internal/policy"
+	"github.com/eyelock/ynf/internal/store"
 	"github.com/eyelock/ynf/internal/store/sqlite"
 	"github.com/eyelock/ynf/internal/tracker"
 	"github.com/eyelock/ynf/internal/workspace"
@@ -69,6 +70,9 @@ lanes:
   agent:
     kind: originate
     intake: [{github.search: "label:ynf:agent", every: 5m}, {jira.search: "project = X", every: 5m}]
+    labels:
+      on_claim: {add: [ynf:working], remove: [ynf:agent]}
+      on_propose: {add: [ynf:proposed], remove: [ynf:working]}
     run:
       runner: command
       command:
@@ -1377,4 +1381,52 @@ func TestAutoApproveOnTheHostOnlyWhenThePersonAsks(t *testing.T) {
 			t.Errorf("%q on an old ynh: %+v", c.asked, it.LastRun)
 		}
 	}
+}
+
+// TestLabelsFollowTheItem: the lane's labels are written on the ticket as the item enters each
+// state, and a failed label write never stops the work (ADR-003).
+func TestLabelsFollowTheItem(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:agent", "keep"}
+	it, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "github.com", Key: "o/r#1"}, Lane: "agent"})
+	if err != nil || it.State != item.Proposed {
+		t.Fatalf("%+v %v", it, err)
+	}
+	if got := strings.Join(h.f.labels[1], ","); got != "keep,ynf:proposed" {
+		t.Fatalf("labels: %s", got)
+	}
+	entries, _ := h.e.Store.Log(ctx, it.Key)
+	var labelled int
+	for _, en := range entries {
+		if en.Kind == "action" && strings.Contains(string(en.Body), `"action":"label","ok":true`) {
+			labelled++
+		}
+	}
+	if labelled != 2 {
+		t.Fatalf("label actions recorded: %d", labelled)
+	}
+
+	h2 := newHarness(t)
+	h2.e.Trackers = map[string]tracker.Tracker{"github.com": failingLabels{forge.IssueTracker(h2.f)}}
+	h2.f.labels[1] = []string{"ynf:agent"}
+	it, err = h2.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "github.com", Key: "o/r#1"}, Lane: "agent"})
+	if err != nil || it.State != item.Proposed {
+		t.Fatalf("a failing label write stopped the work: %+v %v", it, err)
+	}
+	entries, _ = h2.e.Store.Log(ctx, it.Key)
+	if !slices.ContainsFunc(entries, func(en store.LogEntry) bool {
+		return en.Kind == "action" && strings.Contains(string(en.Body), `"action":"label","ok":false`)
+	}) {
+		t.Fatal("the failed label write was not recorded")
+	}
+	if ad, err := h.e.Start(ctx, engine.StartRequest{Prompt: "tidy", Repo: "o/r", Lane: "agent"}); err != nil || ad.State != item.Proposed {
+		t.Fatalf("ad hoc work has nothing to label: %+v %v", ad, err)
+	}
+}
+
+type failingLabels struct{ tracker.Tracker }
+
+func (failingLabels) Label(context.Context, string, []string, []string) error {
+	return errors.New("labels are read-only here")
 }

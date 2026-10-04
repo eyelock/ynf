@@ -92,6 +92,9 @@
         },
         "pr": {
           "$ref": "#/$defs/pr"
+        },
+        "labels": {
+          "$ref": "#/$defs/labels"
         }
       }
     },
@@ -170,6 +173,9 @@
         },
         "retention": {
           "$ref": "#/$defs/duration"
+        },
+        "labels": {
+          "$ref": "#/$defs/labels"
         }
       }
     },
@@ -581,6 +587,57 @@
           "type": "integer",
           "minimum": 1,
           "default": 20
+        }
+      }
+    },
+    "labelChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "add": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "description": "Labels to add."
+        },
+        "remove": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "description": "Labels to remove; one already absent is fine."
+        }
+      }
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Labels ynf writes on the ticket as the item moves, through its tracker (ADR-003). Each is applied when the item enters the state, never blocks a step, and is logged.",
+      "properties": {
+        "on_claim": {
+          "$ref": "#/$defs/labelChange",
+          "description": "ynf takes the item on: from intake to ready. Remove the label that triggered it here, so no search or rule fires again."
+        },
+        "on_propose": {
+          "$ref": "#/$defs/labelChange",
+          "description": "A pull request is open, waiting on CI."
+        },
+        "on_review": {
+          "$ref": "#/$defs/labelChange",
+          "description": "CI is green: waiting on a human."
+        },
+        "on_escalate": {
+          "$ref": "#/$defs/labelChange",
+          "description": "Escalated or quarantined: a human must decide."
+        },
+        "on_done": {
+          "$ref": "#/$defs/labelChange",
+          "description": "Merged or closed."
         }
       }
     }

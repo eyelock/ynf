@@ -117,3 +117,48 @@ func TestDraftDefaultAndGuardTypes(t *testing.T) {
 		t.Fatal("non-bool guard accepted")
 	}
 }
+
+// TestLabelsInheritPerReaction: a lane's label reactions fall back to the defaults one by one.
+func TestLabelsInheritPerReaction(t *testing.T) {
+	f, err := policy.Load([]byte(`version: 1
+defaults:
+  labels:
+    on_claim: {remove: [ynf:go]}
+    on_escalate: {add: [ynf:needs-human]}
+lanes:
+  a:
+    kind: originate
+    intake: [{github.search: "x", every: 5m}]
+    run: {runner: command, command: {argv: ["true"]}}
+    when: {converged: open_pr}
+    labels:
+      on_claim: {add: [ynf:working], remove: [ynf:a]}
+  b:
+    kind: originate
+    intake: [{github.search: "x", every: 5m}]
+    run: {runner: command, command: {argv: ["true"]}}
+    when: {converged: open_pr}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := f.Lanes["a"].Labels, f.Lanes["b"].Labels
+	if c := a.For("ready"); c == nil || c.Add[0] != "ynf:working" || c.Remove[0] != "ynf:a" {
+		t.Fatalf("a's own on_claim: %+v", c)
+	}
+	if a.For("escalated").Add[0] != "ynf:needs-human" || a.For("quarantined").Add[0] != "ynf:needs-human" {
+		t.Fatal("a inherits on_escalate")
+	}
+	if b.For("ready").Remove[0] != "ynf:go" || b.For("proposed") != nil || b.For("running") != nil {
+		t.Fatal("b inherits the defaults only")
+	}
+	var none *policy.Labels
+	if none.For("ready") != nil {
+		t.Fatal("no labels")
+	}
+	for _, st := range []string{"in_review", "done", "closed"} {
+		if b.For(st) != nil {
+			t.Errorf("%s: nothing configured", st)
+		}
+	}
+}
