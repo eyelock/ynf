@@ -22,6 +22,8 @@ func (a *app) start(ctx context.Context, args []string) error {
 	}
 	fs := a.flags("start")
 	prompt := fs.String("prompt", "", "")
+	var labels multi
+	fs.Var(&labels, "label", "")
 	repo := fs.String("repo", "", "")
 	lane := fs.String("lane", "", "")
 	approve := fs.String("auto-approve", "", "")
@@ -53,7 +55,7 @@ func (a *app) start(ctx context.Context, args []string) error {
 		return err
 	}
 	e.HostAutoApprove = *approve
-	req := engine.StartRequest{Prompt: *prompt, Lane: *lane, Detach: *detach}
+	req := engine.StartRequest{Prompt: *prompt, Labels: labels, Lane: *lane, Detach: *detach}
 	if req.Repo, err = forgeRepo(*repo, e.ForgeHost); err != nil {
 		return withCode(ExitStartRefused, err)
 	}
@@ -105,10 +107,11 @@ func startSummary(it item.Item, detached bool) string {
 
 // startBody is POST /start's request: the same instruction as the command.
 type startBody struct {
-	Ref    string `json:"ref"`
-	Prompt string `json:"prompt"`
-	Repo   string `json:"repo"`
-	Lane   string `json:"lane"`
+	Ref    string   `json:"ref"`
+	Prompt string   `json:"prompt"`
+	Labels []string `json:"labels"`
+	Repo   string   `json:"repo"`
+	Lane   string   `json:"lane"`
 }
 
 // startRequest turns POST /start's body into an instruction, always detached: the worker's loop
@@ -118,7 +121,7 @@ func startRequest(e *engine.Engine, body []byte) (engine.StartRequest, error) {
 	if err := json.Unmarshal(body, &b); err != nil {
 		return engine.StartRequest{}, fmt.Errorf("start: %w", err)
 	}
-	req := engine.StartRequest{Prompt: b.Prompt, Lane: b.Lane, Detach: true}
+	req := engine.StartRequest{Prompt: b.Prompt, Labels: b.Labels, Lane: b.Lane, Detach: true}
 	var err error
 	if req.Repo, err = forgeRepo(b.Repo, e.ForgeHost); err != nil {
 		return req, err

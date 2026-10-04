@@ -1,7 +1,8 @@
 # yaml-language-server: $schema=./fixtures.schema.json
 #
 # Every issue and pull request the sandbox starts with, and every ticket in its tracker that is
-# not a forge (kind: ticket, written by e2e), and what ynf is expected to do with each.
+# not a forge (kind: ticket, written by e2e), every piece of ad hoc work started from a prompt
+# (kind: prompt, started by e2e), and what ynf is expected to do with each.
 # Expectations live here, in ynf, never in the sandbox, so the agent cannot read what it is being
 # tested on. Terraform reads this file to create the issues, branches and pull requests.
 #
@@ -175,6 +176,21 @@ fixtures:
       checks:
         - no lane label, so no search finds it; e2e starts it with ynf start --lane gofmt
         - it ends like any found ticket, a draft pull request in review
+
+  - id: prompt-format
+    kind: prompt
+    title: Run gofmt over internal/format, from a prompt
+    body: fixtures/prompt-format.md
+    labels: ["pkg:internal/format"]
+    lane: gofmt
+    calibrate:
+      command: { deterministic: true }
+    expect:
+      result: in_review
+      checks:
+        - no ticket at all; e2e starts it with ynf start --prompt, giving its label with --label
+        - the lane's command reads {label.pkg} from that label, as it would a ticket's
+        - it ends like any ticket, a draft pull request in review
 
   - id: tracker-format
     kind: ticket

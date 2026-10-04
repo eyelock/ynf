@@ -277,3 +277,24 @@ func TestLoadFactory(t *testing.T) {
 		}
 	}
 }
+
+// TestCheckLabels: a lane's command arguments and sensor scopes must all expand from the labels.
+func TestCheckLabels(t *testing.T) {
+	cmd := policy.Lane{Run: policy.Run{Command: &policy.Command{Argv: []string{"gofmt", "-w", "./{label.pkg}"}}}}
+	if err := cmd.CheckLabels([]string{"pkg:internal/x"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.CheckLabels(nil); err == nil || !strings.Contains(err.Error(), "no pkg: label") {
+		t.Fatalf("missing: %v", err)
+	}
+	if err := cmd.CheckLabels([]string{"pkg:a b"}); err == nil {
+		t.Fatal("an unsafe value")
+	}
+	ynh := policy.Lane{Run: policy.Run{Ynh: &policy.Ynh{SensorScope: map[string]string{"test": "go test ./{label.area}/..."}}}}
+	if err := ynh.CheckLabels([]string{"pkg:x"}); err == nil || !strings.Contains(err.Error(), "no area: label") {
+		t.Fatalf("a sensor scope: %v", err)
+	}
+	if err := (policy.Lane{}).CheckLabels(nil); err != nil {
+		t.Fatal("a lane with no templates needs no labels")
+	}
+}

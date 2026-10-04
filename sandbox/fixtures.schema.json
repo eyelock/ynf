@@ -48,9 +48,10 @@
           "enum": [
             "issue",
             "pull_request",
-            "ticket"
+            "ticket",
+            "prompt"
           ],
-          "description": "issue and pull_request are created on eyelock/ynf-sandbox by Terraform; ticket is written into the sandbox's tracker that is not a forge by e2e."
+          "description": "issue and pull_request are created on eyelock/ynf-sandbox by Terraform; ticket is written into the sandbox's tracker that is not a forge by e2e; prompt is ad hoc work with no ticket, which e2e starts with ynf start --prompt, its title and body the prompt and its labels given with --label."
         },
         "title": {
           "type": "string",
