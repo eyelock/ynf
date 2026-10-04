@@ -1,7 +1,6 @@
 variable "owner" {
-  description = "GitHub user or organisation that owns the sandbox."
+  description = "GitHub user or organisation that owns the sandbox: SANDBOX_OWNER in sandbox.env."
   type        = string
-  default     = "eyelock"
 }
 
 variable "name" {

@@ -1,24 +1,37 @@
 # Sandbox
 
-A private GitHub repository, [`eyelock/ynf-sandbox`](https://github.com/eyelock/ynf-sandbox),
-built entirely from this folder so it can be thrown away and rebuilt after every test run. Every
-problem in it is planted, and every issue and pull request in it has a known expected outcome.
+Two GitHub repositories of your own, built entirely from this folder so they can be thrown away and
+rebuilt after every test run: the sandbox (`<owner>/ynf-sandbox`), where every problem is planted
+and every issue and pull request has a known expected outcome, and its factory's configuration
+repository (`<owner>/ynf-sandbox-factory`), which enrols it.
+
+## Your settings
+
+Copy [`sandbox.env.example`](sandbox.env.example) to `sandbox.env`, which git ignores, and set
+`SANDBOX_OWNER` to your GitHub user or organisation. The repositories' names and visibility have
+defaults you can change there too. Everything that names the sandbox (the lanes' searches, the
+factory's enrolment, the Go module path) is written with your names when the seed is pushed.
 
 ```bash
-make up       # create it, or bring it in line with this folder
-make reset    # delete it and build it again from scratch
-make down     # delete it
+cp sandbox.env.example sandbox.env    # then set SANDBOX_OWNER
+make up       # create them, or bring them in line with this folder
+make reset    # delete them and build them again from scratch
+make down     # delete them
 ```
 
-State is kept in `s3://ynf-terraform-state.eyelock.net/sandbox/terraform.tfstate` through the
-`ynf-terraform` AWS profile ([`infra/terraform-state`](../infra/terraform-state/README.md)), so
-any machine with that profile can reset the sandbox.
-
-Deleting needs a token with the `delete_repo` scope, which `gh` does not ask for by default:
+You need Terraform and a GitHub token that can create and delete repositories. `gh` doesn't ask
+for the delete scope by default:
 
 ```bash
 gh auth refresh -s delete_repo
 ```
+
+**Terraform's state** is a local file, `terraform/terraform.tfstate`, unless you set
+`SANDBOX_STATE=s3` with a bucket, region and `AWS_PROFILE` in `sandbox.env`. Then `make init`
+writes `terraform/backend_override.tf` with that backend, and any machine with the profile can
+reset the sandbox. Only S3 needs AWS. eyelock's own sandbox keeps its state in
+`s3://ynf-terraform-state.eyelock.net/sandbox/terraform.tfstate`
+([`infra/terraform-state`](../infra/terraform-state/README.md)).
 
 ## Calibrating the fixtures
 
@@ -64,8 +77,9 @@ repository is disposable.
 | `fixtures/` | Issue and pull request bodies, the files committed on fixture branches (in `<id>/testdata/`, so Go tooling in this repository ignores their planted problems), and each fixture's known fix (`<id>.fix.patch`) |
 | `images/agent/` | The agent base image the ynh lanes build on: ynh's image plus Go and golangci-lint (`make agent-image`) |
 | `calibrate/` | `make calibrate`: a small Go program that proves each fixture still fails before its known fix and passes after |
+| `sandbox.env.example` | Your settings: the owner, the names, and where Terraform keeps its state |
 | `terraform/` | The repository, labels, issues, fixture pull request and branch protection |
-| `scripts/` | The two git steps Terraform calls: the seed commit and the fixture branch |
+| `scripts/` | The two git steps Terraform calls: the seed commit, written with your names, and the fixture branch |
 
 Expected outcomes live in `fixtures.yaml`, in ynf, and never in the sandbox, so an agent working
 in the sandbox cannot read what it is being tested on.

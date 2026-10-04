@@ -1,6 +1,7 @@
-# The ynf sandbox: private GitHub repositories rebuilt from this folder. eyelock/ynf-sandbox, from
-# seed/, holds the fixtures; eyelock/ynf-sandbox-factory, from factory-seed/, is the factory's
+# The ynf sandbox: two GitHub repositories of your own, rebuilt from this folder. <owner>/ynf-sandbox,
+# from seed/, holds the fixtures; <owner>/ynf-sandbox-factory, from factory-seed/, is the factory's
 # configuration repository, which enrols the sandbox and gives it default lanes (ADR-006).
+# Settings are in sandbox.env: copy sandbox.env.example and set SANDBOX_OWNER at least.
 #   make up      create it (or bring it in line with this folder)
 #   make reset   delete it and create it again from scratch
 #   make down    delete it
@@ -13,23 +14,48 @@
 #   make e2e-factory  the same with ynf inside the factory image, as a job runner would run it
 #                   (ADR-009, shape B): the sandbox's harness built on ynf's factory image
 #                   (make -C .. factory-image first; FACTORY_BASE names it)
-#   make reset also empties the sandbox's ynm namespace (factory/github.com/eyelock/ynf-sandbox), so every
+#   make reset also empties the sandbox's ynm namespace (factory/github.com/<owner>/<name>), so every
 #   e2e run starts from the same memory; e2e checks each item that ran left its memories
 #   make agent-image  build ynf-sandbox-agent:latest, the base the ynh lanes' harness images use,
 #                   on the ynh release image YNH_BASE; YNH_SRC=path to a ynh checkout builds its
 #                   origin/develop into the image instead, to try ynh before it is released
 # Deleting needs the delete_repo scope: gh auth refresh -s delete_repo
-# State is in s3://ynf-terraform-state.eyelock.net/sandbox/, through the ynf-terraform AWS profile
-# (infra/terraform-state).
+# State is local (terraform/terraform.tfstate) unless sandbox.env sets SANDBOX_STATE=s3 and the
+# bucket; only then is AWS needed.
+
+-include sandbox.env
+
+SANDBOX_NAME       ?= ynf-sandbox
+SANDBOX_FACTORY    ?= ynf-sandbox-factory
+SANDBOX_VISIBILITY ?= private
+SANDBOX_STATE_KEY  ?= sandbox/terraform.tfstate
+SANDBOX_REPO        = $(SANDBOX_OWNER)/$(SANDBOX_NAME)
+SANDBOX_FACTORY_REPO = $(SANDBOX_OWNER)/$(SANDBOX_FACTORY)
+
+export TF_VAR_owner        = $(SANDBOX_OWNER)
+export TF_VAR_name         = $(SANDBOX_NAME)
+export TF_VAR_factory_name = $(SANDBOX_FACTORY)
+export TF_VAR_visibility   = $(SANDBOX_VISIBILITY)
+ifneq ($(AWS_PROFILE),)
+export AWS_PROFILE
+endif
 
 TF := terraform -chdir=terraform
 export GITHUB_TOKEN ?= $(shell gh auth token)
-export AWS_PROFILE ?= ynf-terraform
 
-.PHONY: init validate up down reset plan calibrate e2e e2e-only e2e-factory agent-image
+.PHONY: settings init validate up down reset plan calibrate e2e e2e-only e2e-factory agent-image
 
-init:
-	$(TF) init -upgrade
+settings:
+	@[ -n "$(SANDBOX_OWNER)" ] || { echo "sandbox: no SANDBOX_OWNER. Copy sandbox.env.example to sandbox.env and set it (and the rest, if you want)."; exit 2; }
+
+# Local state by default; with SANDBOX_STATE=s3, an S3 backend written from sandbox.env.
+init: settings
+	@set -e; if [ "$(SANDBOX_STATE)" = s3 ]; then \
+	  [ -n "$(SANDBOX_STATE_BUCKET)" ] && [ -n "$(SANDBOX_STATE_REGION)" ] || { echo "sandbox: SANDBOX_STATE=s3 needs SANDBOX_STATE_BUCKET and SANDBOX_STATE_REGION"; exit 2; }; \
+	  printf 'terraform {\n  backend "s3" {\n    bucket       = "%s"\n    key          = "%s"\n    region       = "%s"\n    use_lockfile = true\n    encrypt      = true\n  }\n}\n' \
+	    "$(SANDBOX_STATE_BUCKET)" "$(SANDBOX_STATE_KEY)" "$(SANDBOX_STATE_REGION)" > terraform/backend_override.tf; \
+	else rm -f terraform/backend_override.tf; fi
+	$(TF) init -upgrade -reconfigure -input=false
 
 validate: init
 	$(TF) validate
@@ -47,17 +73,17 @@ down: init
 	$(TF) destroy -auto-approve
 
 reset: down up
-	cd e2e && go run . -forget-memory
+	cd e2e && go run . -repo $(SANDBOX_REPO) -forget-memory
 
-calibrate:
-	cd calibrate && go run . -root ..
+calibrate: settings
+	cd calibrate && go run . -root .. -repo $(SANDBOX_REPO)
 
 LANES ?= gofmt,deps,reclaim
 
 e2e: reset e2e-only
 
-e2e-only:
-	cd e2e && go run . -root .. -lanes $(LANES)
+e2e-only: settings
+	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(LANES)
 
 YNH_BASE ?= ghcr.io/eyelock/ynh:0.9.0
 YNH_SRC ?=
@@ -87,4 +113,4 @@ e2e-factory: reset
 	docker build -q --build-arg YNH_BASE=$(FACTORY_BASE) -t ynf-sandbox-agent:factory "$$ctx" >/dev/null; \
 	ynh image ynf-sandbox --from seed --base ynf-sandbox-agent:factory --entrypoint agent --tag $(FACTORY_HARNESS) >/dev/null; \
 	echo "built $(FACTORY_HARNESS) on $(FACTORY_BASE)"
-	cd e2e && go run . -root .. -lanes $(FACTORY_LANES) -image $(FACTORY_HARNESS)
+	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(FACTORY_LANES) -image $(FACTORY_HARNESS)

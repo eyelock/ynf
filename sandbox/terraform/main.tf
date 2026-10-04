@@ -7,11 +7,25 @@ locals {
 
   labels = toset(flatten([for f in local.fixtures : f.labels]))
 
-  # Re-seed when anything under seed/ changes. A change after the first apply needs `make reset`,
-  # because main is protected and the seed is a force push.
-  seed_hash = sha256(join("", [for p in sort(fileset("${local.root}/seed", "**")) : filesha256("${local.root}/seed/${p}")]))
+  # The seeds name eyelock's sandbox; each is pushed with these names instead. scripts/seed.sh makes
+  # the same three replacements, in this order: the factory's name contains the sandbox's.
+  sandbox_repo = "${var.owner}/${var.name}"
+  factory_repo = "${var.owner}/${var.factory_name}"
+  rendered = {
+    for dir in ["seed", "factory-seed"] : dir => [
+      for p in sort(fileset("${local.root}/${dir}", "**")) : replace(replace(replace(
+        file("${local.root}/${dir}/${p}"),
+        "eyelock/ynf-sandbox-factory", local.factory_repo),
+        "eyelock/ynf-sandbox", local.sandbox_repo),
+      "* @eyelock", "* @${var.owner}")
+    ]
+  }
 
-  factory_seed_hash = sha256(join("", [for p in sort(fileset("${local.root}/factory-seed", "**")) : filesha256("${local.root}/factory-seed/${p}")]))
+  # Re-seed when what is pushed changes: a seed file, or the names in it. A change after the first
+  # apply needs `make reset`, because main is protected and the seed is a force push.
+  seed_hash = sha256(join("", [for c in local.rendered["seed"] : sha256(c)]))
+
+  factory_seed_hash = sha256(join("", [for c in local.rendered["factory-seed"] : sha256(c)]))
 }
 
 resource "github_repository" "sandbox" {
@@ -38,8 +52,11 @@ resource "terraform_data" "seed" {
   provisioner "local-exec" {
     command = "${local.root}/scripts/seed.sh"
     environment = {
-      REPO     = github_repository.sandbox.full_name
-      SEED_DIR = "${local.root}/seed"
+      REPO         = github_repository.sandbox.full_name
+      SEED_DIR     = "${local.root}/seed"
+      OWNER        = var.owner
+      SANDBOX_REPO = local.sandbox_repo
+      FACTORY_REPO = local.factory_repo
     }
   }
 }
@@ -56,7 +73,7 @@ resource "github_issue" "fixture" {
   for_each   = local.issues
   repository = github_repository.sandbox.name
   title      = each.value.title
-  body       = file("${local.root}/${each.value.body}")
+  body       = replace(replace(file("${local.root}/${each.value.body}"), "eyelock/ynf-sandbox-factory", local.factory_repo), "eyelock/ynf-sandbox", local.sandbox_repo)
   labels     = each.value.labels
 
   depends_on = [terraform_data.seed, github_issue_label.label]
@@ -132,9 +149,12 @@ resource "terraform_data" "factory_seed" {
   provisioner "local-exec" {
     command = "${local.root}/scripts/seed.sh"
     environment = {
-      REPO     = github_repository.factory.full_name
-      SEED_DIR = "${local.root}/factory-seed"
-      MESSAGE  = "seed: ynf sandbox factory configuration"
+      REPO         = github_repository.factory.full_name
+      SEED_DIR     = "${local.root}/factory-seed"
+      MESSAGE      = "seed: ynf sandbox factory configuration"
+      OWNER        = var.owner
+      SANDBOX_REPO = local.sandbox_repo
+      FACTORY_REPO = local.factory_repo
     }
   }
 }
