@@ -17,14 +17,14 @@ the FR/NFR ids from ADR-000 it satisfies.
 |---|---|
 | [000](000-requirements.md) | Functional and non-functional requirements cited by the other ADRs |
 | [001](001-positioning-and-the-outer-loop.md) | ynf is the runtime layer of ynh's factory pattern: an event-driven outer loop around `ynh agent run` |
-| [002](002-events-work-items-correlation.md) | One event envelope, work items keyed per ticket or PR, alias keys for correlation, originated and adopted items |
-| [003](003-intake-adapters.md) | Webhook, topic, search and internal adapters; webhooks are hints, facts are re-probed |
+| [002](002-events-work-items-correlation.md) | One event envelope; work items with a ticket and a code reference, keyed by the system's own host and key; alias keys for correlation |
+| [003](003-intake-adapters.md) | Told when, gets what: instruction, webhook, topic, search and internal intake; tracker and forge ports with `github` and `mcp` providers |
 | [004](004-store-abstraction.md) | A key/value + compare-and-swap store port with SQLite, S3 and DynamoDB providers |
 | [005](005-claims-leases-fencing.md) | Exclusive claims: leases with an epoch, heartbeats, fencing, capped retries, restart on reclaim |
 | [006](006-decider-and-lane-policy.md) | A fixed state machine in code, lanes in YAML with CEL guards; lanes reference ynh focuses and never redefine them |
-| [007](007-executor-and-containment.md) | Executor port; the agent never holds forge write credentials; containment mandatory for unattended lanes |
-| [008](008-memory-with-ynm.md) | ynm as shared narrative memory, failure signatures as subjects, memory advisory only |
-| [009](009-hosts-and-language.md) | One Go binary, three hosts: daemon, hosted service, CI-native |
+| [007](007-executor-and-containment.md) | Executor port; images pulled, built only as a fallback; the agent never holds forge or tracker write credentials; containment mandatory for unattended work |
+| [008](008-memory-with-ynm.md) | ynm as shared memory through a git remote, failure signatures as subjects, memory advisory only and never relayed into tasks |
+| [009](009-hosts-and-language.md) | One Go binary, four hosts: developer machine, worker pool, job runner, CI; ynf publishes the factory image |
 | [010](010-governance-and-stop-conditions.md) | Attribution trailers, run capture, retention, stop conditions and auto-pause |
-| [011](011-interface-and-observability.md) | The `ynf` CLI, replay, shadow mode, stats, traces |
-| [012](012-loose-coupling-and-detection.md) | Runner and memory ports; ynh and ynm are detected providers, never requirements; ynf's own outcome vocabulary |
+| [011](011-interface-and-observability.md) | The `ynf` CLI (`start` and `handle`), references, replay, shadow mode, stats, logs and traces |
+| [012](012-loose-coupling-and-detection.md) | Ports and providers; instances coupled only by contracts; the image is its harness's source of truth; capabilities checked, failing loudly |

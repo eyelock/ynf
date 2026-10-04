@@ -11,8 +11,10 @@ notice that the same failure keeps happening. ynm already stores episodic memori
 `subject`, and its dream pass turns three or more episodic memories with the same subject into a
 reflective one.
 
-ynh runs already write to ynm through ynm's ynh plugin (`ynm client install ynh`), which hooks
-`on_session_start`, `before_prompt` and `on_stop`.
+ynh runs already reach ynm through ynm's ynh plugin (`ynm client install ynh`), which hooks
+`on_session_start`, `before_prompt` and `on_stop`. ynm keeps memory in git notes, so a store
+shared between machines is a git remote that each one pulls from and pushes to; ynm can also run
+as a hosted service.
 
 ## Decision
 
@@ -20,9 +22,9 @@ ynh runs already write to ynm through ynm's ynh plugin (`ynm client install ynh`
 
 | Writer | What | Type | Namespace and subject |
 |---|---|---|---|
-| ynh run, via ynm's plugin | in-run learnings and scratch | `working`, promoted to `episodic` | `session/<id>`, the repository's namespace |
-| ynf, per step | decision, exit code, `bound_by`, failing sensors, CI result, review outcome | `episodic`, `dataSchema: ynf.step.v1` | `factory/<org>/<repo>`, subject = the item key |
-| ynf, per failure | one record per distinct failure in the step | `episodic`, `dataSchema: ynf.failure.v1` | `factory/<org>/<repo>`, subject = the failure signature |
+| ynh run, via ynm's plugin, when its harness wants memory | in-run learnings and scratch | `working`, promoted to `episodic` | `session/<id>`, the repository's namespace |
+| ynf, per step | decision, exit code, `bound_by`, failing sensors, CI result, review outcome | `episodic`, `dataSchema: ynf.step.v1` | `factory/<host>/<org>/<repo>`, subject = the item key |
+| ynf, per failure | one record per distinct failure in the step | `episodic`, `dataSchema: ynf.failure.v1` | `factory/<host>/<org>/<repo>`, subject = the failure signature |
 | ynm dream | "this keeps happening" | `reflective`, and `procedural` on promote | the same signature subject |
 
 **Failure signatures are the subject.** A signature is deterministic and normalised, so the same
@@ -45,13 +47,17 @@ and reflection needs a model. ynf keeps its own deterministic per-signature coun
 and lane documents (ADR-004), incremented from the same failure observations it writes to ynm.
 Guards read counters; people and agents read memory.
 
-**How memory is used:**
+**Each instance connects to memory itself; nobody relays it.** ynf writes what only it can see,
+outcomes and failures recurring across runs, and reads memory for people. A ynh run whose harness
+wants memory connects its agent to ynm through ynm's own client integration, with its own
+configuration and credentials. ynf does not put memory into an agent's task: the orchestrator
+would otherwise decide what an agent should remember, and a run's task would depend on what the
+store held, so the same item could get a different prompt on each attempt.
 
-1. **Into the next run.** Before a run, ynf recalls `--subject <item>` and the signatures the item
-   has hit, packs them with `ynm context`, and includes them in the task as quoted context.
-2. **Into people.** `ynf stats` lists the top signatures per lane with their reflective
-   summaries. A recurring signature can open an issue on the harness's repository proposing a
-   sensor, a focus change or a quarantine. ynf proposes harness changes; it never makes them.
+**How ynf's memory is used:** `ynf stats` lists the top signatures per lane with their reflective
+summaries, and a recurring signature can open an issue on the harness's repository proposing a
+sensor, a focus change or a quarantine. ynf proposes harness changes; it never makes them. An
+agent sees ynf's records only if its harness connects to the same store and namespace.
 
 **ynf owns its schemas.** `ynf.step.v1` and `ynf.failure.v1` are ynf's, published from this
 repository as JSON schemas under `docs/schema/memory/`. ynm stores them as it stores any record:
@@ -59,21 +65,19 @@ repository as JSON schemas under `docs/schema/memory/`. ynm stores them as it st
 change, no registry entry and no knowledge of ynf to hold them.
 
 **Loosely coupled, configured by ynf.** ynm is detected with no configuration when installed
-(ADR-012), and optional: with no `memory` block ynf runs without
-it, and only the "into the next run" and reflective summaries go missing. ynf talks to ynm only
-through its public surfaces, the CLI with `--json` or the MCP HTTP endpoint, and configures what
-it needs from its own config rather than expecting ynm to know about it:
+(ADR-012), and optional: with no `memory` block ynf runs without it, and only its records and the
+reflective summaries go missing. ynf talks to ynm only through its public surfaces, the CLI with
+`--json` or the MCP HTTP endpoint, and configures what it needs from its own config rather than
+expecting ynm to know about it:
 
-```json
-"memory": {
-  "provider": "ynm",
-  "transport": "http",                         // or "cli"
-  "endpoint": "https://ynm.internal/mcp",
-  "token_env": "YNF_YNM_TOKEN",
-  "namespace": "factory/{org}/{repo}",
-  "context_budget_tokens": 2000,
-  "write": { "steps": true, "failures": true }
-}
+```yaml
+memory:
+  provider: ynm
+  transport: cli                    # or http
+  cwd: /srv/factory/memory          # the folder ynm runs from, which picks its store (cli)
+  # endpoint: https://ynm.internal/mcp, token_env: YNF_YNM_TOKEN   (http)
+  namespace: "factory/{repo}"       # {repo} is host/org/repo
+  write: { steps: true, failures: true }
 ```
 
 ynf may drive ynm on its own behalf, such as triggering `memory_consolidate` after a lane's batch
@@ -81,9 +85,12 @@ of steps so reflections are current, but only through the same public surfaces, 
 writing ynm's config files or stores directly. `ynf doctor` checks the endpoint, the token and
 that a test write and recall round-trip.
 
-**Transport.** CLI `--json` for a local store; one hosted `ynm serve --http` for the daemon and
-hosted service, which serialises writes and respects ynm's single-writer assumption (ynm
-ADR-009). CI-native hosts use the hosted endpoint.
+**Transport and store.** The CLI with `--json`, run from a folder whose ynm configuration picks the
+store. On a developer's machine that is their own store. Wherever memory must outlive the process
+or be shared, on a worker in a pool, a job runner or CI, the store is a git remote that ynm pulls
+from and pushes to, so no service is needed. A hosted `ynm serve --http` is the alternative where
+writes should be serialised through one writer (ynm ADR-009). The factory image carries ynm
+(ADR-009); the agent's own memory, if any, is the harness's configuration.
 
 ## Alternatives
 
@@ -101,6 +108,8 @@ ADR-009). CI-native hosts use the hosted endpoint.
 
 ## Open questions
 
+- A shared store through a git remote, written from a container with a token and from several
+  workers at once: how ynm reconciles concurrent pushes to the same notes, before it is relied on.
 - Should the `memory` port admit providers other than ynm? The block has a `provider` key so it
   can, but nothing needs it yet.
 

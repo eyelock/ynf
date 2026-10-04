@@ -86,7 +86,7 @@ consolidate lifecycle as the ADRs.
 
 ## Non-functional requirements
 
-- NFR-1 One binary, three hosts: a long-running daemon, a hosted service, and a CI job.
+- NFR-1 One binary, four hosts: a developer's machine, a pool of always-on workers, a job runner, and a CI job.
 - NFR-2 No in-memory state that matters. Any process can die between any two steps.
 - NFR-3 Determinism: the decider is a pure function; model output never steers control flow.
 - NFR-4 Unattended lanes never run uncontained.

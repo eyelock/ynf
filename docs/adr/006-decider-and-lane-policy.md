@@ -57,17 +57,24 @@ lanes:
     intake:
       - github.search: 'repo:eyelock/ynh is:issue is:open label:"ynf:lint"'
         every: 15m
-      - jira.webhook: { jql: 'project = PLAT AND labels = ynf-lint' }
+      - tracker: jira                    # a tracker from the config repository (ADR-003)
+        search: 'project = PLAT AND labels = ynf-lint'
+        every: 15m
     run:
       runner: ynh                        # detected when omitted (ADR-012)
+      image: ghcr.io/eyelock/ynh-lint@sha256:…   # a published harness image, pinned
       ynh:
-        harness: eyelock/ynh-lint@1.4    # pinned
         focus: tidy                      # ynh owns what "tidy" means
         sandbox: srt
+        auto_approve: edits              # inside containment only (ADR-007)
         budgets: { max_turns: 20 }       # may only tighten the harness's own
         sensor_scope:                    # narrows declared sensors to the item
           lint: 'golangci-lint run ./{label.pkg}/...'
       executor: docker
+    labels:                              # what ynf writes on the ticket, by event
+      on_claim:    { add: [ynf:working], remove: [ynf:lint] }
+      on_propose:  { add: [ynf:proposed], remove: [ynf:working] }
+      on_escalate: { add: [ynf:needs-human], remove: [ynf:working] }
     when:
       converged:         open_pr
       ci_failed:         { retry: 2, then: escalate }
@@ -85,11 +92,15 @@ lanes:
 Rules branch on ynf's outcome vocabulary (ADR-012), never on a runner's exit codes.
 
 **Lanes reference ynh, never redefine it.** A lane says *whether, when, with what, and what next*.
-The harness, its profile and its focus say *how*. Two rules keep the line sharp:
+The harness, its profile and its focus say *how*. The harness a lane is held to is the one inside
+the image that runs it, read from that image (ADR-012), never the repository's working copy. A
+lane names a published image, or names a harness folder in the repository that ynf builds into an
+image when nothing is published (ADR-007). Two rules keep the line sharp:
 
-- a lane may only **tighten** budgets, never loosen them; ynh's `budget_sources` records who set
-  each cap, so this shows in the run record
-- a lane may **scope** a sensor the harness declares, never add, remove or relax one. ynh's
+- a lane may only **tighten** budgets, never loosen them. ynf compares the lane's budgets with the
+  image's harness before the run and refuses a lane that would loosen one; ynh's `budget_sources`
+  records who set each cap, so this also shows in the run record
+- a lane may **scope** a sensor the image's harness declares, never add, remove or relax one. ynh's
   `--sensor-overlay` substitutes a command for a declared sensor for one run, and rejects a name
   the harness does not declare. A lane uses it to narrow a sensor to the item's part of the
   repository, so the run is judged on the debt it was asked to pay down rather than everyone's.
@@ -106,19 +117,27 @@ harness.
 
 | Layer | Location | Holds |
 |---|---|---|
-| Config repository | `.agents/factory/` in a repository the operator owns | enrolment (which repositories ynf watches) and defaults: org-wide lanes, retry policy, stop conditions |
-| Target repository | `.agents/factory/lanes.yaml` (or a fallback, ADR-009) | overrides and additions for that repository |
+| Config repository | `.agents/factory/` in a repository the operator owns, outside the repositories it works on | enrolment (which repositories ynf works on, on which forge instances), the tracker and forge instances (ADR-003), and defaults: org-wide lanes, retry policy, stop conditions |
+| Target repository | `.agents/factory/lanes.yaml` (or a fallback, ADR-009) | overrides and additions to lanes for that repository |
+
+A factory's configuration lives outside the repositories it serves, as a harness can live outside
+the repositories it is used on. An instance's own settings (its store, memory, credentials by
+variable name, and which config repository to follow) stay in its local configuration (ADR-009).
 
 Lanes merge by name, key by key, and the **target repository wins**: the closer layer knows the
 code, the CI and the reviewers. A repository can override any value, add lanes of its own, or
 turn a config-repository lane off with `enabled: false`. ynf only reads a target repository's
 policy when the config repository enrols it.
 
+Trackers, forges and enrolment are the config repository's alone. They carry credentials, name
+servers ynf starts, and decide which repositories ynf touches, so a target repository can refer
+to them but never declare or change them.
+
 Repository priority is safe because the guardrails that matter most are not lane configuration.
 They are fixed in code and no layer can change them: containment for unattended lanes and no
 forge credentials for the agent (ADR-007), the diff gate (ADR-007), never merging (ADR-010),
-policy read only from default branches, and lanes only tightening budgets and adding sensors
-relative to the harness (above).
+policy read only from default branches, and lanes only tightening budgets and scoping sensors
+relative to the image's harness (above).
 
 The config repository cannot lock keys against repository overrides (default, 2026-10-03). Locks
 are added if a real case needs one.
@@ -128,7 +147,7 @@ request branch, so a pull request cannot rewrite the policy that judges it. A re
 policy change is therefore a reviewed merge, which is the deliberate effort ynh's factory pattern
 asks for.
 
-`ynf lanes show <lane> --repo <repo>` prints the effective lane with the source of every value
+`ynf lanes show --repo <host/org/repo> [<lane>]` prints the effective lane with the source of every value
 (`config@<sha>` or `repo@<sha>`).
 
 **Every decision records the policy hash**, the SHA-256 of the effective lane's normalised YAML,

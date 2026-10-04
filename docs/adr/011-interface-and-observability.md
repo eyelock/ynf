@@ -14,22 +14,64 @@ before it ships.
 **The CLI:**
 
 ```
-ynf serve        [--interval 1m] [--lane <name>]...
+Work
+ynf start        <ref> [--repo <host/org/repo>] [--lane <name>] [--auto-approve edits|all] [--detach]
+ynf start        --prompt <text> --repo <host/org/repo> [--lane <name>] [--auto-approve …] [--detach]
+ynf serve        [--interval 1m] [--listen :8080] [--lane <name>]...     also POST /start
 ynf sweep        [--until-settled] [--timeout 20m] [--lane <name>]...
-ynf step         --event <file|->                        CI-native host
-ynf lanes        validate [--file <path>] | show --repo <owner/name> [<lane>] | explain <lane> --item <key>
-ynf items        ls | show <item> | log <item> | retry <item> | release <item> | quarantine <item>
-ynf replay       <item> [--policy <file>]
-ynf pause        <lane> --reason <text>
-ynf resume       <lane> --reason <text>
+ynf handle       --github-event <file> --github-event-name <name>        an event, CI-native
+
+Items
+ynf items        ls [--tracker <name>] [--repo …] [--state …] | show | log | retry | release | quarantine <ref>
+ynf replay       <ref> [--policy <file>]
+
+Policy and governance
+ynf lanes        validate [--file <path>] | show --repo <host/org/repo> [<lane>] | explain <lane> --item <ref>
+ynf pause        <lane> --reason <text> [--repo …]
+ynf resume       <lane> --reason <text> [--repo …]
 ynf stats        [--lane <name>] [--window 30d]
 ynf shadow       <lane> --since 90d
+
+Connections
+ynf trackers     ls | get <ref>                                           get reads without starting
+ynf forges       ls
+ynf harness      show <image> | --lane <name> --repo …                    what ynf reads from the image
+
+Operations
+ynf version
 ynf doctor
+ynf egress-proxy --allow <hosts> [--listen :3128] [--log <file>]          inside a container
 ```
 
 Global flags come before the command: `--config <path>` (default: `config.yaml` found in the home
 factory folder, ADR-009), `--format text|json`, `--interactive` (allows the uncontained `process`
-executor, ADR-007) and `-v`. An item is named `owner/name#number` or by its store key.
+executor, ADR-007), `--log-file <path>`, `--log-format text|json` and `-v`.
+
+**References.** An item is named by its reference (ADR-002): `github.com/eyelock/ynh#77`,
+`acme.atlassian.net/PLAT-881`, `adhoc/<id>`, or by its store key. Shorthands are for typing only:
+`eyelock/ynh#77` means the default GitHub instance, `jira/PLAT-881` the tracker configured as
+`jira`. They resolve to the host form before anything is stored, so configured names never reach
+an item's identity.
+
+**Two verbs for work.** `ynf start` is an *instruction*: it names one item and says take it on now.
+`ynf handle` is an *event*: something happened, and ynf works out which items it touches, which may
+be several or none. Both feed the same `step` (ADR-009). `ynf start`:
+
+- resolves the reference, reads the ticket through its tracker, checks where the code goes (ADR-002)
+  and that the lane exists and accepts the item, and fails before creating anything if any check
+  does
+- counts as attended when run from a terminal, so it may use the `process` executor, and is the
+  only way to switch off an agent's approval prompts outside containment (`--auto-approve`,
+  ADR-007)
+- steps the item now and returns when it is waiting on something outside ynf (CI, a review, a
+  person), printing its state and any pull request; `--detach` only records it, for a running
+  `ynf serve` to pick up
+
+**Connections are inspectable.** `ynf trackers get <ref>` prints the structured ticket ynf would
+read, and `ynf harness show` prints what ynf reads from an image (its harness, focuses, budgets,
+sensors, passthrough variables and ynh capabilities), so a configuration can be checked without
+starting work. `ynf doctor` also checks every tracker and forge is reachable, ynh's and ynm's
+capabilities, and that images can be pulled.
 
 Every command takes `--format json` and returns one object.
 
@@ -46,13 +88,17 @@ interval.
 `y* = r / h` when the lane declares `h`, attempts per item, cost per merged change, and the top
 failure signatures with ynm's reflective summaries.
 
-**Observability:** structured JSON logs, and an OpenTelemetry trace per step with spans for
-claim, probe, decide, act, and the run. Every span carries the item key, `step_id`, lane, policy
+**Observability:** structured logs as they happen, to stderr and with `--log-file` to a file, as
+text or one JSON object per line: every decision, every run's start, progress and finish, and every
+action on a tracker or forge. An OpenTelemetry trace per step has spans for claim, probe, decide,
+act, and the run. Every span carries the item key, `step_id`, lane, policy
 hash and lease epoch.
 
 **Exit codes**, for every command: `0` success, `2` usage, `20` an adapter failed (the forge, git,
 docker, the store), `30` config or lanes invalid, `31` `sweep --until-settled` timed out before
-every item settled, `32` `replay` found decisions that differ. A step that loses its claim, or a
+every item settled, `32` `replay` found decisions that differ, `33` `start` refused the item (the
+reference does not resolve, the tracker cannot read it, the repository is not enrolled, reachable
+or in agreement with the ticket, or no lane accepts it). A step that loses its claim, or a
 lane that cannot run contained, is not an exit code: the first is another instance's work, and the
 second is recorded on the item as an `operator_error` outcome and escalated.
 

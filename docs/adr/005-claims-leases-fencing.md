@@ -5,8 +5,8 @@ Satisfies: FR-15, FR-16, FR-17, NFR-2, NFR-6
 
 ## Context
 
-Many ynf instances may see the same item at once: two daemons, a hosted service with several
-workers, or two CI workflow runs triggered by a push and a check completing a second apart. When
+Many ynf instances may see the same item at once: a pool of workers sharing a store, a
+developer's machine and a worker, or two CI workflow runs triggered by a push and a check completing a second apart. When
 one of them picks an item, the others must not, and if that instance dies, the item must not be
 stuck forever. A step can last an hour, because `ynh agent run` defaults to a 60 minute wall-clock
 budget.
@@ -74,7 +74,7 @@ optimisation; the lease is the authority, because sweeps and webhooks race acros
 - **A distributed lock service (etcd, Consul, DynamoDB lock client).** Another dependency per
   host, and still needs fencing for side effects.
 - **Queue visibility timeouts as the lock.** Ties exclusivity to one transport and does nothing
-  for the CI and daemon hosts.
+  for the CI and developer hosts.
 
 ## Consequences
 
