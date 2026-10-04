@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/eyelock/ynf/internal/engine"
 )
 
 // pause and resume a lane (ADR-010). Both need a reason and record who gave it.
@@ -127,21 +129,32 @@ func (a *app) stats(ctx context.Context, args []string) error {
 		mw := tabwriter.NewWriter(&b, 0, 4, 2, ' ', 0)
 		_, _ = fmt.Fprintln(mw, "  MODEL\tEFFORT\tRUNS\tCONVERGED\tTURNS/RUN\tTOKENS/RUN\tCACHED/RUN\tCOST\tPROPOSED\tMERGED\tREJECTED")
 		for _, m := range s.Models {
-			effort, cost := m.Effort, "-"
-			if effort == "" {
-				effort = "-"
-			}
-			if m.CostUSD > 0 {
-				cost = fmt.Sprintf("$%.2f", m.CostUSD)
-			}
-			cached := "-"
-			if m.CacheRead > 0 {
-				cached = strconv.Itoa(m.CacheRead / m.Runs)
-			}
-			_, _ = fmt.Fprintf(mw, "  %s\t%s\t%d\t%d\t%.1f\t%d\t%s\t%s\t%d\t%d\t%d\n", m.Model, effort, m.Runs, m.Converged,
-				float64(m.Turns)/float64(m.Runs), m.Tokens/m.Runs, cached, cost, m.Proposed, m.Merged, m.Rejected)
+			_, _ = fmt.Fprintln(mw, "  "+strings.Join(modelCells(m), "\t"))
 		}
 		_ = mw.Flush()
 	}
 	return a.out(map[string]any{"lanes": stats}, b.String())
+}
+
+// modelCells is one row of the by-model table. A figure the runner never reported, such as a
+// command's turns and tokens, is "-", not a measured zero.
+func modelCells(m engine.ModelStats) []string {
+	per := func(total int) string {
+		if total <= 0 || m.Runs == 0 {
+			return "-"
+		}
+		return strconv.Itoa(total / m.Runs)
+	}
+	effort, turns, cost := m.Effort, "-", "-"
+	if effort == "" {
+		effort = "-"
+	}
+	if m.Turns > 0 && m.Runs > 0 {
+		turns = fmt.Sprintf("%.1f", float64(m.Turns)/float64(m.Runs))
+	}
+	if m.CostUSD > 0 {
+		cost = fmt.Sprintf("$%.2f", m.CostUSD)
+	}
+	return []string{m.Model, effort, strconv.Itoa(m.Runs), strconv.Itoa(m.Converged), turns, per(m.Tokens), per(m.CacheRead), cost,
+		strconv.Itoa(m.Proposed), strconv.Itoa(m.Merged), strconv.Itoa(m.Rejected)}
 }
