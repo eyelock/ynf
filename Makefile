@@ -4,6 +4,7 @@
 #   make build    bin/ynf
 #   make install  bin/ynf and its linux builds into $(INSTALL_DIR) (~/.ynf/bin, as ynh and ynm
 #                 use ~/.ynh/bin and ~/.ynm/bin); put it on your PATH
+#   make docs     serve the documentation at http://localhost:$(DOCS_PORT) (ctrl-c to stop)
 #   make e2e      the factory acceptance test against the live sandbox (sandbox/Makefile)
 #   make factory-image  ynf's factory image (ADR-009): ynh's image with ynf and ynm, at the
 #                 versions in images/factory/versions.env, and this checkout's ynf. To try dev
@@ -17,13 +18,14 @@ VERSION     ?= $(shell git diff --quiet 2>/dev/null && git describe --tags --exa
 LDFLAGS     := -s -w -X github.com/eyelock/ynf.Version=$(VERSION)
 INSTALL_DIR ?= $(HOME)/.ynf/bin
 COVERAGE    ?= 80
+DOCS_PORT   ?= 3100
 
 include images/factory/versions.env
 FACTORY_IMAGE ?= ynf-factory:dev
 YNH_SRC       ?=
 YNM_SRC       ?=
 
-.PHONY: deps check build install test cover lint vet fmt fmt-check e2e calibrate clean factory-image
+.PHONY: deps docs check build install test cover lint vet fmt fmt-check e2e calibrate clean factory-image
 
 check: fmt-check vet lint cover
 
@@ -68,6 +70,11 @@ fmt:
 
 fmt-check:
 	@out=$$(gofmt -l . | grep -v '^sandbox/seed/' || true); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
+
+# docs/index.html loads docsify from a CDN, so a static server is all it needs.
+docs:
+	@echo "docs at http://localhost:$(DOCS_PORT) (ctrl-c to stop)"
+	@python3 -m http.server $(DOCS_PORT) --directory docs
 
 e2e:
 	$(MAKE) -C sandbox e2e
