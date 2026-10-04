@@ -40,7 +40,8 @@ sig/budget/turns/harness:ynh-lint@1.4
 
 ynm's dream pass already turns three or more episodic memories with the same subject into a
 reflective one. With a good signature, "this keeps happening" falls out of ynm without ynf doing
-anything clever.
+anything clever. ynf tags each record `occurrence`, so ynm's dedupe and contradiction passes leave
+the records alone and reflection still counts every one.
 
 ## Where the memory goes
 

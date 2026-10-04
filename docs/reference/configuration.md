@@ -32,7 +32,7 @@ the folder the file is in.
 What ynf writes to memory, and why it never decides anything with it, is in
 [Learning from failure](../explanation/learning-from-failure.md): one
 [`ynf.failure.v1`](../schema/memory/ynf.failure.v1.schema.json) record per occurrence of a failure
-signature, tagged `ynf.failure.v1`. Each run's model, effort, turns, tokens and cost stay in ynf's
+signature, tagged `ynf.failure.v1` and `occurrence`. Each run's model, effort, turns, tokens and cost stay in ynf's
 own store, where `ynf stats` reads them.
 
 ## The configuration repository

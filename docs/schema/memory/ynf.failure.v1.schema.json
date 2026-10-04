@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://eyelock.github.io/ynf/schema/memory/ynf.failure.v1.schema.json",
   "title": "ynf.failure.v1",
-  "description": "The data of an episodic memory ynf writes for each occurrence of a failure signature (ADR-008). Its subject is the signature, so ynm's consolidation clusters the same failure across items; each occurrence's text names its item, run, step and time, so consolidation never takes two occurrences for one fact. It is tagged ynf.failure.v1, which is how to select it: ynm filters by tag, not by dataSchema.",
+  "description": "The data of an episodic memory ynf writes for each occurrence of a failure signature (ADR-008). Its subject is the signature, so ynm's consolidation clusters the same failure across items; each occurrence's text names its item, run, step and time. It is tagged occurrence, so ynm's dedupe and contradiction passes leave it alone and reflection still counts it, and tagged ynf.failure.v1, which is how to select it: ynm filters by tag, not by dataSchema.",
   "type": "object",
   "required": [
     "signature",

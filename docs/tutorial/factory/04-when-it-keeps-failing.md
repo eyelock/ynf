@@ -88,7 +88,7 @@ ynm recall --namespace $NS --tags ynf.failure.v1 --limit 1 --json | python3 -m j
 ```
 
 Expected: the record ynf wrote. Its `subject` is the signature. Its tags are `ynf`,
-`ynf.failure.v1`, `lane:lint-paydown` and `failure`. Its `dataSchema` is `ynf.failure.v1`, and its
+`ynf.failure.v1`, `lane:lint-paydown`, `failure` and `occurrence`. Its `dataSchema` is `ynf.failure.v1`, and its
 `data` has the signature, the item, the lane, the count, the run, the step, the time and the model.
 Its content says the same in a sentence:
 
@@ -96,9 +96,11 @@ Its content says the same in a sentence:
 Failure `sig/outcome/stuck` occurred on github.com/<you>/ynf-sandbox#<n> in lane `lint-paydown` at <time>: occurrence 1 on this item, run `<run id>`, step `<step id>`, model ``.
 ```
 
-Every occurrence's text names its own item, run, step and time. That matters to ynm: its dream
-merges memories it judges to say the same thing, and two occurrences of one failure must never be
-taken for one. ynm selects records by tag and namespace, not by `dataSchema`, so the tag is how to
+Every occurrence's text names its own item, run, step and time, and the `occurrence` tag tells ynm
+that each record is one event in a series. That matters to ynm: its dream merges memories it judges
+to say the same thing, and two occurrences of one failure must never be taken for one. With a ynm
+that knows the tag, its dedupe and contradiction passes leave them alone and reflection still counts
+them. ynm selects records by tag and namespace, not by `dataSchema`, so the tag is how to
 find ynf's.
 
 Steps themselves aren't written to ynm. The full history of every run is in ynf's store, as lesson
@@ -141,7 +143,8 @@ OpenAI-compatible endpoint; with neither, the pass is skipped. ynm's
 [how-to](https://github.com/eyelock/ynm/blob/main/docs/how-to/configure-judge-and-writer.md)
 cover choosing one.
 
-Run only the reflect pass, over the sandbox's namespace:
+Run only the reflect pass, over the sandbox's namespace. A ynm that knows the `occurrence` tag would
+leave these records alone in a full dream too; the lesson needs only the reflection:
 
 ```bash
 ynm dream --namespace $NS --passes reflect
