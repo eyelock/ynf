@@ -53,7 +53,7 @@ sig/egress/denied/registry.npmjs.org             the harness needed a host the l
 Each is built from what the run or the pull request reported. Free text is lower-cased with
 spaces turned to `-`, a signature stops at 200 characters (a ynm subject's limit), and one failure
 is counted under its specific signatures or, when it has none, under `sig/outcome/<outcome>`, never
-both. A run ends on a cap, `turns`, `tokens` or `wall`, as `budget/<cap>/harness:<name>@<version>`,
+both. A run ends on a cap, `turns`, `tokens` or `wall`, as `budget/<cap>/harness:<name>@<version>` (without the harness when the run reported none),
 and each sensor still failing is a `stuck` signature of its own. When CI fails, each failed check
 is one signature.
 
@@ -66,7 +66,7 @@ and lane documents (ADR-004), incremented from the same failure observations it 
 Guards read counters; people and agents read memory.
 
 **Each instance connects to memory itself; nobody relays it.** ynf writes what only it can see,
-outcomes and failures recurring across runs, and reads memory for people. A ynh run whose harness
+failures recurring across runs, and reads memory for people. A ynh run whose harness
 wants memory connects its agent to ynm through ynm's own client integration, with its own
 configuration and credentials. ynf does not put memory into an agent's task: the orchestrator
 would otherwise decide what an agent should remember, and a run's task would depend on what the
@@ -103,8 +103,7 @@ memory:
 
 ynf may drive ynm on its own behalf, such as triggering `memory_consolidate` after a lane's batch
 of steps so reflections are current, but only through the same public surfaces, and never by
-writing ynm's config files or stores directly. `ynf doctor` checks the endpoint, the token and
-that a test write and recall round-trip.
+writing ynm's config files or stores directly. `ynf doctor` reports whether ynm is installed, which is optional (ADR-012).
 
 **Transport, store and level.** On a developer's machine, the CLI with `--json`, run from a folder
 whose ynm configuration picks the store: their own. Wherever memory is shared, a pool of workers,

@@ -14,10 +14,15 @@
     "signature": {
       "type": "string",
       "pattern": "^sig/",
+      "maxLength": 200,
+      "description": "The failure signature, also the memory's subject: lower-cased, whitespace turned to '-', cut to 200 bytes. Kinds: sig/ci-diverges/<check>, sig/ci/<check>, sig/stuck/sensor:<name>, sig/budget/<cap>[/harness:<name>@<version>], sig/outcome/<outcome>, sig/egress/denied/<host>.",
       "examples": [
+        "sig/ci-diverges/golangci-lint",
         "sig/ci/lint",
-        "sig/egress/denied/www.iana.org",
-        "sig/outcome/stuck"
+        "sig/stuck/sensor:unit-tests",
+        "sig/budget/turns/harness:local/ynf-sandbox@0.1.0",
+        "sig/outcome/error",
+        "sig/egress/denied/www.iana.org"
       ]
     },
     "item": {
