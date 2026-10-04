@@ -193,6 +193,9 @@ func (s *step) decideAndAct(ev event.Event) (*event.Event, error) {
 	}
 	s.remember(in, d)
 	e.log().Info("decided", "item", it.Key, "event", ev.Type, "state", d.Item.State, "reason", d.Reason)
+	if d.Item.State != it.State {
+		s.label(d.Item, lane)
+	}
 
 	for _, a := range d.Actions {
 		next, err := s.act(a, d.Item, rp, lane)
@@ -733,6 +736,21 @@ func oneLine(s string, max int) string {
 		s = s[:max] + "…"
 	}
 	return s
+}
+
+// label writes the lane's labels for the state the item has just entered, through its tracker.
+// A label is a signal to people, not a decision: a failure is logged and recorded, never fatal.
+func (s *step) label(it item.Item, lane policy.Lane) {
+	c := lane.Labels.For(string(it.State))
+	if c == nil || len(c.Add)+len(c.Remove) == 0 {
+		return
+	}
+	tr, err := s.e.tracker(it.Ticket)
+	if err == nil {
+		err = tr.Label(s.ctx, it.Ticket.Key, c.Add, c.Remove)
+	}
+	s.e.log().Info("action", "item", it.Key, "action", decide.Label, "ok", err == nil, "add", strings.Join(c.Add, ","), "remove", strings.Join(c.Remove, ","))
+	s.recordAction(it.Key, ActionRecord{Action: decide.Label, OK: err == nil, Detail: errString(err)})
 }
 
 // comment posts on the item's ticket through its tracker.

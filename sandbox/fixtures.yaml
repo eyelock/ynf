@@ -139,6 +139,7 @@ fixtures:
       command: { deterministic: true }
     expect:
       result: in_review
+      labels: { present: [ynf:in-review], absent: [ynf:fmt, ynf:working, ynf:proposed] }
       checks:
         - the command runner, no model; detected providers recorded on the step
         - the same input always produces the same diff
@@ -168,6 +169,7 @@ fixtures:
       command: { deterministic: true }
     expect:
       result: in_review
+      labels: { present: [ynf:in-review], absent: [ynf:fmt, ynf:working, ynf:proposed] }
       start: true
       checks:
         - no lane label, so no search finds it; e2e starts it with ynf start --lane gofmt

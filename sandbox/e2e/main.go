@@ -41,6 +41,10 @@ type fixture struct {
 		Signatures []string `yaml:"signatures"`
 		Crash      bool     `yaml:"crash"`
 		Start      bool     `yaml:"start"`
+		Labels     struct {
+			Present []string `yaml:"present"`
+			Absent  []string `yaml:"absent"`
+		} `yaml:"labels"`
 	} `yaml:"expect"`
 }
 
@@ -325,6 +329,24 @@ func check(f fixture, numbers map[string]int, items []item, repo, ynf, cfg strin
 		return "", err
 	}
 	detail += fmt.Sprintf(", %d decisions replay the same", len(r.Decisions))
+	if want := f.Expect.Labels; len(want.Present)+len(want.Absent) > 0 {
+		out, err := sh("", "gh", "issue", "view", fmt.Sprint(n), "-R", repo, "--json", "labels", "-q", "[.labels[].name] | join(\",\")")
+		if err != nil {
+			return "", fmt.Errorf("#%d's labels: %w", n, err)
+		}
+		have := strings.Split(strings.TrimSpace(out), ",")
+		for _, l := range want.Present {
+			if !slices.Contains(have, l) {
+				return "", fmt.Errorf("#%d lacks the label %s: %v", n, l, have)
+			}
+		}
+		for _, l := range want.Absent {
+			if slices.Contains(have, l) {
+				return "", fmt.Errorf("#%d still has the label %s: %v", n, l, have)
+			}
+		}
+		detail += ", labelled " + strings.Join(want.Present, ",")
+	}
 	if f.Expect.Crash {
 		log, err := sh("", ynf, "--config", cfg, "items", "log", fmt.Sprintf("%s#%d", repo, n))
 		if err != nil {

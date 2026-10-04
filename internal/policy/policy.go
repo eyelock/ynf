@@ -40,6 +40,22 @@ type Defaults struct {
 	Egress    *Egress `yaml:"egress" json:"egress,omitempty"`
 	Stop      *Stop   `yaml:"stop" json:"stop,omitempty"`
 	PR        *PR     `yaml:"pr" json:"pr,omitempty"`
+	Labels    *Labels `yaml:"labels" json:"labels,omitempty"`
+}
+
+// Labels are what ynf writes on the ticket as the item enters a state (ADR-003, ADR-006).
+type Labels struct {
+	OnClaim    *LabelChange `yaml:"on_claim" json:"on_claim,omitempty"`
+	OnPropose  *LabelChange `yaml:"on_propose" json:"on_propose,omitempty"`
+	OnReview   *LabelChange `yaml:"on_review" json:"on_review,omitempty"`
+	OnEscalate *LabelChange `yaml:"on_escalate" json:"on_escalate,omitempty"`
+	OnDone     *LabelChange `yaml:"on_done" json:"on_done,omitempty"`
+}
+
+// LabelChange adds and removes labels.
+type LabelChange struct {
+	Add    []string `yaml:"add" json:"add,omitempty"`
+	Remove []string `yaml:"remove" json:"remove,omitempty"`
 }
 
 // Lane is one lane, with defaults applied after Load.
@@ -56,6 +72,7 @@ type Lane struct {
 	Executor  string              `yaml:"executor" json:"executor,omitempty"`
 	Attempts  int                 `yaml:"attempts" json:"attempts,omitempty"`
 	Retention string              `yaml:"retention" json:"retention,omitempty"`
+	Labels    *Labels             `yaml:"labels" json:"labels,omitempty"`
 }
 
 // On reports whether the lane is enabled.
@@ -205,6 +222,21 @@ func (d Defaults) apply(l Lane) Lane {
 	if l.Run.Egress == nil {
 		l.Run.Egress = d.Egress
 	}
+	if d.Labels != nil {
+		lb := Labels{}
+		if l.Labels != nil {
+			lb = *l.Labels
+		}
+		for _, p := range []struct{ lane, def **LabelChange }{
+			{&lb.OnClaim, &d.Labels.OnClaim}, {&lb.OnPropose, &d.Labels.OnPropose}, {&lb.OnReview, &d.Labels.OnReview},
+			{&lb.OnEscalate, &d.Labels.OnEscalate}, {&lb.OnDone, &d.Labels.OnDone},
+		} {
+			if *p.lane == nil {
+				*p.lane = *p.def
+			}
+		}
+		l.Labels = &lb
+	}
 	if l.Run.Egress == nil {
 		l.Run.Egress = &Egress{}
 	}
@@ -296,4 +328,24 @@ func Resolve(exists func(dir string) bool) (dir string, shadowed []string) {
 		}
 	}
 	return dir, shadowed
+}
+
+// For is the change for an item entering state, or nil.
+func (l *Labels) For(state string) *LabelChange {
+	if l == nil {
+		return nil
+	}
+	switch state {
+	case "ready":
+		return l.OnClaim
+	case "proposed":
+		return l.OnPropose
+	case "in_review":
+		return l.OnReview
+	case "escalated", "quarantined":
+		return l.OnEscalate
+	case "done", "closed":
+		return l.OnDone
+	}
+	return nil
 }
