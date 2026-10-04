@@ -94,20 +94,20 @@ REPO               LANE          ITEMS  PROPOSED  MERGED  REJECTED  YIELD  STATU
 ```
 
 (Your figures will differ, and the signature appears only if your run was refused a host. There is
-also a row for lesson 1's refused run, with `0` converged: a run refused before it starts is
-recorded without its runner, so that row's model reads ` (model not reported)`.)
+also a row for lesson 1's refused run, with `0` converged: a run refused before it starts never
+reached a model, so that row reads `ynh (model not reported)`.)
 
 The first table is the lane's yield: of the proposals people have decided on, the share they merged. Nothing is decided yet, so it's `-`. The last breaks
 the lane's runs down by model and effort: how often each converged, what a run took and cost, and
 what happened to the changes it proposed. A proposal, merge or rejection counts for the model of
 the run whose change was proposed.
 
-**`claude (model not reported)`** is honest rather than broken. The lane didn't name a model, so
-Claude used its default, and ynh reports the backend but not which model that was. When ynh reports
-the model a run actually used ([eyelock/ynh#441](https://github.com/eyelock/ynh/issues/441)), this
-column names it for unpinned runs too, and nothing in ynf changes. Until then every run on the
-default model is grouped here. A command lane has no model at all: its row says `none (command)`,
-and its turns, tokens and cost are `-`, never reported rather than zero.
+**The model column** names the model the run actually used, as ynh 0.10.0 and later report it,
+`claude/` and the model's name, even when the lane didn't pin one and Claude chose its default. The
+output above came from an older ynh, which reported the backend but not the model, so its row reads
+`claude (model not reported)`: you see that only on a ynh before 0.10.0. A command lane has no model
+at all: its row says `none (command)`, and its turns, tokens and cost are `-`, never reported rather
+than zero.
 
 The effort column is what ynh reports the run used, or, when the backend reports none, the effort
 the run was asked for. A lane asks for one with `run.ynh.effort`: `low`, `medium` or `high`, passed
@@ -170,8 +170,8 @@ ynf stats --lane lint-paydown-pinned
 
 Expected: a draft pull request as in lesson 2, and a row that names the model instead of saying it
 wasn't reported, `claude/sonnet` or, on a ynh that resolves aliases, the full name it ran, such as
-`claude/claude-sonnet-5-5`. `ynf stats` without `--lane` lists both lanes. The run on the default
-model still reads `claude (model not reported)`. The two lanes ran different tickets, so this is a
+`claude/claude-sonnet-5-5`. `ynf stats` without `--lane` lists both lanes, each row naming the model
+it ran; on a ynh before 0.10.0 the run on the default model reads `claude (model not reported)`. The two lanes ran different tickets, so this is a
 first look, not a controlled test: with a few dozen tickets through each lane the rows say whether
 the pinned model converges as often, at what cost, and whether its changes merge as often. `ynf
 harness` shows the pin beside the lane, as `model sonnet`.
