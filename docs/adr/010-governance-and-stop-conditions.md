@@ -14,12 +14,15 @@ for trajectories, and stop conditions written down before starting. ynf opens th
 **Attribution in the commit message.** Every commit ynf writes carries:
 
 ```
-Co-Authored-By: <backend/model, when the runner reports one>
+Co-Authored-By: <backend/model, when the runner reports one and ynf knows the vendor's address>
 YNF-Item: <item key>
 YNF-Step: <step_id>
 YNF-Run: <run id>
 YNH-Session: <session_id from run.json, ynh runner only>
 ```
+
+ynf knows the address for claude only (`noreply@anthropic.com`); a run by any other vendor carries
+no `Co-Authored-By` line, and the other trailers still identify it.
 
 The trailer survives a squash merge where a pull request comment does not, which is what makes the
 escaped-defect limit enforceable.
