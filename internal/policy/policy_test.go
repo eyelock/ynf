@@ -317,3 +317,21 @@ func TestYnhModelIsASafeName(t *testing.T) {
 		}
 	}
 }
+
+// TestYnhEffortLevels: a lane's effort is one of the levels ynh accepts.
+func TestYnhEffortLevels(t *testing.T) {
+	lane := func(effort string) []byte {
+		return []byte("version: 1\nlanes:\n  x:\n    kind: originate\n    intake: [{github.search: q, every: 5m}]\n" +
+			"    run: {runner: ynh, ynh: {harness: ., effort: " + effort + "}}\n    when: {converged: open_pr}\n")
+	}
+	for _, ok := range []string{"low", "medium", "high"} {
+		if f, err := policy.Load(lane(ok)); err != nil || f.Lanes["x"].Run.Ynh.Effort != ok {
+			t.Errorf("%s: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"max", `""`, "High"} {
+		if _, err := policy.Load(lane(bad)); err == nil {
+			t.Errorf("%s: loaded, want a schema error", bad)
+		}
+	}
+}

@@ -118,6 +118,9 @@ func (a *app) harness(ctx context.Context, args []string) error {
 			if r.Model != "" {
 				fmt.Fprintf(&b, "        model %s\n", r.Model)
 			}
+			if r.Effort != "" {
+				fmt.Fprintf(&b, "        effort %s\n", r.Effort)
+			}
 			if h := r.Read; h != nil {
 				if h.ID != "" {
 					fmt.Fprintf(&b, "        installed as %s\n", h.ID)

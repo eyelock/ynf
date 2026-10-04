@@ -58,8 +58,11 @@ type Result struct {
 // by model and effort (ADR-011). A command runner's result file may report it too.
 type Usage struct {
 	Effort string `json:"effort,omitempty"` // reasoning effort, when the runner reports it
-	Turns  int    `json:"turns,omitempty"`  // agent turns
-	Tokens int    `json:"tokens,omitempty"` // tokens consumed: input and output
+	// EffortRequested is the effort the run was asked for, when it was: a lane's effort or the
+	// harness's default. A backend may run at another, which Effort then shows.
+	EffortRequested string `json:"effort_requested,omitempty"`
+	Turns           int    `json:"turns,omitempty"`  // agent turns
+	Tokens          int    `json:"tokens,omitempty"` // tokens consumed: input and output
 	// The split, when the runner reports it. Cache reads are not in Tokens, and are often most of
 	// what a long session costs.
 	InputTokens     int `json:"input_tokens,omitempty"`
