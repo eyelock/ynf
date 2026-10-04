@@ -40,7 +40,7 @@ an issue on GitHub Enterprise Server is `item/github.acme.internal/…`.
 | `ynf items ls` | Every tracked item: lane, state, pull request, reason. |
 | `ynf items show <item>` | The item document. |
 | `ynf items log <item>` | Every decision, run, action and note, in order. |
-| `ynf items retry <item>` | Puts an escalated or quarantined item back to ready, clearing its counters. Refused while another instance holds it. |
+| `ynf items retry <item>` | Puts an escalated or quarantined item back to ready, clearing its counters. Refused for an item in any other state, and while another instance holds it. |
 | `ynf items release <item>` | Clears the item's lease, for one left by an instance that died. |
 | `ynf pause <lane> --reason <text> [--repo <owner/name>]` | Pauses a lane: its tracked items carry on, but nothing new starts. Recorded with who and why. |
 | `ynf resume <lane> --reason <text> [--repo <owner/name>]` | Resumes a lane, with a reason, also recorded: stop conditions are changed deliberately (ADR-010). |
@@ -56,7 +56,7 @@ Every decision (`decided`: item, event, state, reason), every run (`run started`
 | Code | Meaning |
 |---|---|
 | `0` | Success. |
-| `2` | Usage: an unknown command, flag or item name. |
+| `2` | Usage: an unknown command, flag or item name, or `items retry` on an item that is not escalated or quarantined. |
 | `20` | An adapter failed: the forge, git, docker or the store. |
 | `30` | The config or a lanes file is invalid, or `doctor` found a problem. |
 | `31` | `sweep --until-settled` timed out before every item settled. |
