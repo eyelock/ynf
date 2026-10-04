@@ -15,13 +15,23 @@ three tools feel like three products. When they are installed, it should just wo
 
 ## Decision
 
-**Two ports, each with providers.** ynf depends only on its own ports; ynh and ynm are providers
-behind them, never assumptions in the core.
+**Ports, each with providers.** ynf depends only on its own ports; ynh, ynm, GitHub and JIRA are
+providers behind them, never assumptions in the core.
 
 | Port | Providers | What the core sees |
 |---|---|---|
 | Runner | `ynh` (ynh agent run), `command` (any command) | a `RunSpec` in, a `RunResult` with a ynf **outcome** out |
-| Memory | `ynm`, `none` | `Remember(record)`, `Context(subject, budget)` |
+| Executor (ADR-007) | `process`, `docker`, `inline` | a run started, supervised and stopped |
+| Tracker (ADR-003) | `github`, `mcp`, `adhoc` | `get`, `comment`, `label`, and `search` where offered |
+| Forge (ADR-003) | `github` | pull requests, checks, reviews, branches and files |
+| Memory (ADR-008) | `ynm`, `none` | `Remember(record)`, `Recall(subject)` for people |
+
+**Instances are coupled only by these contracts.** A ynf instance and the ynh instances it runs
+are separate programs: ynf knows a run only as a request (an image, a repository at a ref, a task,
+budgets, a focus and profile by name) and a result in ynh's own format. A ynh image knows nothing
+of ynf: any ynf can run any ynh image that supports what the lane needs, and so can a person or a
+plain CI job. ynh's side of the contract is ynh's own published interface, `ynh agent run`, its
+result and trajectory schemas and its capabilities version, which ynh versions for exactly this.
 
 **ynf's own outcome vocabulary.** Lane rules branch on outcomes, never on a provider's exit codes:
 
@@ -40,14 +50,34 @@ understands. The `command` provider maps exit code 0 to `converged` and anything
 `error`, unless the command writes a result file in ynf's `RunResult` schema, in which case
 it says exactly what happened.
 
+**The image is the source of truth for its harness.** The ynh provider reads what an image's
+harness declares from the image itself, by asking the ynh inside it, cached per image digest:
+
+```
+ynh ls --format json                  the harness the image carries, and ynh's capabilities
+ynh info <harness id> --format json   its manifest: focuses (prompt, profile), env_passthrough,
+                                      agent budgets, sensors
+```
+
+ynf resolves a lane's focus to its prompt and profile, checks the harness passes the variables the
+lane gives it, and checks the lane only tightens budgets and scopes declared sensors (ADR-006), all
+against that answer and never against the repository's working copy, which may differ from what
+the image carries or not contain the harness at all. ynf asks the image's ynh rather than the
+host's, because the image's runs the agent.
+
+**Capabilities are checked, and a missing ability fails loudly.** Before using an ability, ynf
+checks the providing ynh reports a capabilities version that has it (0.9.0 for `--auto-approve`),
+and the same holds for any ability ynf asks of another tool. A missing ability refuses the work
+before anything runs, naming what is missing and what was found; it never degrades quietly.
+
 **Provider-specific settings live in a provider block,** so the lane's shape does not change
 with the runner:
 
 ```yaml
 run:
   runner: ynh                      # or: command
+  image: ghcr.io/eyelock/ynh-lint@sha256:…   # or ynh.harness: <folder>, built when unpublished
   ynh:
-    harness: eyelock/ynh-lint@1.4
     focus: tidy
     budgets: { max_turns: 20 }     # may only tighten (ADR-006)
   # command:
@@ -61,6 +91,7 @@ run:
 |---|---|
 | runner `ynh` | `ynh` is on `PATH` (or `YNF_YNH_BIN`) and `ynh version --format json` is in the supported range |
 | memory `ynm` | `ynm` is on `PATH`, and the repository has `.ynm/` or the user has `~/.ynm/`; or a `YNM_URL` endpoint answers |
+| tracker and forge `github` for github.com | always available; any other instance, GitHub Enterprise Server or an `mcp` tracker, is configured, never detected |
 
 Precedence is explicit config, then detection, then the built-in fallback (`command` for the
 runner, `none` for memory). A lane that names a provider explicitly and cannot get it fails to

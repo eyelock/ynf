@@ -28,12 +28,22 @@ type Run interface {
 }
 ```
 
-| Executor | Runs the runner as | Host |
+| Executor | Runs the runner as | Host (ADR-009) |
 |---|---|---|
-| `process` | a child process | daemon, interactive and shadow mode only |
-| `docker` | a container pinned by digest; for ynh, `ynh image <harness> --entrypoint agent` | daemon, hosted |
-| `ecs`, `k8s-job` | a remote task; ynf tails its event stream and relays control messages | hosted |
-| `ci-inline` | the current CI job | CI-native |
+| `process` | a child process on the host | a developer's machine, for attended work and shadow mode only |
+| `docker` | a container beside ynf, from the lane's image | a developer's machine, a worker in a pool |
+| `inline` | a child process inside the container ynf itself runs in, which is the containment | a job runner, a CI job |
+| `ecs`, `k8s-job` | a remote task; ynf tails its event stream and relays control messages | later, a hosted service |
+
+**Where the image comes from.** A lane names a published harness image (`run.image`, pinned by
+digest), and ynf pulls it. Only when a lane names a harness folder in the repository and nothing
+published does ynf build one, with `ynh image <harness> --entrypoint agent`, keyed on the harness
+folder's contents and the base image's id, so it is built again only when one of those changes.
+Building is a convenience for development and the sandbox; an instance can turn it off
+(`images: { build: false }`), so a deployed factory only runs pinned, published images. The same
+harness is published in two flavours that differ only in their base (ADR-009): on ynh's image for
+developers, and on ynf's factory image for a job runner. ynf reads what the image's harness
+declares from the image itself (ADR-012).
 
 Every run gets its own worktree, step directory and **tool caches**. A cache shared between
 worktrees is a correctness problem, not only a containment one. golangci-lint's analysis cache
@@ -49,21 +59,28 @@ disagree about a file's path, `--new-from-merge-base` matches nothing and the se
 With the ynh runner, ynf passes `--emit-jsonl <step dir>/trajectory.jsonl`, so ynh writes a
 checkpoint (ynh only checkpoints when given a real emit path).
 
-**The agent never holds forge write credentials.** The worker receives only what the harness's
-`env_passthrough` declares: model credentials and, where needed, read-only tokens. When the run
-ends, ynf itself reads the worktree (`base_commit` and `changed_files` from the result), commits
-with ynf's trailers (ADR-010), pushes, opens or updates the pull request, and comments, using
-the GitHub App and JIRA credentials only ynf holds. A prompt-injected agent can at worst produce
-a bad diff, which a human reviews.
+**The agent never holds forge or tracker write credentials.** The worker receives only what the
+harness's `env_passthrough` declares: model credentials and, where needed, read-only tokens. When
+the run ends, ynf itself reads the worktree (`base_commit` and `changed_files` from the result),
+commits with ynf's trailers (ADR-010), pushes, opens or updates the pull request, comments and
+labels, using the forge and tracker credentials only ynf holds (ADR-003). A prompt-injected agent
+can at worst produce a bad diff, which a human reviews.
 
-**Approval prompts are switched off only inside containment.** A worker with no one to approve
-its edits changes nothing. ynh passes no permission flag unless asked; a lane asks with
-`run.ynh.auto_approve: edits | all`, which ynf passes to `ynh agent run --auto-approve` only for a
-contained run, and only after asking the agent image's own ynh, which runs the agent, for its
-capabilities (0.9.0 or later). An older image is refused before anything runs. A run on the host
-keeps its prompts, with a warning. `edits` approves file edits and still refuses commands, with
-ynh's sensors checking the work between turns; lanes use the narrowest level that works. The
-vendor-specific part, which mode each vendor CLI needs and when the vendor refuses it, is ynh's.
+With `docker`, the worker is a separate container and never sees ynf's environment. With
+`inline`, ynf and the worker share one container, so the worker runs as a different user that
+cannot read ynf's environment, files or process, and receives only its passthrough variables.
+
+**Approval prompts are switched off only inside containment, or by the person at the terminal.**
+A worker with no one to approve its edits changes nothing. ynh passes no permission flag unless
+asked; a lane asks with `run.ynh.auto_approve: edits | all`, which ynf passes to
+`ynh agent run --auto-approve` only for a contained run, and only after asking the agent image's
+own ynh, which runs the agent, for its capabilities (0.9.0 or later). An older image is refused
+before anything runs. Outside containment a lane's setting is ignored, with a warning: a
+repository's policy must never switch off the prompts on someone's own machine. There, only the
+person starting the work can, explicitly, with `ynf start … --auto-approve edits`. `edits`
+approves file edits and still refuses commands, with ynh's sensors checking the work between
+turns; lanes use the narrowest level that works. The vendor-specific part, which mode each vendor
+CLI needs and when the vendor refuses it, is ynh's.
 
 **A diff gate before every push.** ynf refuses to push, and escalates, when the diff:
 
@@ -75,11 +92,14 @@ vendor-specific part, which mode each vendor CLI needs and when the vendor refus
 This works with any runner, and with ynh it catches what the `tamper` outcome cannot: changes
 outside the files ynh's baseline knows about.
 
-**Containment is mandatory for unattended lanes.** A lane whose trigger is not a human at a
-terminal must use `docker`, `ecs`, `k8s-job` or `ci-inline`. `process` is accepted only by
-`ynf step --interactive` and `ynf shadow`. ynh's `--sandbox srt` stacks on top where the backend
-supports it. A lane that asks for containment the host cannot provide fails to load; it never
-degrades to uncontained.
+**Containment is mandatory for unattended work.** Work whose trigger is not a person at a terminal
+must use `docker`, `inline`, `ecs` or `k8s-job`. `process` is accepted only for attended work:
+`ynf start` run from a terminal, `--interactive`, and `ynf shadow`. `inline` is accepted only
+where the instance is configured as running inside containment the operator owns (a job runner's
+container with its network restricted); ynf cannot verify that from inside, so it is an explicit
+operator setting, never a default. ynh's `--sandbox srt` stacks on top where the backend supports
+it. A lane that asks for containment the host cannot provide fails to load; it never degrades to
+uncontained.
 
 **Egress is the lane's alone.** A harness declares nothing about the network: it does what it
 asks for, and is written as if it could reach anything. The lane decides what a run may reach in
@@ -96,7 +116,9 @@ run:
 ```
 
 A contained executor denies everything else. The model provider's endpoint is allowed implicitly,
-derived from the run's backend rather than declared by the harness (default, 2026-10-03).
+derived from the run's backend rather than declared by the harness (default, 2026-10-03). Under
+`inline`, egress is enforced by the job runner's network policy, which the operator sets to the
+lane's list; ynf records the list it expected.
 
 Running a harness in a lane is where a mismatch shows up, so it has to show up legibly rather than
 as a timeout three tools deep. Egress goes through an allow-list proxy in the executor that logs
@@ -128,13 +150,18 @@ default; the pull request author stays the owner of record.
 
 ## Consequences
 
-- A laptop daemon running unattended lanes needs Docker (or a compatible runtime).
+- A developer can run everything without Docker for attended work; unattended lanes on a laptop
+  need Docker (or a compatible runtime).
+- A deployed factory with `images.build: false` runs only what has been published and pinned.
 - Harnesses that today rely on the agent running `gh pr create` need a focus that stops at the
   diff when run under ynf.
 
 ## Open questions
 
-- None open.
+- What the job runner can do per job: run more than one container (so `docker` works inside a
+  job and `inline` is unnecessary), and restrict a job's egress to a list.
+- Whether separate users inside one container are enough to keep ynf's credentials from the
+  worker under `inline`, or whether a job should only ever run the worker, with ynf elsewhere.
 
 ## History
 

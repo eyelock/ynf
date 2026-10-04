@@ -5,8 +5,8 @@ Satisfies: FR-18, NFR-1, NFR-2
 
 ## Context
 
-ynf runs as a laptop daemon, a hosted service and a CI job (ADR-009). Its state must be SQLite
-for the first, and an S3 bucket or a DynamoDB table for the others, swappable by configuration.
+ynf runs on a developer's machine, on a pool of workers, in a job runner and in CI (ADR-009). Its
+state must be SQLite for the first, and an S3 bucket or a DynamoDB table for the others, swappable by configuration.
 S3 is the weakest of the three: no queries, no transactions, but since late 2024 it supports
 conditional writes (`If-None-Match: *` to create only, `If-Match: <etag>` to replace only the
 version you read), which is compare-and-swap.
