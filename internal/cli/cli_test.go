@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -255,6 +256,52 @@ func TestRetryRefusesALiveLease(t *testing.T) {
 	_ = st.Close()
 	if code, _, stderr := e.run("items", "retry", "o/r#5"); code != cli.ExitAdapter || !strings.Contains(stderr, "being worked on by other") {
 		t.Fatalf("%d %s", code, stderr)
+	}
+}
+
+// Releasing brings the restart forward for an unsettled item. A settled one has no work to
+// restart, so its timer is left alone.
+func TestReleaseMakesAnUnsettledItemDueNow(t *testing.T) {
+	for state, wantDue := range map[item.State]bool{item.Running: true, item.Done: false} {
+		t.Run(string(state), func(t *testing.T) {
+			e := setup(t)
+			if code, _, _ := e.run("sweep"); code != 0 {
+				t.Fatal("sweep")
+			}
+			ctx := context.Background()
+			k := item.IssueKey("127.0.0.1", "o/r", 5)
+			setState(t, e.dir, k, state)
+			st, _ := sqlite.Open(filepath.Join(e.dir, "state.db"))
+			defer func() { _ = st.Close() }()
+			if _, err := lease.Claim(ctx, st, k, "other", "s", time.Hour, time.Now); err != nil {
+				t.Fatal(err)
+			}
+			// The dead holder's timer, an hour out.
+			if err := st.Schedule(ctx, k, time.Now().Add(time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+			if code, _, stderr := e.run("items", "release", "o/r#5"); code != 0 {
+				t.Fatalf("%d %s", code, stderr)
+			}
+			doc, _, err := st.Get(ctx, k)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var it item.Item
+			if err := json.Unmarshal(doc, &it); err != nil {
+				t.Fatal(err)
+			}
+			if it.Lease != nil {
+				t.Errorf("lease still held: %+v", it.Lease)
+			}
+			due, err := st.Due(ctx, time.Now(), 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := slices.Contains(due, k); got != wantDue {
+				t.Errorf("due now = %v, want %v (%v)", got, wantDue, due)
+			}
+		})
 	}
 }
 

@@ -41,7 +41,7 @@ an issue on GitHub Enterprise Server is `item/github.acme.internal/…`.
 | `ynf items show <item>` | The item document. |
 | `ynf items log <item>` | Every decision, run, action and note, in order. |
 | `ynf items retry <item>` | Puts an escalated or quarantined item back to ready, clearing its counters. Refused for an item in any other state, and while another instance holds it. |
-| `ynf items release <item>` | Clears the item's lease, for one left by an instance that died. |
+| `ynf items release <item>` | Clears the item's lease, for one left by an instance that died, and makes the item due now so its work restarts at once. A settled item is only unleased. |
 | `ynf pause <lane> --reason <text> [--repo <owner/name>]` | Pauses a lane: its tracked items carry on, but nothing new starts. Recorded with who and why. |
 | `ynf resume <lane> --reason <text> [--repo <owner/name>]` | Resumes a lane, with a reason, also recorded: stop conditions are changed deliberately (ADR-010). |
 | `ynf stats [--lane <name>]...` | Every lane's items, proposals, merged, rejected, yield, whether it is paused and why, its top failure signatures, and its runs by model and effort: runs, converged, turns per run (a ynh turn is one plan-and-check iteration, not one model call), input and output tokens and cache-read tokens per run, cost where reported, and the proposals, merges and rejections of each model's changes. A run on the vendor's default model is listed as `<backend> (model not reported)`, and a command lane as `none (command)`. |
