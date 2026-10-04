@@ -276,6 +276,9 @@ var placeholder = regexp.MustCompile(`\{label\.([a-z0-9-]+)\}`)
 // as anything but a plain path-like token (ADR-006).
 var SafeValue = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
+// SafeLabel is what a label given with a prompt must match: a plain name or <prefix>:<value>.
+var SafeLabel = regexp.MustCompile(`^[A-Za-z0-9._/-]+(:[A-Za-z0-9._/-]+)?$`)
+
 // Expand fills {label.<prefix>} placeholders from '<prefix>:<value>' labels.
 func Expand(tmpl string, labels []string) (string, error) {
 	var bad error
@@ -346,6 +349,27 @@ func (l *Labels) For(state string) *LabelChange {
 		return l.OnEscalate
 	case "done", "closed":
 		return l.OnDone
+	}
+	return nil
+}
+
+// CheckLabels reports whether labels fill every {label.<prefix>} placeholder the lane's runs use,
+// with safe values: its command's arguments and its ynh sensor scopes. Work the lane cannot run is
+// refused before it starts, rather than failing in its first run.
+func (l Lane) CheckLabels(labels []string) error {
+	var tmpls []string
+	if c := l.Run.Command; c != nil {
+		tmpls = append(tmpls, c.Argv...)
+	}
+	if y := l.Run.Ynh; y != nil {
+		for _, name := range slices.Sorted(maps.Keys(y.SensorScope)) {
+			tmpls = append(tmpls, y.SensorScope[name])
+		}
+	}
+	for _, t := range tmpls {
+		if _, err := Expand(t, labels); err != nil {
+			return err
+		}
 	}
 	return nil
 }

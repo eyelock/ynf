@@ -59,7 +59,7 @@ func fakeAPI(t *testing.T) string {
 			}
 			reply(map[string]any{"items": []any{}})
 		case "/repos/o/r/issues/5":
-			reply(map[string]any{"number": 5, "state": "open", "title": "t", "labels": []any{map[string]any{"name": "ynf:off"}}})
+			reply(map[string]any{"number": 5, "state": "open", "title": "t", "labels": []any{map[string]any{"name": "ynf:off"}, map[string]any{"name": "pkg:internal/format"}}})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			reply(map[string]any{"message": "Not Found"})
@@ -363,6 +363,9 @@ func TestStart(t *testing.T) {
 	if code, out, _ := e.run("start", "127.0.0.1/o/r#5", "--detach"); code != 0 || !strings.Contains(out, "a running ynf serve takes it on") {
 		t.Fatalf("a host-qualified reference: %d %s", code, out)
 	}
+	if code, out, stderr := e.run("start", "--prompt", "tidy", "--label", "pkg:internal/format", "--repo", "o/r", "--lane", "fmt", "--detach"); code != 0 || !strings.Contains(out, "a running ynf serve takes it on") {
+		t.Fatalf("a labelled prompt: %d %s %s", code, out, stderr)
+	}
 	for _, c := range []struct {
 		args []string
 		code int
@@ -370,6 +373,7 @@ func TestStart(t *testing.T) {
 	}{
 		{[]string{"start", "o/r#5", "--lane", "off", "--detach"}, cli.ExitStartRefused, "switched off"},
 		{[]string{"start", "--prompt", "tidy", "--detach"}, cli.ExitStartRefused, "say which repository"},
+		{[]string{"start", "--prompt", "tidy", "--repo", "o/r", "--lane", "fmt", "--detach"}, cli.ExitStartRefused, "give it with --label"},
 		{[]string{"start", "--prompt", "tidy", "--repo", "github.example/o/r", "--detach"}, cli.ExitStartRefused, "this ynf works with the forge at 127.0.0.1"},
 		{[]string{"start", "--prompt", "tidy", "--repo", "a/b/c/d"}, cli.ExitStartRefused, "not owner/name"},
 		{[]string{"start"}, cli.ExitUsage, "a reference or --prompt"},
@@ -420,7 +424,7 @@ func TestInspect(t *testing.T) {
 	if code, out, _ := e.run("--format", "json", "trackers"); code != 0 || !strings.Contains(out, `"its forge's issues"`) {
 		t.Fatalf("trackers: %d %s", code, out)
 	}
-	if code, out, stderr := e.run("ticket", "o/r#5"); code != 0 || !strings.Contains(out, "state   open") || !strings.Contains(out, "labels  ynf:off") {
+	if code, out, stderr := e.run("ticket", "o/r#5"); code != 0 || !strings.Contains(out, "state   open") || !strings.Contains(out, "labels  pkg:internal/format, ynf:off") {
 		t.Fatalf("ticket: %d %s %s", code, out, stderr)
 	}
 	if code, _, _ := e.run("ticket", "o/r#9"); code == 0 {

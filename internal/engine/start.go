@@ -25,6 +25,7 @@ const AdhocHost = "adhoc"
 type StartRequest struct {
 	Ref    tracker.Ref // the ticket; empty when Prompt is set
 	Prompt string      // ad hoc work, with no ticket
+	Labels []string    // the prompt's labels, as a ticket's would be: what the lane's templates read
 	Repo   string      // owner/name on the forge; a GitHub issue's own repository when empty
 	Lane   string      // empty: the repository's only originate lane
 	Detach bool        // only record it, for a running ynf serve to step
@@ -45,6 +46,14 @@ func refuse(format string, args ...any) error { return &RefusedError{fmt.Sprintf
 func (e *Engine) Start(ctx context.Context, req StartRequest) (item.Item, error) {
 	if (req.Prompt == "") == (req.Ref == tracker.Ref{}) {
 		return item.Item{}, refuse("start needs a ticket reference or a prompt, not both")
+	}
+	if len(req.Labels) > 0 && req.Prompt == "" {
+		return item.Item{}, refuse("labels are for a prompt; a ticket has its own")
+	}
+	for _, l := range req.Labels {
+		if !policy.SafeLabel.MatchString(l) {
+			return item.Item{}, refuse("label %q: want <prefix>:<value>, or a plain name, of letters, digits and . _ / : -", l)
+		}
 	}
 	ref := req.Ref
 	if req.Prompt != "" {
@@ -84,19 +93,31 @@ func (e *Engine) Start(ctx context.Context, req StartRequest) (item.Item, error)
 		return item.Item{}, err
 	}
 
+	var ticket facts.Ticket
 	if req.Prompt != "" {
-		doc, _ := json.Marshal(adhocDoc{Prompt: req.Prompt})
+		ticket = facts.Ticket{Key: ref.Key, State: "open", Labels: req.Labels}
+	} else {
+		tr, err := e.tracker(ref)
+		if err != nil {
+			return item.Item{}, refuse("%v", err)
+		}
+		if ticket, _, err = tr.Get(ctx, ref.Key); err != nil {
+			return item.Item{}, refuse("%s cannot be read: %v", ref, err)
+		}
+	}
+	// The lane's runs must be able to read what they need from the ticket's labels.
+	if err := lane.CheckLabels(ticket.Labels); err != nil {
+		hint := ""
+		if req.Prompt != "" {
+			hint = "; give it with --label"
+		}
+		return item.Item{}, refuse("lane %s cannot run %s: %v%s", lane.Name, ref, err, hint)
+	}
+	if req.Prompt != "" {
+		doc, _ := json.Marshal(adhocDoc{Prompt: req.Prompt, Labels: req.Labels})
 		if _, err := e.Store.Put(ctx, adhocKey(ref.Key), doc, ""); err != nil {
 			return item.Item{}, err
 		}
-	}
-	tr, err := e.tracker(ref)
-	if err != nil {
-		return item.Item{}, refuse("%v", err)
-	}
-	ticket, _, err := tr.Get(ctx, ref.Key)
-	if err != nil {
-		return item.Item{}, refuse("%s cannot be read: %v", ref, err)
 	}
 	// A ticket that names its repository must agree with where its code is being sent: this
 	// catches the wrong ticket or a typo before anything runs (ADR-002). Free text never counts.
@@ -175,7 +196,8 @@ func (e *Engine) startLane(ctx context.Context, repo, name string) (policy.Lane,
 }
 
 type adhocDoc struct {
-	Prompt string `json:"prompt"`
+	Prompt string   `json:"prompt"`
+	Labels []string `json:"labels,omitempty"`
 }
 
 func adhocKey(id string) string { return "adhoc/" + id }
@@ -199,7 +221,7 @@ func (a adhoc) Get(ctx context.Context, key string) (facts.Ticket, tracker.Text,
 		return facts.Ticket{}, tracker.Text{}, err
 	}
 	title, _, _ := strings.Cut(strings.TrimSpace(d.Prompt), "\n")
-	return facts.Ticket{Key: key, State: "open"}, tracker.Text{Title: title, Body: d.Prompt}, nil
+	return facts.Ticket{Key: key, State: "open", Labels: d.Labels}, tracker.Text{Title: title, Body: d.Prompt}, nil
 }
 
 func (adhoc) Comment(context.Context, string, string, string) error { return nil }

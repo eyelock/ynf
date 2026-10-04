@@ -1932,3 +1932,39 @@ func TestConnectionsAndTickets(t *testing.T) {
 		t.Fatal("a tracker that is not configured")
 	}
 }
+
+// TestStartChecksTheLanesLabels: a lane whose runs read a label refuses work without it before
+// creating anything, a ticket or a prompt alike; a prompt carries its labels as a ticket would.
+func TestStartChecksTheLanesLabels(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.f.labels[2] = []string{"bug"}
+	for _, c := range []struct {
+		req  engine.StartRequest
+		want string
+	}{
+		{engine.StartRequest{Prompt: "gofmt it", Repo: "o/r", Lane: "fmt"}, "lane fmt cannot run adhoc/"},
+		{engine.StartRequest{Ref: tracker.Ref{Host: "github.com", Key: "o/r#2"}, Lane: "fmt"}, "no pkg: label for {label.pkg}"},
+		{engine.StartRequest{Ref: tracker.Ref{Host: "github.com", Key: "o/r#2"}, Labels: []string{"pkg:x"}, Lane: "fmt"}, "labels are for a prompt"},
+		{engine.StartRequest{Prompt: "p", Labels: []string{"pkg:$(rm -rf /)"}, Repo: "o/r", Lane: "fmt"}, `label "pkg:$(rm -rf /)"`},
+	} {
+		_, err := h.e.Start(ctx, c.req)
+		var refused *engine.RefusedError
+		if !errors.As(err, &refused) || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%+v: %v, want %q", c.req, err, c.want)
+		}
+	}
+	if keys, _ := h.e.Store.Keys(ctx, "item/"); len(keys) != 0 {
+		t.Fatalf("a refusal left items behind: %v", keys)
+	}
+	if _, err := h.e.Start(ctx, engine.StartRequest{Prompt: "gofmt it", Repo: "o/r", Lane: "fmt"}); !strings.Contains(err.Error(), "give it with --label") {
+		t.Fatalf("a prompt is told how: %v", err)
+	}
+	it, err := h.e.Start(ctx, engine.StartRequest{Prompt: "Tidy internal/format", Labels: []string{"pkg:internal/format"}, Repo: "o/r", Lane: "fmt"})
+	if err != nil || it.State != item.Proposed {
+		t.Fatalf("a labelled prompt: %s %v", it.State, err)
+	}
+	if body := git(t, h.remote, "show", it.Branch+":internal/format/f.go"); !strings.Contains(body, "func F() int") {
+		t.Fatalf("the lane did not run on the label's package: %s", body)
+	}
+}

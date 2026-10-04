@@ -222,7 +222,13 @@ func run(root, repo, factory, image string, lanes []string, timeout time.Duratio
 	// Fixtures nothing searches for are started, as a person or an automation would: a GitHub
 	// issue with no lane label, and every ticket in the tracker that is not a forge.
 	for _, f := range ff.Fixtures {
-		if !f.Expect.Start && f.Kind != "ticket" || !slices.Contains(lanes, f.Lane) {
+		if !f.Expect.Start && f.Kind != "ticket" && f.Kind != "prompt" || !slices.Contains(lanes, f.Lane) {
+			continue
+		}
+		if f.Kind == "prompt" {
+			if err := startPrompt(root, ynf, cfg, logPath, repo, f); err != nil {
+				return err
+			}
 			continue
 		}
 		ref, _, _, err := subject(f, numbers, repo)
@@ -308,8 +314,47 @@ func run(root, repo, factory, image string, lanes []string, timeout time.Duratio
 // trackerHost is the sandbox tracker's host, from its site in the configuration repository.
 const trackerHost = "tracker.ynf-sandbox.invalid"
 
+// promptKeys is each prompt fixture's item key, which ynf chooses when it is started.
+var promptKeys = map[string]string{}
+
+// startPrompt starts a prompt fixture as a person would, with no ticket: its title and body are the
+// prompt, and its labels are given with --label, for the lane's templates to read.
+func startPrompt(root, ynf, cfg, logPath, repo string, f fixture) error {
+	body, err := os.ReadFile(filepath.Join(root, f.Body))
+	if err != nil {
+		return err
+	}
+	args := []string{"--config", cfg, "--format", "json", "--log-file", logPath, "start", "--prompt", f.Title + "\n\n" + string(body), "--repo", repo, "--lane", f.Lane}
+	for _, l := range f.Labels {
+		args = append(args, "--label", l)
+	}
+	fmt.Printf("ynf start --prompt %q --label %s --repo %s --lane %s (%s)\n", f.Title, strings.Join(f.Labels, " --label "), repo, f.Lane, f.ID)
+	out, err := stream(ynf, args...)
+	if err != nil {
+		return fmt.Errorf("ynf start %s: %w\n%s", f.ID, err, out)
+	}
+	var it struct {
+		Key string `json:"key"`
+	}
+	if err := json.Unmarshal([]byte(out), &it); err != nil {
+		return fmt.Errorf("ynf start %s: %w", f.ID, err)
+	}
+	if !strings.HasPrefix(it.Key, "item/adhoc/") {
+		return fmt.Errorf("ynf start %s: no ad hoc item in %q", f.ID, out)
+	}
+	promptKeys[f.ID] = it.Key
+	return nil
+}
+
 // subject is how ynf names a fixture's ticket (ref), its item's key, and how e2e reports it.
 func subject(f fixture, numbers map[string]int, repo string) (ref, key, name string, err error) {
+	if f.Kind == "prompt" {
+		k, ok := promptKeys[f.ID]
+		if !ok {
+			return "", "", "", fmt.Errorf("%s was never started", f.ID)
+		}
+		return k, k, "prompt " + f.ID, nil
+	}
 	if f.Kind == "ticket" {
 		return trackerHost + "/" + f.Ticket, "item/" + trackerHost + "/" + f.Ticket, f.Ticket, nil
 	}
