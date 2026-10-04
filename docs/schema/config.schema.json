@@ -108,6 +108,17 @@
         }
       }
     },
+    "images": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Agent images (ADR-007).",
+      "properties": {
+        "build": {
+          "type": "boolean",
+          "description": "Build an image with ynh image for a lane that names no published one (run.image). Default true; false on a deployed factory, so it only runs pinned, published images."
+        }
+      }
+    },
     "memory": {
       "type": "object",
       "additionalProperties": false,

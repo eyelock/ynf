@@ -26,6 +26,7 @@ import (
 	"github.com/eyelock/ynf/internal/lease"
 	"github.com/eyelock/ynf/internal/memory"
 	"github.com/eyelock/ynf/internal/policy"
+	"github.com/eyelock/ynf/internal/runner"
 	"github.com/eyelock/ynf/internal/store"
 	"github.com/eyelock/ynf/internal/store/sqlite"
 	"github.com/eyelock/ynf/internal/tracker"
@@ -90,6 +91,18 @@ lanes:
       runner: ynh
       env: [ANTHROPIC_API_KEY]
       ynh: {harness: ".", focus: tidy}
+    when: {converged: open_pr}
+  bounded:
+    kind: originate
+    intake: [{github.search: "label:ynf:bounded", every: 5m}]
+    run:
+      runner: ynh
+      env: [ANTHROPIC_API_KEY]
+      ynh:
+        harness: "."
+        focus: tidy
+        budgets: {max_turns: 20}
+        sensor_scope: {lint: "golangci-lint run ./{label.pkg}/..."}
     when: {converged: open_pr}
   approved:
     kind: originate
@@ -289,7 +302,7 @@ func newHarness(t *testing.T) *harness {
 	if err := os.MkdirAll(filepath.Join(src, ".agents/harness"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(src, ".agents/harness/plugin.json"), []byte(`{"name":"h","env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"TIDY FOCUS PROMPT","profile":"careful"}}}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(src, ".agents/harness/plugin.json"), []byte(testManifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	git(t, src, "add", "-A")
@@ -696,6 +709,7 @@ func TestYnhRunnerInAnAgentImage(t *testing.T) {
 	_ = os.WriteFile(proxy, []byte("x"), 0o755)
 	h.e.Executor = func(string) (executor.Executor, error) { return executor.Docker{Bin: bin, ProxyBinary: proxy}, nil }
 	var built []string
+	h.e.ImageHarness = imageCarries(t, testManifest)
 	h.e.BuildImage = func(_ context.Context, wt string, cfg policy.Ynh) (string, error) {
 		built = append(built, cfg.Harness)
 		return "ynf-harness:abc", nil
@@ -922,7 +936,7 @@ func TestYieldFloorPausesTheLane(t *testing.T) {
 		}
 	}
 	stats, err := h.e.Stats(ctx)
-	if err != nil || len(stats) != 9 {
+	if err != nil || len(stats) != 10 {
 		t.Fatalf("every lane should be listed, with or without items: %+v %v", stats, err)
 	}
 	fmtStats := func(ss []engine.Stats) engine.Stats {
@@ -1037,6 +1051,20 @@ func TestMemoryOutageNeverStopsAStep(t *testing.T) {
 	}
 	if it := h.item(t, 1); it.State != item.Proposed {
 		t.Fatalf("a memory outage stopped the step: %s %s", it.State, it.Reason)
+	}
+}
+
+// testManifest is the test repository's harness, which an image built from it carries.
+const testManifest = `{"name":"h","env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"TIDY FOCUS PROMPT","profile":"careful"}},"agent":{"max_turns":12,"max_wall":"30m"},"sensors":{"lint":{},"test":{}}}`
+
+// imageCarries fakes reading an image's harness: it carries manifest.
+func imageCarries(t *testing.T, manifest string) func(context.Context, string, string) (runner.Harness, error) {
+	return func(context.Context, string, string) (runner.Harness, error) {
+		h, err := runner.ParseManifest([]byte(manifest))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h, nil
 	}
 }
 
@@ -1241,6 +1269,7 @@ func TestAutoApproveOnlyInsideAnImageThatSupportsIt(t *testing.T) {
 		_ = os.WriteFile(proxy, []byte("x"), 0o755)
 		h.e.Executor = func(string) (executor.Executor, error) { return executor.Docker{Bin: bin, ProxyBinary: proxy}, nil }
 		h.e.BuildImage = func(context.Context, string, policy.Ynh) (string, error) { return "ynf-harness:abc", nil }
+		h.e.ImageHarness = imageCarries(t, testManifest)
 		h.e.ImageCapabilities = func(_ context.Context, img string) (string, error) {
 			if img != "ynf-harness:abc" {
 				t.Errorf("asked %s, not the agent image", img)
@@ -1696,5 +1725,54 @@ func TestATicketFromATrackerThatIsNotAForge(t *testing.T) {
 	bad.e.NewTracker = func(string, map[string]any) (string, tracker.Tracker, error) { return "", nil, errors.New("no server") }
 	if _, err := bad.e.Enrolled(ctx); err == nil || !strings.Contains(err.Error(), "tracker jira: no server") {
 		t.Fatalf("a tracker that cannot be built: %v", err)
+	}
+}
+
+// TestALaneIsHeldToItsImagesHarness: before anything runs, a lane is checked against the harness
+// inside the image that will run it, never the repository's copy (ADR-006, ADR-012).
+func TestALaneIsHeldToItsImagesHarness(t *testing.T) {
+	for _, c := range []struct{ manifest, want string }{
+		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"p"}},"agent":{"max_turns":12},"sensors":{"lint":{}}}`, "max_turns 20 loosens the harness's 12"},
+		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"p"}},"agent":{"max_turns":30},"sensors":{"test":{}}}`, `sensor_scope names "lint"`},
+		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"other":{"prompt":"p"}},"agent":{"max_turns":30},"sensors":{"lint":{}}}`, `has no focus "tidy"`},
+		{`{"env_passthrough":[],"focuses":{"tidy":{"prompt":"p"}},"sensors":{"lint":{}}}`, "does not pass ANTHROPIC_API_KEY"},
+		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"p"}},"agent":{"max_turns":30},"sensors":{"lint":{}}}`, ""},
+	} {
+		h := newHarness(t)
+		h.e.Interactive = false
+		bin, _ := fakeDocker(t)
+		proxy := filepath.Join(t.TempDir(), "ynf-linux")
+		_ = os.WriteFile(proxy, []byte("x"), 0o755)
+		h.e.Executor = func(string) (executor.Executor, error) { return executor.Docker{Bin: bin, ProxyBinary: proxy}, nil }
+		h.e.BuildImage = func(context.Context, string, policy.Ynh) (string, error) { return "ynf-harness:abc", nil }
+		h.e.ImageHarness = imageCarries(t, c.manifest)
+		h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "k"}[k] }
+		h.f.labels[1] = []string{"ynf:bounded", "pkg:internal/format"}
+		if err := h.e.Sweep(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		it := h.item(t, 1)
+		if c.want == "" {
+			if it.State != item.Proposed {
+				t.Errorf("a fitting lane: %s %+v", it.State, it.LastRun)
+			}
+			continue
+		}
+		if it.State != item.Escalated || it.LastRun.Outcome != "operator_error" || !strings.Contains(it.LastRun.Detail, c.want) {
+			t.Errorf("%q: %s %+v", c.want, it.State, it.LastRun)
+		}
+	}
+	h := newHarness(t)
+	h.e.Interactive = false
+	bin, _ := fakeDocker(t)
+	h.e.Executor = func(string) (executor.Executor, error) { return executor.Docker{Bin: bin}, nil }
+	h.e.BuildImage = func(context.Context, string, policy.Ynh) (string, error) { return "ynf-harness:abc", nil }
+	h.e.ImageHarness = func(context.Context, string, string) (runner.Harness, error) {
+		return runner.Harness{}, errors.New("no ynh in it")
+	}
+	h.f.labels[1] = []string{"ynf:bounded", "pkg:internal/format"}
+	_ = h.e.Sweep(context.Background())
+	if it := h.item(t, 1); it.LastRun == nil || !strings.Contains(it.LastRun.Detail, "read the harness in ynf-harness:abc: no ynh in it") {
+		t.Fatalf("%+v", it.LastRun)
 	}
 }

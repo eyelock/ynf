@@ -22,6 +22,7 @@ import (
 	"github.com/eyelock/ynf/internal/lease"
 	"github.com/eyelock/ynf/internal/memory"
 	"github.com/eyelock/ynf/internal/policy"
+	"github.com/eyelock/ynf/internal/runner"
 	"github.com/eyelock/ynf/internal/store"
 	"github.com/eyelock/ynf/internal/tracker"
 )
@@ -81,6 +82,9 @@ type Engine struct {
 	// runs on the host only; HostCapabilities reports the host ynh's capabilities to check it.
 	HostAutoApprove  string
 	HostCapabilities func(ctx context.Context) (string, error)
+	// ImageHarness reads what the harness inside an agent image declares, by asking the image's
+	// own ynh; harness picks one when the image carries several. nil skips reading it.
+	ImageHarness func(ctx context.Context, image, harness string) (runner.Harness, error)
 	// ImageCapabilities reports the capabilities version of the ynh inside an agent image; nil
 	// skips the check.
 	ImageCapabilities func(ctx context.Context, image string) (string, error)
