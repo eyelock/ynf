@@ -78,6 +78,9 @@ func imageHarness(ctx context.Context, image, want string) (runner.Harness, erro
 		return h, nil
 	}
 	ynh := func(args ...string) (string, error) {
+		if image == "" { // the ynh installed here: an inline run in the factory image
+			return stdoutOf(ctx, "ynh", args...)
+		}
 		return stdoutOf(ctx, "docker", append([]string{"run", "--rm", "--network", "none", "--entrypoint", "ynh", image}, args...)...)
 	}
 	out, err := ynh("ls", "--format", "json")
@@ -111,6 +114,7 @@ func imageHarness(ctx context.Context, image, want string) (runner.Harness, erro
 	if err != nil {
 		return runner.Harness{}, fmt.Errorf("the manifest of %s in %s: %w", ids[0], image, err)
 	}
+	h.ID = ids[0]
 	harnessCache[image+"\x00"+want] = h
 	return h, nil
 }

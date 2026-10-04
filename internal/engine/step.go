@@ -358,16 +358,28 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	if err != nil {
 		return fail(runner.OperatorError, err)
 	}
+	inline := ex.Name() == "inline"
+	if inline {
+		job.Image = ""                        // the run is in this image, whatever the lane names for a container
+		job.Share = append(job.Share, mirror) // the worktree's git data lives in the mirror
+		// The job runner's network policy enforces egress here, not ynf (ADR-007): say what the
+		// lane expects, so a mismatch is visible.
+		e.log().Info("egress is the job runner's", "item", it.Key, "lane", lane.Name, "expects", strings.Join(append(append([]string(nil), job.Egress...), lane.Run.Egress.Allow...), ","))
+	}
 	// The harness the lane is held to is the one that will run: inside the image, or in the
 	// folder ynh runs on the host (ADR-012).
 	var focus *runner.Focus
 	if y, ok := r.(runner.YnhRunner); ok {
-		h, known, err := s.harness(y, job.Image, inImage, lane.Run.Image == "", wt)
+		h, known, err := s.harness(y, job.Image, inImage, lane.Run.Image == "", inline, wt)
 		if err != nil {
 			return fail(runner.OperatorError, err)
 		}
+		if inline && h.ID != "" {
+			y.Cfg.Harness = h.ID // run the harness installed here, by its id
+			r = y
+		}
 		if known {
-			if err := s.checkPassthrough(lane, y, h, ex.Contained() && len(job.Egress) > 0); err != nil {
+			if err := s.checkPassthrough(lane, y, h, ex.Name() == "docker" && len(job.Egress) > 0); err != nil {
 				return fail(runner.OperatorError, err)
 			}
 			if err := h.CheckLane(y.Cfg); err != nil {
@@ -399,7 +411,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 			labels = t.Labels
 		}
 	}
-	argv, err := r.Command(runner.Spec{Lane: lane, Labels: labels, TaskFile: cr + "/task.md", RunDir: cr, Feedback: feedback, InImage: inImage, Focus: focus, HostAutoApprove: e.HostAutoApprove})
+	argv, err := r.Command(runner.Spec{Lane: lane, Labels: labels, TaskFile: cr + "/task.md", RunDir: cr, Feedback: feedback, InImage: inImage, Contained: ex.Contained(), Focus: focus, HostAutoApprove: e.HostAutoApprove})
 	if err != nil {
 		return fail(runner.OperatorError, err)
 	}
@@ -455,6 +467,20 @@ func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, wt, 
 	}
 	y, isYnh := r.(runner.YnhRunner)
 	if !isYnh {
+		return job, false, nil
+	}
+	if ex.Name() == "inline" {
+		// The factory image: ynh is installed here and the job runner contains it (ADR-007), so a
+		// lane's auto_approve applies, once this ynh is shown to support it.
+		if y.Cfg.AutoApprove != "" && e.HostCapabilities != nil {
+			caps, err := e.HostCapabilities(s.ctx)
+			if err != nil {
+				return job, false, fmt.Errorf("read this image's ynh capabilities: %w", err)
+			}
+			if !atLeast(caps, autoApproveCapabilities) {
+				return job, false, fmt.Errorf("lane %s sets auto_approve, which needs ynh capabilities %s; this image's ynh has %s", lane.Name, autoApproveCapabilities, caps)
+			}
+		}
 		return job, false, nil
 	}
 	if !ex.Contained() {
@@ -543,7 +569,21 @@ func (s *step) checkPassthrough(lane policy.Lane, y runner.YnhRunner, h runner.H
 // harness reads what the harness that will run declares: from the image's own ynh, or from the
 // harness folder ynh runs on the host. known is false for an installed harness id on the host,
 // whose manifest ynh reads and reports on itself.
-func (s *step) harness(y runner.YnhRunner, image string, inImage, built bool, wt string) (h runner.Harness, known bool, err error) {
+func (s *step) harness(y runner.YnhRunner, image string, inImage, built, inline bool, wt string) (h runner.Harness, known bool, err error) {
+	if inline {
+		// The harness installed in this image; a folder in the repository means the one it carries.
+		if s.e.ImageHarness == nil {
+			return h, false, errors.New("inline runs need ynh to read the harness installed here")
+		}
+		want := y.Cfg.Harness
+		if want == "." || isFolder(wt, want) {
+			want = ""
+		}
+		if h, err = s.e.ImageHarness(s.ctx, "", want); err != nil {
+			return h, false, fmt.Errorf("read the harness installed here: %w", err)
+		}
+		return h, true, nil
+	}
 	if inImage {
 		if s.e.ImageHarness == nil {
 			return h, false, nil
@@ -565,6 +605,15 @@ func (s *step) harness(y runner.YnhRunner, image string, inImage, built bool, wt
 	}
 	h, err = runner.ReadHarness(filepath.Join(wt, filepath.FromSlash(y.Cfg.Harness)))
 	return h, err == nil, nil
+}
+
+// isFolder reports whether name is a folder in the worktree, rather than an installed harness id.
+func isFolder(wt, name string) bool {
+	if name == "" || strings.Contains(name, "@") {
+		return false
+	}
+	fi, err := os.Stat(filepath.Join(wt, filepath.FromSlash(name)))
+	return err == nil && fi.IsDir()
 }
 
 func harnessName(y runner.YnhRunner) string {

@@ -47,3 +47,59 @@ jobs:
         env:
           # Writes the release here and the formula to eyelock/homebrew-tap.
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+
+  factory-image:
+    # ynf's factory image (ADR-009): ynh's image at the version images/factory/versions.env pairs,
+    # with this release's ynf and that ynm, for amd64 and arm64.
+    name: Factory image
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7
+        with:
+          go-version-file: go.mod
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1  # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build context
+        id: context
+        env:
+          # ynm's releases are private while it is: the release token reads them.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          set -eu
+          . images/factory/versions.env
+          version="${GITHUB_REF_NAME#v}"
+          ctx="$RUNNER_TEMP/factory"
+          mkdir -p "$ctx/ynh" "$ctx/ynm"
+          cp images/factory/Dockerfile "$ctx/"
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
+              -ldflags "-s -w -X github.com/eyelock/ynf.Version=$version" -o "$ctx/ynf-linux-$arch" ./cmd/ynf
+          done
+          gh release download "v$YNM_VERSION" -R eyelock/ynm -p "ynm_${YNM_VERSION}_slim.tar.gz" -D "$ctx"
+          tar -xzf "$ctx/ynm_${YNM_VERSION}_slim.tar.gz" -C "$ctx/ynm"
+          {
+            echo "dir=$ctx"
+            echo "ynh=$YNH_VERSION"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
+        with:
+          context: ${{ steps.context.outputs.dir }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            YNH_BASE=ghcr.io/eyelock/ynh:${{ steps.context.outputs.ynh }}
+            YNF_VERSION=${{ steps.context.outputs.version }}
+          tags: |
+            ghcr.io/eyelock/ynf-factory:${{ steps.context.outputs.version }}
+            ghcr.io/eyelock/ynf-factory:latest

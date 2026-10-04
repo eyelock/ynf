@@ -119,6 +119,16 @@
         }
       }
     },
+    "executor": {
+      "enum": [
+        "inline"
+      ],
+      "description": "inline: this instance runs inside containment the operator provides, such as the factory image run as a job (ADR-007). Every run then starts ynh as a process beside ynf, as inline_user, with the folders it needs handed to that user for the run; the job runner provides the network policy and capabilities. Never set it outside such a container."
+    },
+    "inline_user": {
+      "type": "string",
+      "description": "The user inline runs run as. Default ynh, the user agent images are built for. It must not be the user ynf runs as."
+    },
     "memory": {
       "type": "object",
       "additionalProperties": false,

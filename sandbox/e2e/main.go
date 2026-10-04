@@ -93,6 +93,7 @@ func main() {
 	lanes := flag.String("lanes", "gofmt,deps", "lanes to run and check")
 	timeout := flag.Duration("timeout", 15*time.Minute, "how long to wait for items to settle")
 	forget := flag.Bool("forget-memory", false, "empty the sandbox's ynm namespace and exit")
+	image := flag.String("image", "", "run ynf inside this factory-flavoured harness image, as a job runner would (ADR-009, shape B)")
 	flag.Parse()
 	if *forget {
 		if err := forgetMemory(*repo); err != nil {
@@ -101,13 +102,13 @@ func main() {
 		}
 		return
 	}
-	if err := run(*root, *repo, *factory, strings.Split(*lanes, ","), *timeout); err != nil {
+	if err := run(*root, *repo, *factory, *image, strings.Split(*lanes, ","), *timeout); err != nil {
 		fmt.Fprintln(os.Stderr, "e2e:", err)
 		os.Exit(1)
 	}
 }
 
-func run(root, repo, factory string, lanes []string, timeout time.Duration) error {
+func run(root, repo, factory, image string, lanes []string, timeout time.Duration) error {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return err
@@ -184,7 +185,7 @@ func run(root, repo, factory string, lanes []string, timeout time.Duration) erro
 	// Memory is explicit: ynm in the sandbox's namespace when it is installed, and checked;
 	// otherwise off, and said so.
 	_, ynmErr := exec.LookPath("ynm")
-	memoryOn := ynmErr == nil
+	memoryOn := ynmErr == nil && image == ""
 	mem := "memory: {provider: none}\n"
 	if memoryOn {
 		mem = "memory: {provider: ynm, namespace: \"" + memoryNamespace + "\"}\n"
@@ -192,7 +193,16 @@ func run(root, repo, factory string, lanes []string, timeout time.Duration) erro
 		fmt.Println("memory not checked: ynm is not installed")
 	}
 	// Enrolment comes from the configuration repository, as a deployed factory's does (ADR-006).
-	if err := os.WriteFile(cfg, fmt.Appendf(nil, "version: 1\nfactory: {repo: %s}\npoll: {ci: 15s, review: 1m}\nlease: {ttl: 30s, heartbeat: 10s}\n%s", factory, mem), 0o644); err != nil {
+	inImage := ""
+	if image != "" {
+		// Shape B: every run inline beside ynf, in the image; work on a Linux volume.
+		inImage = "executor: inline\nwork_dir: /work\n"
+		if ynf, err = inImageWrapper(root, tmp, arch, image); err != nil {
+			return err
+		}
+		fmt.Printf("ynf runs inside %s, as a job runner would run it\n", image)
+	}
+	if err := os.WriteFile(cfg, fmt.Appendf(nil, "version: 1\nfactory: {repo: %s}\npoll: {ci: 15s, review: 1m}\nlease: {ttl: 30s, heartbeat: 10s}\n%s%s", factory, mem, inImage), 0o644); err != nil {
 		return err
 	}
 	// Memories written before this run are not evidence for it (e2e-only skips the reset).
@@ -229,7 +239,10 @@ func run(root, repo, factory string, lanes []string, timeout time.Duration) erro
 		}
 	}
 	for _, f := range ff.Fixtures {
-		if !f.Expect.Crash || !slices.Contains(lanes, f.Lane) {
+		if image != "" && f.Expect.Crash {
+			fmt.Printf("%s: the crash test needs ynf as a process here to kill; skipped in an image\n", f.ID)
+		}
+		if !f.Expect.Crash || image != "" || !slices.Contains(lanes, f.Lane) {
 			continue
 		}
 		n, ok := numbers[f.Title]
@@ -555,6 +568,35 @@ func readTicket(path, key string) (*trackerTicket, error) {
 		return nil, fmt.Errorf("the tracker has no %s", key)
 	}
 	return ts[key], nil
+}
+
+// inImageWrapper writes a ynf that runs in the factory image, hardened as a job runner would run
+// it (ADR-007): root with only SETUID, SETGID and CHOWN, no new privileges, the run folder shared
+// at the same path, work on a fresh volume, and the sandbox tracker for linux on its PATH.
+func inImageWrapper(root, tmp, arch, image string) (string, error) {
+	linux := filepath.Join(tmp, "linux")
+	if out, err := shEnv(filepath.Join(root, "e2e"), []string{"GOOS=linux", "GOARCH=" + arch, "CGO_ENABLED=0"}, "go", "build", "-o", filepath.Join(linux, "ynf-sandbox-tracker"), "./tracker"); err != nil {
+		return "", fmt.Errorf("build the sandbox tracker for linux: %w\n%s", err, out)
+	}
+	env, err := sh("", "docker", "image", "inspect", "--format", "{{range .Config.Env}}{{println .}}{{end}}", image)
+	if err != nil {
+		return "", fmt.Errorf("the image %s: %w", image, err)
+	}
+	path := "/usr/local/bin:/usr/bin:/bin"
+	for l := range strings.SplitSeq(env, "\n") {
+		if p, ok := strings.CutPrefix(l, "PATH="); ok {
+			path = p
+		}
+	}
+	const volume = "ynf-e2e-work"
+	_, _ = sh("", "docker", "volume", "rm", "-f", volume)
+	wrapper := filepath.Join(tmp, "ynf-in-image")
+	script := fmt.Sprintf(`#!/bin/sh
+exec docker run --rm --user root --cap-drop ALL --cap-add SETUID --cap-add SETGID --cap-add CHOWN \
+  --security-opt no-new-privileges -e GITHUB_TOKEN -e YNF_SANDBOX_TRACKER_DATA -e PATH=%s:%s \
+  -v %s:%s -v %s:/work -w %s --entrypoint ynf %s "$@"
+`, linux, path, tmp, tmp, volume, tmp, image)
+	return wrapper, os.WriteFile(wrapper, []byte(script), 0o755)
 }
 
 func oneLine(s string, max int) string {

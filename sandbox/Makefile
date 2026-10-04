@@ -10,6 +10,9 @@
 #   make e2e        rebuild the sandbox, run ynf against it until everything settles, and check
 #                   each fixture's expect block (tests the factory; LANES=gofmt,deps,reclaim by default)
 #   make e2e-only   the same, without the rebuild
+#   make e2e-factory  the same with ynf inside the factory image, as a job runner would run it
+#                   (ADR-009, shape B): the sandbox's harness built on ynf's factory image
+#                   (make -C .. factory-image first; FACTORY_BASE names it)
 #   make reset also empties the sandbox's ynm namespace (factory/github.com/eyelock/ynf-sandbox), so every
 #   e2e run starts from the same memory; e2e checks each item that ran left its memories
 #   make agent-image  build ynf-sandbox-agent:latest, the base the ynh lanes' harness images use,
@@ -23,7 +26,7 @@ TF := terraform -chdir=terraform
 export GITHUB_TOKEN ?= $(shell gh auth token)
 export AWS_PROFILE ?= ynf-terraform
 
-.PHONY: init validate up down reset plan calibrate e2e e2e-only agent-image
+.PHONY: init validate up down reset plan calibrate e2e e2e-only e2e-factory agent-image
 
 init:
 	$(TF) init -upgrade
@@ -71,3 +74,17 @@ agent-image:
 	fi; \
 	docker build -q --build-arg YNH_BASE=$(YNH_BASE) -t $(AGENT_IMAGE) "$$ctx"; \
 	docker run --rm --network none --entrypoint ynh $(AGENT_IMAGE) version
+
+FACTORY_BASE    ?= ynf-factory:dev
+FACTORY_HARNESS ?= ynf-sandbox-harness:factory
+FACTORY_LANES   ?= gofmt,deps
+
+# Shape B: the sandbox's agent tools on the factory image, its harness in the factory flavour, and
+# the acceptance test with ynf running inside that image, every run inline beside it.
+e2e-factory: reset
+	@set -e; ctx=$$(mktemp -d); trap 'rm -rf "$$ctx"' EXIT; \
+	cp images/agent/Dockerfile "$$ctx/"; mkdir -p "$$ctx/ynh"; \
+	docker build -q --build-arg YNH_BASE=$(FACTORY_BASE) -t ynf-sandbox-agent:factory "$$ctx" >/dev/null; \
+	ynh image ynf-sandbox --from seed --base ynf-sandbox-agent:factory --entrypoint agent --tag $(FACTORY_HARNESS) >/dev/null; \
+	echo "built $(FACTORY_HARNESS) on $(FACTORY_BASE)"
+	cd e2e && go run . -root .. -lanes $(FACTORY_LANES) -image $(FACTORY_HARNESS)

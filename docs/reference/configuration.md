@@ -10,6 +10,8 @@ the folder the file is in.
 | `repos` | one of `repos` or `factory` | Enrolled repositories, `owner/name`. ynf reads each one's lanes from its default branch. |
 | `factory.repo` | one of `repos` or `factory` | The factory's configuration repository (ADR-006), `owner/name` or `host/owner/name`. Its `factory.yaml` enrols repositories instead of `repos`, and its `lanes.yaml` lies under every enrolled repository's lanes, below. |
 | `images.build` | `true` | Build an agent image with `ynh image` for a lane that names no published one (`run.image`). `false` on a deployed factory, so it only runs pinned, published images. |
+| `executor` | none | `inline` declares this instance runs inside containment the operator provides: the factory image run as a job (ADR-007, ADR-009). Every run then starts ynh as a process beside ynf, as `inline_user`, using the harness installed in the image; the run's folders and the repository mirror are handed to that user for the run and taken back after. The job runner provides the containment: run the image as root with `--cap-drop ALL --cap-add SETUID --cap-add SETGID --cap-add CHOWN --security-opt no-new-privileges`, and a network policy allowing the forge, the model API and the lane's hosts. Never set it outside such a container. |
+| `inline_user` | `ynh` | The user inline runs run as. It must not be the user ynf runs as, so the run cannot read ynf's environment or token. |
 | `store` | `sqlite://state.db` | Where state lives (ADR-004): `sqlite://<path>`, or `s3://bucket/prefix?region=…` for state that outlives the process (CI, the hosted service), with credentials from the AWS chain; `endpoint=` and `path_style=true` point it at MinIO or another S3. `dynamodb://` is not built yet. |
 | `work_dir` | `work` | Repository mirrors and per-step worktrees and run folders. |
 | `owner` | `ynf@<host>/<pid>` | This instance's name in leases. |
@@ -67,3 +69,16 @@ The first of these that has `config.yaml`; any later one is shadowed and `ynf do
 2. `~/.ynh/ynf/`
 3. `~/.ynm/ynf/`
 4. `~/.ynf/`
+
+## The factory image
+
+`make factory-image` builds ynf's factory image (ADR-009): ynh's image at the version
+[`images/factory/versions.env`](../../images/factory/versions.env) pairs, with this checkout's ynf
+and that ynm. `YNH_SRC=<ynh checkout>` and `YNM_SRC=<ynm checkout>` build dev versions in instead;
+`FACTORY_IMAGE` names it (default `ynf-factory:dev`). A release publishes it as
+`ghcr.io/eyelock/ynf-factory:<version>` for amd64 and arm64.
+
+Harness images built on it with `ynh image <harness> --base ynf-factory:<version> --entrypoint
+agent` are the factory flavour: run one as a job with `--user root --entrypoint ynf`, the
+capabilities above, a config with `executor: inline`, and `ynf start` or `ynf handle`.
+`make -C sandbox e2e-factory` is the acceptance test of exactly that.
