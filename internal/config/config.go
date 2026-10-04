@@ -23,9 +23,13 @@ const File = "config.yaml"
 type Config struct {
 	Version int      `yaml:"version"`
 	Repos   []string `yaml:"repos"`
-	Store   string   `yaml:"store"`
-	WorkDir string   `yaml:"work_dir"`
-	Owner   string   `yaml:"owner"`
+	// Factory names the configuration repository, which enrols repositories instead of Repos.
+	Factory *struct {
+		Repo string `yaml:"repo"`
+	} `yaml:"factory"`
+	Store   string `yaml:"store"`
+	WorkDir string `yaml:"work_dir"`
+	Owner   string `yaml:"owner"`
 	GitHub  struct {
 		TokenEnv string `yaml:"token_env"`
 		Author   *struct {

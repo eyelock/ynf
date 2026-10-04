@@ -162,3 +162,89 @@ lanes:
 		}
 	}
 }
+
+// TestMergeLanes: the repository wins key by key; maps merge, anything else is replaced; the
+// merged document is what gets validated, so a repository may hold only overrides.
+func TestMergeLanes(t *testing.T) {
+	config := []byte(`version: 1
+defaults: {attempts: 2}
+lanes:
+  lint:
+    kind: originate
+    intake: [{github.search: "label:a", every: 5m}]
+    run: {runner: command, command: {argv: [a, b]}}
+    when: {converged: open_pr, ci_failed: escalate}
+  docs:
+    kind: originate
+    intake: [{github.search: "label:d", every: 5m}]
+    run: {runner: command, command: {argv: ["true"]}}
+    when: {converged: open_pr}
+`)
+	repo := []byte(`version: 1
+lanes:
+  lint:
+    run: {command: {argv: [c]}}
+    when: {ci_failed: {retry: 1, then: escalate}}
+  docs: {enabled: false}
+  own:
+    kind: originate
+    intake: [{github.search: "label:o", every: 5m}]
+    run: {runner: command, command: {argv: ["true"]}}
+    when: {converged: open_pr}
+`)
+	if _, err := policy.Load(repo); err == nil {
+		t.Fatal("the overrides alone should not be a valid lanes file")
+	}
+	doc, err := policy.MergeLanes(config, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := policy.Load(doc)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, doc)
+	}
+	lint := f.Lanes["lint"]
+	if strings.Join(lint.Run.Command.Argv, " ") != "c" || lint.Run.Runner != "command" || lint.Kind != "originate" {
+		t.Fatalf("lint: %+v", lint.Run)
+	}
+	if lint.When["converged"].Then == "" && lint.When["converged"].Action == "" || lint.When["ci_failed"].Retry != 1 {
+		t.Fatalf("when merges key by key: %+v", lint.When)
+	}
+	if f.Lanes["docs"].On() || f.Lanes["own"].Kind != "originate" || lint.Attempts != 2 {
+		t.Fatalf("docs off, own added, defaults kept: %v %+v %d", f.Lanes["docs"].On(), f.Lanes["own"], lint.Attempts)
+	}
+	if only, err := policy.MergeLanes(config, nil); err != nil || !strings.Contains(string(only), "label:a") {
+		t.Fatalf("no repository lanes: %v", err)
+	}
+	if _, err := policy.MergeLanes([]byte("lanes: ["), repo); err == nil {
+		t.Fatal("bad config yaml")
+	}
+	if _, err := policy.MergeLanes(config, []byte("lanes: [")); err == nil {
+		t.Fatal("bad repo yaml")
+	}
+	src, err := policy.LaneSources(config, repo, "lint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if src["run.command.argv"] != "repo" || src["run.runner"] != "config" || src["when.ci_failed.retry"] != "repo" || src["kind"] != "config" {
+		t.Fatalf("sources: %v", src)
+	}
+	if _, err := policy.LaneSources([]byte("x: ["), repo, "lint"); err == nil {
+		t.Fatal("bad config yaml in sources")
+	}
+	if _, err := policy.LaneSources(config, []byte("x: ["), "lint"); err == nil {
+		t.Fatal("bad repo yaml in sources")
+	}
+}
+
+func TestLoadFactory(t *testing.T) {
+	f, err := policy.LoadFactory([]byte("version: 1\nrepos: [o/r, github.acme.internal/acme/x]\ntrackers:\n  jira: {provider: mcp}\n"))
+	if err != nil || len(f.Repos) != 2 || f.Trackers["jira"]["provider"] != "mcp" {
+		t.Fatalf("%+v %v", f, err)
+	}
+	for _, bad := range []string{"version: 1\n", "version: 2\nrepos: [o/r]\n", "version: 1\nrepos: [not a repo]\n", "version: 1\nrepos: [o/r]\nextra: 1\n", "version: 1\nrepos: ["} {
+		if _, err := policy.LoadFactory([]byte(bad)); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}

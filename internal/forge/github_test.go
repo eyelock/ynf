@@ -81,6 +81,8 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(b, &f.opened)
 		w.WriteHeader(http.StatusCreated)
 		reply(map[string]any{"number": 8})
+	case p == "/repos/o/r/branches/main":
+		reply(map[string]any{"name": "main", "commit": map[string]any{"sha": "c0ffee"}})
 	case p == "/repos/o/r/issues/1/labels" && r.Method == http.MethodPost:
 		var add []string
 		_ = json.NewDecoder(r.Body).Decode(&add)
@@ -281,5 +283,17 @@ func TestIssueTracker(t *testing.T) {
 	}
 	if repo, n, err := forge.ParseIssueKey(forge.IssueKey("a/b", 7)); err != nil || repo != "a/b" || n != 7 {
 		t.Fatal("issue keys do not round-trip")
+	}
+}
+
+func TestHead(t *testing.T) {
+	srv := httptest.NewServer(&fakeGitHub{t: t})
+	defer srv.Close()
+	g, _ := forge.NewGitHub("tok", srv.URL)
+	if sha, err := g.Head(context.Background(), "o/r", "main"); err != nil || sha != "c0ffee" {
+		t.Fatalf("%q %v", sha, err)
+	}
+	if _, err := g.Head(context.Background(), "o/r", "gone"); !errors.Is(err, forge.ErrNotFound) {
+		t.Fatalf("a missing branch: %v", err)
 	}
 }

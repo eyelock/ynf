@@ -61,7 +61,11 @@ func (e *Engine) Start(ctx context.Context, req StartRequest) (item.Item, error)
 	if repo == "" {
 		return item.Item{}, refuse("%s: say which repository its code goes to, with --repo", ref)
 	}
-	if !slices.Contains(e.Repos, repo) {
+	enrolled, err := e.Enrolled(ctx)
+	if err != nil {
+		return item.Item{}, err
+	}
+	if !slices.Contains(enrolled, repo) {
 		return item.Item{}, refuse("%s/%s is not an enrolled repository", e.forgeHost(), repo)
 	}
 	if _, err := e.Forge.DefaultBranch(ctx, repo); err != nil {

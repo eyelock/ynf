@@ -56,14 +56,26 @@ func (a *app) doctor(ctx context.Context) error {
 			add("engine", false, err.Error())
 		} else {
 			add("store", true, a.cfg.Store)
-			add("repos", true, strings.Join(a.cfg.Repos, ", "))
-			for _, r := range a.cfg.Repos {
+			enrolled, err := a.eng.Enrolled(ctx)
+			if fp, ferr := a.eng.Factory(ctx); ferr == nil && fp != nil {
+				add("factory", true, fmt.Sprintf("%s at %.7s (%s)", fp.Repo, fp.SHA, fp.Dir))
+			}
+			if err != nil {
+				add("repos", false, err.Error())
+			} else {
+				add("repos", true, strings.Join(enrolled, ", "))
+			}
+			for _, r := range enrolled {
 				rp, err := a.eng.Policy(ctx, r)
 				if err != nil {
 					add("lanes "+r, false, err.Error())
 					continue
 				}
-				detail := fmt.Sprintf("%s on %s: %s", rp.Dir, rp.Base, strings.Join(rp.File.Names(), ", "))
+				dir := rp.Dir
+				if dir == "" {
+					dir = "the configuration repository's lanes only"
+				}
+				detail := fmt.Sprintf("%s on %s at %.7s: %s", dir, rp.Base, rp.SHA, strings.Join(rp.File.Names(), ", "))
 				if len(rp.Shadowed) > 0 {
 					detail += "; shadows " + strings.Join(rp.Shadowed, ", ")
 				}
@@ -133,8 +145,10 @@ func (a *app) lanesCmd(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		if *repo == "" && len(a.cfg.Repos) == 1 {
-			*repo = a.cfg.Repos[0]
+		if *repo == "" {
+			if *repo, err = onlyRepo(ctx, e); err != nil {
+				return err
+			}
 		}
 		rp, err := e.Policy(ctx, *repo)
 		if err != nil {
@@ -148,8 +162,31 @@ func (a *app) lanesCmd(ctx context.Context, args []string) error {
 			}
 			lanes = map[string]policy.Lane{name: l}
 		}
-		j, _ := json.MarshalIndent(map[string]any{"repo": rp.Repo, "dir": rp.Dir, "ref": rp.Base, "lanes": lanes}, "", "  ")
-		return a.out(map[string]any{"repo": rp.Repo, "dir": rp.Dir, "ref": rp.Base, "lanes": lanes}, string(j))
+		shown := map[string]any{"repo": rp.Repo, "dir": rp.Dir, "ref": rp.Base, "sha": rp.SHA, "lanes": lanes}
+		if rp.Config != nil {
+			// Which layer set each value (ADR-006): the configuration repository or the repository.
+			shown["config"] = map[string]string{"repo": rp.Config.Repo, "sha": rp.Config.SHA}
+			sources := map[string]map[string]string{}
+			for name := range lanes {
+				src, err := policy.LaneSources(rp.Config.Lanes, rp.Own, name)
+				if err != nil {
+					return err
+				}
+				for path, layer := range src {
+					if sources[name] == nil {
+						sources[name] = map[string]string{}
+					}
+					if layer == "repo" {
+						sources[name][path] = "repo@" + short(rp.SHA)
+					} else {
+						sources[name][path] = "config@" + short(rp.Config.SHA)
+					}
+				}
+			}
+			shown["sources"] = sources
+		}
+		j, _ := json.MarshalIndent(shown, "", "  ")
+		return a.out(shown, string(j))
 	}
 	return withCode(ExitUsage, fmt.Errorf("unknown lanes command %q", args[0]))
 }
@@ -430,3 +467,17 @@ func (a *app) replay(ctx context.Context, args []string) error {
 	}
 	return nil
 }
+
+// onlyRepo is the enrolled repository when there is exactly one, so commands can default to it.
+func onlyRepo(ctx context.Context, e *engine.Engine) (string, error) {
+	enrolled, err := e.Enrolled(ctx)
+	if err != nil {
+		return "", err
+	}
+	if len(enrolled) == 1 {
+		return enrolled[0], nil
+	}
+	return "", nil
+}
+
+func short(sha string) string { return sha[:min(7, len(sha))] }

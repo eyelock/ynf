@@ -13,5 +13,11 @@ var LanesSchema []byte
 //go:embed docs/schema/config.schema.json
 var ConfigSchema []byte
 
+// FactorySchema is docs/schema/factory.schema.json, the schema for a configuration repository's
+// .agents/factory/factory.yaml.
+//
+//go:embed docs/schema/factory.schema.json
+var FactorySchema []byte
+
 // Version is set at build time with -ldflags "-X github.com/eyelock/ynf.Version=...".
 var Version = "dev"

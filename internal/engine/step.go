@@ -40,10 +40,27 @@ type DecisionRecord struct {
 
 // PolicyRef says which policy a decision ran under.
 type PolicyRef struct {
-	Repo string `json:"repo"`
-	Dir  string `json:"dir"`
-	Ref  string `json:"ref"`
-	Hash string `json:"hash"`
+	Repo      string `json:"repo"`
+	Dir       string `json:"dir"`
+	Ref       string `json:"ref"`
+	SHA       string `json:"sha,omitempty"` // the repository's commit its lanes were read at
+	Config    string `json:"config,omitempty"`
+	ConfigSHA string `json:"config_sha,omitempty"`
+	Hash      string `json:"hash"`
+}
+
+func configRepo(rp *RepoPolicy) string {
+	if rp.Config == nil {
+		return ""
+	}
+	return rp.Config.Repo
+}
+
+func configSHA(rp *RepoPolicy) string {
+	if rp.Config == nil {
+		return ""
+	}
+	return rp.Config.SHA
 }
 
 // RunRecord is the log entry for a run.
@@ -177,7 +194,7 @@ func (s *step) decideAndAct(ev event.Event) (*event.Event, error) {
 	in.Item.Lease = nil // not an input to the decision; keeps replay exact
 	d := decide.Decide(in)
 
-	rec := DecisionRecord{Input: in, Decision: d, Policy: PolicyRef{Repo: rp.Repo, Dir: rp.Dir, Ref: rp.Base, Hash: lane.Hash()}}
+	rec := DecisionRecord{Input: in, Decision: d, Policy: PolicyRef{Repo: rp.Repo, Dir: rp.Dir, Ref: rp.Base, SHA: rp.SHA, Config: configRepo(rp), ConfigSHA: configSHA(rp), Hash: lane.Hash()}}
 	if err := s.record(it.Key, "decision", rec); err != nil {
 		return nil, err
 	}
