@@ -61,8 +61,12 @@ ynf turns each failure into a **signature**, a short, deterministic key, and cou
 ynf items show $REPO#$C | grep -A3 counters
 ```
 
-Expected: `"sig/outcome/stuck": 1`, or `"sig/outcome/budget": 2` for a run that hit its cap twice.
-These counters are ynf's own. Its decisions and stop conditions read them, never memory.
+Expected: `"sig/stuck/sensor:test": 1`, the sensor that stayed red, and for a run that hit its turn
+cap, `"sig/budget/turns/harness:<harness>@<version>"` counted once per capped run, so twice if the
+retry capped too. A signature names what failed, so the same failure on another ticket gets the
+same name. A failure that names nothing more specific, such as a command that exited 2, is counted
+as `sig/outcome/<outcome>`, and a failure is counted under one or the other, never both. These
+counters are ynf's own. Its decisions and stop conditions read them, never memory.
 
 ## In ynm
 
@@ -77,7 +81,7 @@ Expected: a line per occurrence: its score, id, type and store, then its summary
 failure is there, and, if lesson 2's run was refused a host, so is that:
 
 ```text
-0.875  <id>  episodic   personal  sig/outcome/stuck on github.com/<you>/ynf-sandbox#<n> (lint-paydown), occurrence 1, run <run id>
+0.875  <id>  episodic   personal  sig/stuck/sensor:test on github.com/<you>/ynf-sandbox#<n> (lint-paydown), occurrence 1, run <run id>
 0.871  <id>  episodic   personal  sig/egress/denied/raw.githubusercontent.com on github.com/<you>/ynf-sandbox#<n> (lint-paydown), occurrence 1, run <run id>
 ```
 
@@ -93,7 +97,7 @@ Expected: the record ynf wrote. Its `subject` is the signature. Its tags are `yn
 Its content says the same in a sentence:
 
 ```text
-Failure `sig/outcome/stuck` occurred on github.com/<you>/ynf-sandbox#<n> in lane `lint-paydown` at <time>: occurrence 1 on this item, run `<run id>`, step `<step id>`, model ``.
+Failure `sig/stuck/sensor:test` occurred on github.com/<you>/ynf-sandbox#<n> in lane `lint-paydown` at <time>: occurrence 1 on this item, run `<run id>`, step `<step id>`, model ``.
 ```
 
 Every occurrence's text names its own item, run, step and time, and the `occurrence` tag tells ynm
