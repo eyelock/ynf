@@ -6,6 +6,7 @@ import (
 
 	"github.com/eyelock/ynf/internal/item"
 	"github.com/eyelock/ynf/internal/policy"
+	"github.com/eyelock/ynf/internal/runner"
 	"github.com/eyelock/ynf/internal/tracker"
 )
 
@@ -25,5 +26,28 @@ func TestPullRequestsAreNamedForTheirTicket(t *testing.T) {
 	}
 	if b := prBody(jira, policy.Lane{Name: "l"}, run); !strings.HasPrefix(b, "For acme.atlassian.net/PLAT-881.") || strings.Contains(b, "Closes") {
 		t.Fatal(b)
+	}
+}
+
+// TestTrailersCreditOnlyKnownVendors: Co-Authored-By carries the vendor's own address and is left
+// out for a vendor whose address ynf does not know; the other trailers always stay.
+func TestTrailersCreditOnlyKnownVendors(t *testing.T) {
+	it := item.Item{Ticket: tracker.Ref{Host: "github.com", Key: "o/r#7"}, Forge: "github.com", Repo: "o/r"}
+	for _, tc := range []struct {
+		name string
+		r    runner.Result
+		want string
+	}{
+		{"claude", runner.Result{Model: "claude/opus"}, "Co-Authored-By: claude/opus <noreply@anthropic.com>\n"},
+		{"backend and model", runner.Result{Model: "claude/opus", Usage: runner.Usage{Backend: "claude"}}, "Co-Authored-By: claude/opus <noreply@anthropic.com>\n"},
+		{"codex", runner.Result{Model: "codex/gpt-5", Usage: runner.Usage{Backend: "codex"}}, ""},
+		{"cursor", runner.Result{Model: "cursor/auto"}, ""},
+		{"self-reported model", runner.Result{Model: "my-model"}, ""},
+		{"no model", runner.Result{}, ""},
+	} {
+		got := trailers(it, "s1", "r1", tc.r)
+		if (tc.want == "") == strings.Contains(got, "Co-Authored-By") || !strings.HasPrefix(got, tc.want) || !strings.Contains(got, "YNF-Run: r1") {
+			t.Errorf("%s: %q", tc.name, got)
+		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/eyelock/ynf/internal/policy"
 )
@@ -33,6 +34,22 @@ var ModelHosts = map[string][]string{
 	"codex":   {"api.openai.com"},
 	"cursor":  {"api2.cursor.sh"},
 	"copilot": {"api.githubcopilot.com", "api.github.com"},
+}
+
+// CoAuthorAddresses are the addresses for a commit's Co-Authored-By trailer, by vendor. ynf adds an
+// address only when it knows the vendor's own convention; a vendor not listed gets no trailer.
+var CoAuthorAddresses = map[string]string{
+	"claude": "noreply@anthropic.com",
+}
+
+// CoAuthorAddress is the Co-Authored-By address for a result: by its backend, else the vendor named
+// before the slash in its model. It is empty when ynf does not know the vendor's address.
+func CoAuthorAddress(r Result) string {
+	vendor := r.Backend
+	if vendor == "" {
+		vendor, _, _ = strings.Cut(r.Model, "/")
+	}
+	return CoAuthorAddresses[vendor]
 }
 
 // Vendor is the lane's vendor, claude unless it says otherwise.

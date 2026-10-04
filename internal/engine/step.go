@@ -754,11 +754,12 @@ func (s *step) recordAction(key string, a ActionRecord) {
 	}
 }
 
-// trailers are ynf's attribution (ADR-010): they survive a squash merge.
+// trailers are ynf's attribution (ADR-010): they survive a squash merge. Co-Authored-By is written
+// only for a vendor whose address ynf knows.
 func trailers(it item.Item, stepID, runID string, r runner.Result) string {
 	var b strings.Builder
-	if r.Model != "" {
-		fmt.Fprintf(&b, "Co-Authored-By: %s <noreply@anthropic.com>\n", r.Model)
+	if addr := runner.CoAuthorAddress(r); r.Model != "" && addr != "" {
+		fmt.Fprintf(&b, "Co-Authored-By: %s <%s>\n", r.Model, addr)
 	}
 	fmt.Fprintf(&b, "YNF-Item: %s\nYNF-Step: %s\nYNF-Run: %s\n", it.Ref(), stepID, runID)
 	if r.Session != "" {
