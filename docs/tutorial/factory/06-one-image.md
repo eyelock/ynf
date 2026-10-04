@@ -37,7 +37,7 @@ Expected, after a few minutes the first time:
 ```text
 built ynf-factory:dev:
   ynf <version>
-  ynh 0.9.0
+  ynh 0.10.0
   ynm <version>
 ```
 
@@ -142,7 +142,7 @@ ok    forge default            github.com: reached <you>/ynf-sandbox
 ok    tracker tracker          tracker.ynf-sandbox.invalid: its server has the tools it is configured to call
 ok    git                      git version <version>
 --    docker                   not needed: no lane runs in docker here
-ok    ynh                      0.9.0
+ok    ynh                      0.10.0
 ok    ynm                      @ynm/cli/<version> linux-<arch> node-<version>
 ```
 
