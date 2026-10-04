@@ -1,4 +1,4 @@
-# Which model, at what cost
+# 3. Which model, at what cost
 
 Once a factory runs unattended, the questions change from "did it work" to "is it worth it": which
 lanes need a bigger model, which could use a smaller one or less effort, and what each merged

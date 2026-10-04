@@ -1,4 +1,4 @@
-# One image
+# 6. One image
 
 Everything so far ran on your laptop: ynf as a process, each agent run in a container ynf started.
 A job runner, a CI system or a pool of workers wants something else: one image it can run as a

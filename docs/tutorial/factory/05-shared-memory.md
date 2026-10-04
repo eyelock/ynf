@@ -1,4 +1,4 @@
-# Shared memory
+# 5. Shared memory
 
 So far ynf has written to your own ynm store, through the ynm CLI. That's right for one developer
 on one laptop. A factory that runs as a pool of workers, or in CI, has many writers at once and no
