@@ -1,4 +1,4 @@
-# A harness lane
+# 1. A harness lane
 
 In track 1 every lane ran a command: `gofmt -w ./internal/format`, done in milliseconds. A lane can
 instead hand the work to an agent: ynh, running a **harness**. This lesson puts the two kinds of

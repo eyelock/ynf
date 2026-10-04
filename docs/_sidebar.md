@@ -4,7 +4,20 @@
 * **Tutorials**
   * [Tutorials overview](/tutorial/README.md)
   * [1. ynf on its own](/tutorial/ynf/README.md)
+    * [1. A sandbox and what ynf can see](/tutorial/ynf/01-a-sandbox-and-what-ynf-can-see.md)
+    * [2. Lanes](/tutorial/ynf/02-lanes.md)
+    * [3. A ticket becomes a pull request](/tutorial/ynf/03-a-ticket-becomes-a-pull-request.md)
+    * [4. What it decided and why](/tutorial/ynf/04-what-it-decided-and-why.md)
+    * [5. Running unattended](/tutorial/ynf/05-running-unattended.md)
+    * [6. When things go wrong](/tutorial/ynf/06-when-things-go-wrong.md)
+    * [7. Tickets from elsewhere](/tutorial/ynf/07-tickets-from-elsewhere.md)
   * [2. The factory](/tutorial/factory/README.md)
+    * [1. A harness lane](/tutorial/factory/01-a-harness-lane.md)
+    * [2. A contained agent run](/tutorial/factory/02-a-contained-agent-run.md)
+    * [3. Which model, at what cost](/tutorial/factory/03-which-model-at-what-cost.md)
+    * [4. When it keeps failing](/tutorial/factory/04-when-it-keeps-failing.md)
+    * [5. Shared memory](/tutorial/factory/05-shared-memory.md)
+    * [6. One image](/tutorial/factory/06-one-image.md)
 
 * **How-to guides**
   * [How-to overview](/how-to/README.md)

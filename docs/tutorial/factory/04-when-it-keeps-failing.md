@@ -1,4 +1,4 @@
-# When it keeps failing
+# 4. When it keeps failing
 
 One failed run is a fact about one ticket. The same failure on ticket after ticket is a fact about
 the factory: a sensor that's too strict, a harness prompt that sends the agent somewhere it can't

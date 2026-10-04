@@ -1,4 +1,4 @@
-# A contained agent run
+# 2. A contained agent run
 
 Lesson 1 stopped before any model ran. This one lets the agent work: ynf starts ynh in a
 container, the agent edits the code, ynh's sensors judge it, and ynf turns the result into a draft
