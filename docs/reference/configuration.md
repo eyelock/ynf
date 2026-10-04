@@ -21,7 +21,7 @@ the folder the file is in.
 | `lease.heartbeat` | `30s` | How often a holder renews. Must be shorter than `ttl`. |
 | `poll.ci` | `30s` | How often a proposed item's checks are probed. |
 | `poll.review` | `5m` | How often an item in review is probed for merge, close or review. |
-| `memory.provider` | detected | `ynm`, or `none` to switch memory off. Without a `memory` block, ynf uses ynm when it is on PATH (ADR-012). ynf writes what only it can see (each step's outcome, and failures recurring across runs) and never puts memory into an agent's task: a harness that wants memory connects its agent to ynm itself (ADR-008). |
+| `memory.provider` | detected | `ynm`, or `none` to switch memory off. Without a `memory` block, ynf uses ynm when it is on PATH (ADR-012). ynf writes what only it can see: one `ynf.failure.v1` record per occurrence of a failure signature (steps are not written; ynf's own store is the run history). It never puts memory into an agent's task: a harness that wants memory connects its agent to ynm itself (ADR-008). |
 | `memory.namespace` | `factory/{repo}` | Where a repository's memories go; `{repo}` is `host/owner/name`, so the same `owner/name` on two forges never share one. |
 | `memory.cwd` | where ynf runs | With `transport: cli`, the directory ynm runs as if from, which decides its store: your own on a laptop. |
 | `memory.transport` | `cli` | `cli`, the ynm CLI; or `http`, a hosted ynm's MCP endpoint, the shared store for a pool of workers or CI, where many writers go through one server (ADR-008). |

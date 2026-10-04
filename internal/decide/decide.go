@@ -189,7 +189,7 @@ func (d *decider) running() {
 			d.react("converged", OpenPR, "")
 			return
 		}
-		it.Bump("sig/outcome/" + outcome)
+		d.bumpRunSignatures(outcome)
 		d.react("outcome."+outcome, Escalate, fmt.Sprintf("The previous run ended %s: %s", outcome, it.LastRun.Detail))
 
 	case event.ActionDone:
@@ -264,9 +264,49 @@ func (d *decider) proposed() {
 		}
 		d.wake(d.in.Poll.Review)
 	case "failure":
-		failed := strings.Join(pr.Failed(), ", ")
-		it.Bump("sig/ci/" + failed)
-		d.react("ci_failed", Escalate, "CI failed on the pull request: "+failed)
+		// CI failed on a change whose last run converged: the harness's sensors passed and the real
+		// gate did not. Only ynf sees that, so it is its own signature, per check. A pull request
+		// ynf's run never converged on (an adopted one) fails plainly.
+		//
+		// The failure is counted once per head commit: CI stays failed across many polls, and
+		// counting each would report one failure as a recurring one. A new commit that fails
+		// again is a new occurrence. The reaction below does not depend on this.
+		if pr.HeadSHA == "" || pr.HeadSHA != it.CICountedSHA {
+			kind := "ci"
+			if it.LastRun != nil && it.LastRun.Outcome == "converged" {
+				kind = "ci-diverges"
+			}
+			for _, check := range sortedUnique(pr.Failed()) {
+				it.Bump(signature(kind, check))
+			}
+			it.CICountedSHA = pr.HeadSHA
+		}
+		d.react("ci_failed", Escalate, "CI failed on the pull request: "+strings.Join(pr.Failed(), ", "))
+	}
+}
+
+// bumpRunSignatures counts why a run that did not converge failed. Each fact the runner reported
+// is its own signature: the budget that bound the run, with the harness it ran, and every sensor
+// still failing. A run with neither falls back to sig/outcome/<outcome>, so nothing goes uncounted,
+// and only then: a failure is never counted under both a specific signature and the fallback.
+// Events recorded before these facts existed carry none of them, and so fall back as they always did.
+func (d *decider) bumpRunSignatures(outcome string) {
+	it, ev := &d.it, d.in.Event
+	specific := false
+	if bound := ev.Str("bound_by"); bound != "" {
+		if h := ev.Str("harness"); h != "" {
+			it.Bump(signature("budget", bound, "harness:"+h))
+		} else {
+			it.Bump(signature("budget", bound))
+		}
+		specific = true
+	}
+	for _, name := range sortedUnique(stringList(ev.Data["failed_sensors"])) {
+		it.Bump(signature("stuck", "sensor:"+name))
+		specific = true
+	}
+	if !specific {
+		it.Bump(signature("outcome", outcome))
 	}
 }
 

@@ -306,6 +306,9 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		s.recordRun(it.Key, rec)
 		return s.event(event.RunFinished, it, map[string]any{
 			"run_id": runID, "outcome": rec.Outcome, "detail": rec.Detail, "changed": anyList(rec.Changed), "denied": anyList(rec.Denied),
+			// What the runner reported, for the decider's failure signatures. Empty means the
+			// runner reported nothing, which the decider reads as not known.
+			"bound_by": rec.BoundBy, "harness": rec.Harness, "failed_sensors": anyList(rec.FailedSensors),
 		})
 	}
 	// A run refused or broken before it starts still says what it would have used: the lane's

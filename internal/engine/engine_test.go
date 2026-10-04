@@ -1029,7 +1029,7 @@ func TestMemoryIsWrittenNotRelayed(t *testing.T) {
 		t.Fatalf("failure memories: %+v", mem.records)
 	}
 	f := failures[0]
-	if f.Subject != "sig/ci/lint" || f.Type != "episodic" || f.Level != "distributed" || f.Namespace != "factory/github.com/o/r" ||
+	if f.Subject != "sig/ci-diverges/lint" || f.Type != "episodic" || f.Level != "distributed" || f.Namespace != "factory/github.com/o/r" ||
 		!slices.Contains(f.Tags, "ynf.failure.v1") || !slices.Contains(f.Tags, "failure") || !slices.Contains(f.Tags, "occurrence") ||
 		!strings.Contains(f.Content, "occurrence 1") || !strings.Contains(f.Content, "run `") || f.Data["step"] == "" {
 		t.Fatalf("failure memory: %+v", f)
@@ -1045,6 +1045,113 @@ func TestMemoryIsWrittenNotRelayed(t *testing.T) {
 		if err != nil || strings.Contains(string(b), "remembers") {
 			t.Fatalf("memory reached the task: %s %v", b, err)
 		}
+	}
+}
+
+// TestAFailingCheckIsRememberedOncePerCommit: CI that stays failed across polls is one occurrence
+// in ynm, not one per poll; a new head commit that fails again is another.
+func TestAFailingCheckIsRememberedOncePerCommit(t *testing.T) {
+	h := newHarness(t)
+	mem := &fakeMemory{}
+	h.e.Memory = mem
+	h.e.MemoryLevel = "distributed"
+	// A lane that comments on a CI failure keeps the item proposed, so it is polled again.
+	h.f.lanes = strings.Replace(lanesYAML, "when: {converged: open_pr}", "when: {converged: open_pr, ci_failed: comment}", 1)
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:fmt", "pkg:internal/format"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.f.setChecks(101, "failure")
+	h.f.mu.Lock()
+	h.f.prs[101].HeadSHA = "first-commit"
+	h.f.mu.Unlock()
+	poll := func() {
+		t.Helper()
+		h.advance(time.Minute)
+		key := item.IssueKey("github.com", "o/r", 1)
+		if err := h.e.Handle(ctx, key, event.New("x", "t", event.TimerDue, "github.com/o/r#1", h.e.Now(), nil)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	failures := func() int {
+		n := 0
+		for _, r := range mem.records {
+			if r.DataSchema == "ynf.failure.v1" {
+				n++
+			}
+		}
+		return n
+	}
+	h.advance(time.Minute)
+	if _, err := h.e.RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	poll()
+	poll()
+	if it := h.item(t, 1); it.State != item.Proposed || failures() != 1 {
+		t.Fatalf("%s %s: failure memories after three polls on one commit: %d", it.State, it.Reason, failures())
+	}
+	h.f.mu.Lock()
+	h.f.prs[101].HeadSHA = "second-commit"
+	h.f.mu.Unlock()
+	poll()
+	poll()
+	if failures() != 2 {
+		t.Fatalf("a new failing commit is a new occurrence: %d", failures())
+	}
+}
+
+// TestRunFinishedCarriesWhatTheRunnerReported: a run ynh stopped at its turn cap with a sensor
+// still failing records both on the run-finished event, so the decider can name the signatures
+// from the event alone; replay needs nothing else, and memory gets the same subjects (ADR-008).
+func TestRunFinishedCarriesWhatTheRunnerReported(t *testing.T) {
+	h := newHarness(t)
+	mem := &fakeMemory{}
+	h.e.Memory = mem
+	h.e.MemoryLevel = "distributed"
+	dir := t.TempDir()
+	script := `#!/bin/sh
+echo '{"exit_code":10,"reason":"turn cap reached","backend":"claude","bound_by":"turns","harness":{"name":"Tidy","version":"1.0.0"},"sensors":[{"name":"Unit Tests","status":"fail"},{"name":"lint","status":"pass"}]}'
+exit 10
+`
+	if err := os.WriteFile(filepath.Join(dir, "ynh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := h.e.Store.Log(ctx, item.IssueKey("github.com", "o/r", 1))
+	var finished event.Event
+	for _, en := range entries {
+		var rec engine.DecisionRecord
+		if en.Kind == "decision" && json.Unmarshal(en.Body, &rec) == nil && rec.Input.Event.Type == event.RunFinished {
+			finished = rec.Input.Event
+		}
+	}
+	sensors, _ := finished.Data["failed_sensors"].([]any)
+	if finished.Str("bound_by") != "turns" || finished.Str("harness") != "Tidy@1.0.0" || !slices.Equal(sensors, []any{"Unit Tests"}) {
+		t.Fatalf("run finished event: %+v", finished.Data)
+	}
+	rs, err := engine.Replay(entries, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rs {
+		if !r.Same {
+			t.Errorf("decision %s replayed differently", r.EntryID)
+		}
+	}
+	var subjects []string
+	for _, r := range mem.records {
+		subjects = append(subjects, r.Subject)
+	}
+	slices.Sort(subjects)
+	if want := []string{"sig/budget/turns/harness:tidy@1.0.0", "sig/stuck/sensor:unit-tests"}; !slices.Equal(subjects, want) {
+		t.Fatalf("memory subjects %v, want %v", subjects, want)
 	}
 }
 

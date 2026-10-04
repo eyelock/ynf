@@ -33,10 +33,26 @@ item, run, step and time, so consolidation never takes two occurrences for one, 
 `ynf.failure.v1`, which is how to select ynf's records.
 
 ```
-sig/ci-diverges/golangci-lint/errcheck
-sig/stuck/sensor:unit-tests/test:TestFoo
-sig/budget/turns/harness:ynh-lint@1.4
+sig/ci-diverges/golangci-lint
+sig/stuck/sensor:unit-tests
+sig/budget/turns/harness:local/ynf-sandbox@0.1.0
 ```
+
+Those are the three that say the most, and ynf produces these kinds:
+
+- `sig/ci-diverges/<check>`: CI failed on a pull request whose run had converged, once per failed
+  check. The harness's sensors were satisfied and the real gate was not, which only ynf can see.
+- `sig/ci/<check>`: CI failed on a pull request whose run had not converged, such as one ynf
+  adopted, once per failed check.
+- `sig/stuck/sensor:<name>`: a run ended without converging with this sensor still failing, once
+  per failing sensor.
+- `sig/budget/<cap>/harness:<name>@<version>`: a run ended on a cap, `turns`, `tokens` or `wall`;
+  the harness part is left off when the run reported none.
+- `sig/outcome/<outcome>`: a run ended without converging and reported nothing more specific. A
+  failure is counted under the specific signatures above or this one, never both.
+- `sig/egress/denied/<host>`: the run asked for a host the lane does not allow.
+
+Names are lower-cased with spaces turned to `-`, and a signature never passes 200 characters.
 
 ynm's dream pass already turns three or more episodic memories with the same subject into a
 reflective one. With a good signature, "this keeps happening" falls out of ynm without ynf doing

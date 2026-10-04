@@ -65,10 +65,11 @@ consolidate lifecycle as the ADRs.
   configuration.
 
 ### Memory
-- FR-19 Write each step's outcome and each observed failure to ynm, keyed so recurring failures
+- FR-19 Write each observed failure to ynm, keyed so recurring failures
   cluster.
-- FR-20 Supply relevant memory (prior attempts on the item, known failure patterns) to the next
-  harness run as context.
+- FR-20 Make what ynf learns available to the people and agents who need it: known failure
+  patterns are readable in ynm, and an agent whose harness connects to the same store reads them
+  itself. ynf never puts memory into an agent's task (ADR-008).
 
 ### Governance
 - FR-21 Every commit ynf writes carries ynf's attribution trailers, plus `YNH-Session` when the

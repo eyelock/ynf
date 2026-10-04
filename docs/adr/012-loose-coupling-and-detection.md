@@ -97,7 +97,7 @@ Precedence is explicit config, then detection, then the built-in fallback (`comm
 runner, `none` for memory). A lane that names a provider explicitly and cannot get it fails to
 load. A lane that relies on detection runs with whatever was detected. Every step records the
 providers it used and their versions, so a run on one machine is explainable on another, and
-`ynf doctor` prints what it detected and why.
+`ynf doctor` prints which providers are installed and their versions.
 
 **ynh-only features stay in the ynh provider.** Budget tightening, sensor overlays, the control
 channel, checkpoint paths, and the `YNH-Session` trailer exist only when the runner is `ynh`.
