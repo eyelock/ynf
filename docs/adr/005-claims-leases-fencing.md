@@ -59,8 +59,7 @@ re-runs the step from the last committed decision on a fresh worktree. The aband
 stays in the item's log, so it still counts in yield and cost.
 
 **Clock skew.** S3 and DynamoDB offer no server timestamp to compare against, so the TTL is
-generous relative to the renewal interval, and hosts are expected to run NTP. `ynf doctor`
-reports skew against the store provider's `Date` header.
+generous relative to the renewal interval, and hosts are expected to run NTP.
 
 **In CI**, a GitHub Actions `concurrency: ynf-<item>` group cuts duplicate jobs early. It is an
 optimisation; the lease is the authority, because sweeps and webhooks race across workflows.
