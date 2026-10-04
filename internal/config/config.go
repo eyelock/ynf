@@ -49,10 +49,9 @@ type Config struct {
 		Build *bool `yaml:"build"`
 	} `yaml:"images"`
 	Memory *struct {
-		Provider            string `yaml:"provider"`
-		Namespace           string `yaml:"namespace"`
-		ContextBudgetTokens int    `yaml:"context_budget_tokens"`
-		Cwd                 string `yaml:"cwd"`
+		Provider  string `yaml:"provider"`
+		Namespace string `yaml:"namespace"`
+		Cwd       string `yaml:"cwd"`
 	} `yaml:"memory"`
 
 	Path     string   `yaml:"-"` // the file it was loaded from
@@ -178,13 +177,13 @@ func (c *Config) Author() (name, email string) {
 	return "ynf", "ynf@users.noreply.github.com"
 }
 
-// MemorySettings returns whether memory is wanted (nil means detect), the namespace template, the
-// budget and ynm's working directory.
-func (c *Config) MemorySettings() (enabled *bool, namespace string, budget int, cwd string) {
-	namespace, budget = "factory/{repo}", 1000
+// MemorySettings returns whether memory is wanted (nil means detect), the namespace template
+// ({repo} is host/owner/name), and the folder ynm runs from, which picks its store.
+func (c *Config) MemorySettings() (enabled *bool, namespace, cwd string) {
+	namespace = "factory/{repo}"
 	m := c.Memory
 	if m == nil {
-		return nil, namespace, budget, ""
+		return nil, namespace, ""
 	}
 	if m.Provider != "" {
 		on := m.Provider == "ynm"
@@ -193,11 +192,8 @@ func (c *Config) MemorySettings() (enabled *bool, namespace string, budget int, 
 	if m.Namespace != "" {
 		namespace = m.Namespace
 	}
-	if m.ContextBudgetTokens > 0 {
-		budget = m.ContextBudgetTokens
-	}
 	if m.Cwd != "" {
 		cwd = c.rel(m.Cwd)
 	}
-	return enabled, namespace, budget, cwd
+	return enabled, namespace, cwd
 }

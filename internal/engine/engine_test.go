@@ -967,7 +967,6 @@ func TestYieldFloorPausesTheLane(t *testing.T) {
 type fakeMemory struct {
 	mu      sync.Mutex
 	records []memory.Record
-	asked   []string
 	fail    bool
 }
 
@@ -981,17 +980,9 @@ func (m *fakeMemory) Remember(_ context.Context, r memory.Record) error {
 	return nil
 }
 
-func (m *fakeMemory) Context(_ context.Context, ns, text string, _ int) (string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.asked = append(m.asked, ns+" | "+text)
-	if m.fail {
-		return "", fmt.Errorf("ynm is down")
-	}
-	return "Last time on this item, CI's lint check failed.", nil
-}
-
-func TestMemoryIsWrittenAndRecalled(t *testing.T) {
+// TestMemoryIsWrittenNotRelayed: ynf writes what only it sees, under the repository's host-qualified
+// namespace, and never puts memory into an agent's task (ADR-008).
+func TestMemoryIsWrittenNotRelayed(t *testing.T) {
 	h := newHarness(t)
 	mem := &fakeMemory{}
 	h.e.Memory = mem
@@ -1017,14 +1008,11 @@ func TestMemoryIsWrittenAndRecalled(t *testing.T) {
 			failure = &mem.records[i]
 		}
 	}
-	if outcome == nil || outcome.Subject != item.IssueKey("github.com", "o/r", 1) || outcome.Namespace != "factory/o/r" || outcome.Data["outcome"] != "converged" {
+	if outcome == nil || outcome.Subject != item.IssueKey("github.com", "o/r", 1) || outcome.Namespace != "factory/github.com/o/r" || outcome.Data["outcome"] != "converged" {
 		t.Fatalf("outcome memory: %+v", outcome)
 	}
 	if failure == nil || failure.Subject != "sig/ci/lint" || failure.Type != "episodic" || !slices.Contains(failure.Tags, "failure") {
 		t.Fatalf("failure memory: %+v", failure)
-	}
-	if len(mem.asked) == 0 || !strings.HasPrefix(mem.asked[0], "factory/o/r | item/github.com/o/r/issues/1") {
-		t.Fatalf("recall: %v", mem.asked)
 	}
 	entries, _ := h.e.Store.Log(ctx, item.IssueKey("github.com", "o/r", 1))
 	for _, en := range entries {
@@ -1034,8 +1022,8 @@ func TestMemoryIsWrittenAndRecalled(t *testing.T) {
 		var rec engine.RunRecord
 		_ = json.Unmarshal(en.Body, &rec)
 		b, err := os.ReadFile(filepath.Join(rec.StepDir, "run", "task.md"))
-		if err != nil || !strings.Contains(string(b), "## What ynf remembers about this work") || !strings.Contains(string(b), "CI's lint check failed") {
-			t.Fatalf("task.md: %s %v", b, err)
+		if err != nil || strings.Contains(string(b), "remembers") {
+			t.Fatalf("memory reached the task: %s %v", b, err)
 		}
 	}
 }

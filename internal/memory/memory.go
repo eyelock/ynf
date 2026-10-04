@@ -1,5 +1,7 @@
 // Package memory is ynf's memory port (ADR-008, ADR-012): ynm when it is installed, nothing when
-// it is not. Memory is advisory. It explains and informs the next run; it never decides anything.
+// it is not. ynf writes what only it can see, outcomes and failures recurring across runs; it
+// never decides anything with memory, and never puts memory into an agent's task: a harness that
+// wants memory connects its agent to ynm itself.
 package memory
 
 import (
@@ -8,7 +10,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"strconv"
 	"strings"
 )
 
@@ -28,8 +29,6 @@ type Record struct {
 // Memory is the port.
 type Memory interface {
 	Remember(ctx context.Context, r Record) error
-	// Context returns what is remembered in namespace, focused on text, within a token budget.
-	Context(ctx context.Context, namespace, text string, budget int) (string, error)
 }
 
 // Ynm talks to ynm through its CLI, which works against whatever store ynm is configured for.
@@ -72,16 +71,6 @@ func (y Ynm) Remember(ctx context.Context, r Record) error {
 	}
 	_, err := y.run(ctx, args...)
 	return err
-}
-
-// Context implements Memory.
-func (y Ynm) Context(ctx context.Context, namespace, text string, budget int) (string, error) {
-	args := []string{"context", "--namespace", namespace, "--budget-tokens", strconv.Itoa(budget)}
-	if text != "" {
-		args = append(args, "--text", text)
-	}
-	out, err := y.run(ctx, args...)
-	return strings.TrimSpace(out), err
 }
 
 func (y Ynm) run(ctx context.Context, args ...string) (string, error) {

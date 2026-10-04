@@ -20,19 +20,19 @@ func TestMemoryFor(t *testing.T) {
 		return c
 	}
 	t.Setenv("PATH", t.TempDir())
-	if m, ns, _ := memoryFor(load("version: 1\nrepos: [o/r]\n")); m != nil || ns("o/r") != "factory/o/r" {
+	if m, ns := memoryFor(load("version: 1\nrepos: [o/r]\n")); m != nil || ns("github.com/o/r") != "factory/github.com/o/r" {
 		t.Fatal("no ynm on PATH: no memory")
 	}
-	if m, _, _ := memoryFor(load("version: 1\nrepos: [o/r]\nmemory: {provider: ynm}\n")); m == nil {
+	if m, _ := memoryFor(load("version: 1\nrepos: [o/r]\nmemory: {provider: ynm}\n")); m == nil {
 		t.Fatal("explicit ynm")
 	}
 	bin := t.TempDir()
 	_ = os.WriteFile(filepath.Join(bin, "ynm"), []byte("#!/bin/sh\n"), 0o755)
 	t.Setenv("PATH", bin)
-	if m, _, _ := memoryFor(load("version: 1\nrepos: [o/r]\n")); m == nil {
+	if m, _ := memoryFor(load("version: 1\nrepos: [o/r]\n")); m == nil {
 		t.Fatal("ynm on PATH should be detected")
 	}
-	if m, _, _ := memoryFor(load("version: 1\nrepos: [o/r]\nmemory: {provider: none}\n")); m != nil {
+	if m, _ := memoryFor(load("version: 1\nrepos: [o/r]\nmemory: {provider: none}\n")); m != nil {
 		t.Fatal("provider none wins over detection")
 	}
 }
