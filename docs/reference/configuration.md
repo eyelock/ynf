@@ -26,7 +26,7 @@ the folder the file is in.
 | `memory.cwd` | where ynf runs | With `transport: cli`, the directory ynm runs as if from, which decides its store: your own on a laptop. |
 | `memory.transport` | `cli` | `cli`, the ynm CLI; or `http`, a hosted ynm's MCP endpoint, the shared store for a pool of workers or CI, where many writers go through one server (ADR-008). |
 | `memory.endpoint` | none | The hosted ynm's MCP endpoint, for `transport: http`. |
-| `memory.token_env` | none | The variable holding the bearer token for `transport: http`, such as a machine token from your identity provider's client-credentials grant; its subject is the writer in ynm's audit log. ynf refuses to start without it. |
+| `memory.token_env` | none | The variable holding the bearer token for `transport: http`, such as a machine token from your identity provider's client-credentials grant; its subject is the writer in ynm's audit log. A shared static token names no one, so every worker is recorded as the server's own user; records still land in ynf's namespace. ynf refuses to start without it. |
 | `memory.level` | `personal`; `distributed` over http | The level ynf writes at. A shared store keeps nothing at the personal level, so writes to one say `distributed`. |
 
 What ynf writes to memory, and why it never decides anything with it, is in
