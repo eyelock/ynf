@@ -26,7 +26,8 @@ Or build from source:
 
 ```bash
 make build            # bin/ynf, and bin/ynf-linux-{amd64,arm64} for the egress proxy
-make install          # or copy them to ~/.local/bin
+make install          # all three into ~/.ynf/bin; INSTALL_DIR=<dir> for elsewhere
+export PATH="$HOME/.ynf/bin:$PATH"   # in your shell profile, as for ~/.ynh/bin and ~/.ynm/bin
 ```
 
 ## Configure
