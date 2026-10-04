@@ -267,12 +267,19 @@ func (d *decider) proposed() {
 		// CI failed on a change whose last run converged: the harness's sensors passed and the real
 		// gate did not. Only ynf sees that, so it is its own signature, per check. A pull request
 		// ynf's run never converged on (an adopted one) fails plainly.
-		kind := "ci"
-		if it.LastRun != nil && it.LastRun.Outcome == "converged" {
-			kind = "ci-diverges"
-		}
-		for _, check := range sortedUnique(pr.Failed()) {
-			it.Bump(signature(kind, check))
+		//
+		// The failure is counted once per head commit: CI stays failed across many polls, and
+		// counting each would report one failure as a recurring one. A new commit that fails
+		// again is a new occurrence. The reaction below does not depend on this.
+		if pr.HeadSHA == "" || pr.HeadSHA != it.CICountedSHA {
+			kind := "ci"
+			if it.LastRun != nil && it.LastRun.Outcome == "converged" {
+				kind = "ci-diverges"
+			}
+			for _, check := range sortedUnique(pr.Failed()) {
+				it.Bump(signature(kind, check))
+			}
+			it.CICountedSHA = pr.HeadSHA
 		}
 		d.react("ci_failed", Escalate, "CI failed on the pull request: "+strings.Join(pr.Failed(), ", "))
 	}

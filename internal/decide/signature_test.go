@@ -88,3 +88,34 @@ func TestCISignatures(t *testing.T) {
 		t.Errorf("last run did not converge: %v", got)
 	}
 }
+
+// TestCIFailureIsCountedOncePerHeadCommit: CI stays failed across polls, and one failure is one
+// occurrence; a new commit that fails again is another. The reaction is the same on every poll.
+func TestCIFailureIsCountedOncePerHeadCommit(t *testing.T) {
+	lane := lanes(t).Lanes["lint-paydown"]
+	poll := func(it item.Item, sha string) decide.Decision {
+		p := &facts.PR{Number: 7, State: "open", HeadSHA: sha, Checks: []facts.Check{
+			{Name: "test", Status: "completed", Conclusion: "failure"},
+			{Name: "lint", Status: "completed", Conclusion: "failure"},
+		}}
+		it.State, it.PR = item.Proposed, 7
+		return decide.Decide(decide.Input{Lane: lane, Item: it, Facts: facts.Facts{Ticket: open(), PR: p}, Event: ev(event.TimerDue, nil), Poll: decide.Poll{CI: time.Minute}})
+	}
+	// An item from before the field existed: the first failing poll counts once.
+	it := item.Item{LastRun: &item.Run{ID: "r", Outcome: "converged"}}
+	first := poll(it, "abc")
+	for range 3 {
+		it = first.Item
+		again := poll(it, "abc")
+		if again.Item.Counters["sig/ci-diverges/test"] != 1 || again.Item.Counters["sig/ci-diverges/lint"] != 1 {
+			t.Fatalf("same commit, counted again: %v", again.Item.Counters)
+		}
+		if again.Item.State != first.Item.State || !slices.EqualFunc(again.Actions, first.Actions, func(a, b decide.Action) bool { return a.Kind == b.Kind }) {
+			t.Fatalf("the reaction changed: %s %v, then %s %v", first.Item.State, first.Actions, again.Item.State, again.Actions)
+		}
+	}
+	next := poll(first.Item, "def")
+	if next.Item.Counters["sig/ci-diverges/test"] != 2 || next.Item.Counters["sig/ci-diverges/lint"] != 2 || next.Item.CICountedSHA != "def" {
+		t.Fatalf("a new failing commit is a new occurrence: %v %q", next.Item.Counters, next.Item.CICountedSHA)
+	}
+}

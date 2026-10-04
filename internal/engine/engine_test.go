@@ -1048,6 +1048,60 @@ func TestMemoryIsWrittenNotRelayed(t *testing.T) {
 	}
 }
 
+// TestAFailingCheckIsRememberedOncePerCommit: CI that stays failed across polls is one occurrence
+// in ynm, not one per poll; a new head commit that fails again is another.
+func TestAFailingCheckIsRememberedOncePerCommit(t *testing.T) {
+	h := newHarness(t)
+	mem := &fakeMemory{}
+	h.e.Memory = mem
+	h.e.MemoryLevel = "distributed"
+	// A lane that comments on a CI failure keeps the item proposed, so it is polled again.
+	h.f.lanes = strings.Replace(lanesYAML, "when: {converged: open_pr}", "when: {converged: open_pr, ci_failed: comment}", 1)
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:fmt", "pkg:internal/format"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.f.setChecks(101, "failure")
+	h.f.mu.Lock()
+	h.f.prs[101].HeadSHA = "first-commit"
+	h.f.mu.Unlock()
+	poll := func() {
+		t.Helper()
+		h.advance(time.Minute)
+		key := item.IssueKey("github.com", "o/r", 1)
+		if err := h.e.Handle(ctx, key, event.New("x", "t", event.TimerDue, "github.com/o/r#1", h.e.Now(), nil)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	failures := func() int {
+		n := 0
+		for _, r := range mem.records {
+			if r.DataSchema == "ynf.failure.v1" {
+				n++
+			}
+		}
+		return n
+	}
+	h.advance(time.Minute)
+	if _, err := h.e.RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	poll()
+	poll()
+	if it := h.item(t, 1); it.State != item.Proposed || failures() != 1 {
+		t.Fatalf("%s %s: failure memories after three polls on one commit: %d", it.State, it.Reason, failures())
+	}
+	h.f.mu.Lock()
+	h.f.prs[101].HeadSHA = "second-commit"
+	h.f.mu.Unlock()
+	poll()
+	poll()
+	if failures() != 2 {
+		t.Fatalf("a new failing commit is a new occurrence: %d", failures())
+	}
+}
+
 // TestRunFinishedCarriesWhatTheRunnerReported: a run ynh stopped at its turn cap with a sensor
 // still failing records both on the run-finished event, so the decider can name the signatures
 // from the event alone; replay needs nothing else, and memory gets the same subjects (ADR-008).

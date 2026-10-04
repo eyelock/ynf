@@ -50,13 +50,16 @@ type Item struct {
 	Forge  string      `json:"forge"` // the code's forge host: github.com
 	Repo   string      `json:"repo"`  // owner/name on Forge
 	// Number is the GitHub issue or pull request number when the ticket is one; 0 otherwise.
-	Number   int    `json:"number,omitempty"`
-	State    State  `json:"state"`
-	Reason   string `json:"reason,omitempty"`
-	Branch   string `json:"branch,omitempty"`
-	PR       int    `json:"pr,omitempty"`
-	PRHead   string `json:"pr_head,omitempty"`
-	Attempts int    `json:"attempts"`
+	Number int    `json:"number,omitempty"`
+	State  State  `json:"state"`
+	Reason string `json:"reason,omitempty"`
+	Branch string `json:"branch,omitempty"`
+	PR     int    `json:"pr,omitempty"`
+	PRHead string `json:"pr_head,omitempty"`
+	// CICountedSHA is the head commit whose failing CI the failure counters already include, so a
+	// failure that stays failed across polls is counted once. Empty until a failure is counted.
+	CICountedSHA string `json:"ci_counted_sha,omitempty"`
+	Attempts     int    `json:"attempts"`
 	// Counters are the deterministic counters decisions read (ADR-008): reaction retries and
 	// per-signature failures.
 	Counters map[string]int `json:"counters,omitempty"`
