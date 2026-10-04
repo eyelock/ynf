@@ -39,7 +39,7 @@ func run(t *testing.T, dir string, name string, args ...string) string {
 	return string(out)
 }
 
-func TestMirrorWorktreeCommitPush(t *testing.T) {
+func TestMirrorCheckoutCommitPush(t *testing.T) {
 	ctx := context.Background()
 	bare := remote(t)
 	w := workspace.Workspace{Root: t.TempDir(), Token: "secret", Author: workspace.Author{Name: "ynf", Email: "ynf@x"},
@@ -52,16 +52,16 @@ func TestMirrorWorktreeCommitPush(t *testing.T) {
 	if again, err := w.Mirror(ctx, "o/r"); err != nil || again != mirror {
 		t.Fatalf("second mirror: %s %v", again, err)
 	}
-	wt, err := w.Worktree(ctx, mirror, "main", filepath.Join(t.TempDir(), "step", "wt"))
+	wt, err := w.Checkout(ctx, mirror, "main", filepath.Join(t.TempDir(), "step", "wt"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if real, _ := filepath.EvalSymlinks(wt); real != wt {
-		t.Fatalf("worktree path %s is not real (%s)", wt, real)
+		t.Fatalf("checkout path %s is not real (%s)", wt, real)
 	}
 
 	if changed, err := w.Changed(ctx, wt); err != nil || len(changed) != 0 {
-		t.Fatalf("clean worktree changed: %v %v", changed, err)
+		t.Fatalf("clean checkout changed: %v %v", changed, err)
 	}
 	if err := os.WriteFile(filepath.Join(wt, "a.go"), []byte("package a\n\nvar X = 1\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -91,11 +91,51 @@ func TestMirrorWorktreeCommitPush(t *testing.T) {
 	if !w.RemoteHas(ctx, mirror, "ynf/issue-1") || w.RemoteHas(ctx, mirror, "nope") {
 		t.Fatal("RemoteHas")
 	}
-	if err := w.RemoveWorktree(ctx, mirror, wt); err != nil {
+	if err := w.RemoveCheckout(wt); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(wt); !os.IsNotExist(err) {
-		t.Fatal("worktree not removed")
+		t.Fatal("checkout not removed")
+	}
+}
+
+// TestCheckoutIsSelfContained: the checkout alone is a repository (a container mounts nothing
+// else): .git is a folder, nothing points into the mirror, and the base is checked out with its
+// remote-tracking ref.
+func TestCheckoutIsSelfContained(t *testing.T) {
+	ctx := context.Background()
+	bare := remote(t)
+	w := workspace.Workspace{Root: t.TempDir(), RemoteURL: func(string) string { return bare }}
+	mirror, err := w.Mirror(ctx, "o/r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, err := w.Checkout(ctx, mirror, "main", filepath.Join(t.TempDir(), "wt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(filepath.Join(wt, ".git")); err != nil || !fi.IsDir() {
+		t.Fatalf(".git should be a folder: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wt, ".git", "objects", "info", "alternates")); !os.IsNotExist(err) {
+		t.Fatalf("objects should not be shared with the mirror: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wt, "a.go")); err != nil {
+		t.Fatalf("base not checked out: %v", err)
+	}
+	head, _ := w.Head(ctx, wt)
+	if tip := strings.TrimSpace(run(t, wt, "git", "rev-parse", "origin/main")); tip != head {
+		t.Fatalf("origin/main %s, head %s", tip, head)
+	}
+	// Hide the mirror: the checkout must not need it.
+	if err := os.Rename(mirror, mirror+".gone"); err != nil {
+		t.Fatal(err)
+	}
+	if out := run(t, wt, "git", "status", "--porcelain"); out != "" {
+		t.Fatalf("status without the mirror: %q", out)
+	}
+	if out := run(t, wt, "git", "diff", "origin/main", "--stat"); out != "" {
+		t.Fatalf("diff without the mirror: %q", out)
 	}
 }
 
@@ -111,10 +151,10 @@ func TestErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.Worktree(ctx, mirror, "no-such-branch", filepath.Join(t.TempDir(), "wt")); err == nil {
-		t.Fatal("worktree at a missing ref")
+	if _, err := w.Checkout(ctx, mirror, "no-such-branch", filepath.Join(t.TempDir(), "wt")); err == nil {
+		t.Fatal("checkout at a missing ref")
 	}
-	wt, _ := w.Worktree(ctx, mirror, "main", filepath.Join(t.TempDir(), "wt"))
+	wt, _ := w.Checkout(ctx, mirror, "main", filepath.Join(t.TempDir(), "wt"))
 	if _, err := w.Commit(ctx, wt, "nothing staged"); err == nil {
 		t.Fatal("empty commit accepted")
 	}
@@ -128,8 +168,8 @@ func TestFastForwardOnly(t *testing.T) {
 	bare := remote(t)
 	w := workspace.Workspace{Root: t.TempDir(), RemoteURL: func(string) string { return bare }}
 	mirror, _ := w.Mirror(ctx, "o/r")
-	a, _ := w.Worktree(ctx, mirror, "main", filepath.Join(t.TempDir(), "a"))
-	b, _ := w.Worktree(ctx, mirror, "main", filepath.Join(t.TempDir(), "b"))
+	a, _ := w.Checkout(ctx, mirror, "main", filepath.Join(t.TempDir(), "a"))
+	b, _ := w.Checkout(ctx, mirror, "main", filepath.Join(t.TempDir(), "b"))
 	base, err := w.Head(ctx, a)
 	if err != nil || len(base) != 40 {
 		t.Fatalf("%q %v", base, err)

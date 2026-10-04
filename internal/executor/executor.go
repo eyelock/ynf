@@ -45,8 +45,7 @@ type Job struct {
 	// Secrets reach the run by name only: docker reads each value from its own environment, so a
 	// secret never appears in a command line or a process listing.
 	Secrets map[string]string
-	// Share are folders the run needs beside its own, such as the repository mirror a worktree
-	// shares; the inline executor hands them to the run user too.
+	// Share are folders the run needs beside its own, if any; the inline executor hands them to the run user too.
 	Share []string
 }
 
@@ -120,6 +119,9 @@ func (d Docker) Args(j Job, name, network string) ([]string, error) {
 		"GOLANGCI_LINT_CACHE": RunDir + "/cache/golangci-lint",
 		// Go makes its module cache read-only by default, which leaves run folders nobody can delete.
 		"GOFLAGS": "-modcacherw",
+		// The checkout belongs to the host user, who is not always the container's: git would refuse
+		// it as dubious ownership. It is the one repository the run sees.
+		"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "safe.directory", "GIT_CONFIG_VALUE_0": WorkDir,
 	}
 	if !j.ImageUser {
 		env["HOME"] = RunDir + "/home"

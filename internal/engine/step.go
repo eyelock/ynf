@@ -180,7 +180,7 @@ const reclaimGrace = time.Second
 
 func (s *step) cleanup() {
 	if s.wt != "" {
-		_ = s.g.RemoveWorktree(context.WithoutCancel(s.ctx), s.mirror, s.wt)
+		_ = s.g.RemoveCheckout(s.wt)
 	}
 }
 
@@ -338,7 +338,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		base = it.Branch // resume from what was proposed, with the feedback
 	}
 	if s.wt != "" {
-		_ = s.g.RemoveWorktree(s.ctx, s.mirror, s.wt)
+		_ = s.g.RemoveCheckout(s.wt)
 		s.wt = ""
 	}
 	stepDir := filepath.Join(e.WorkDir, "steps", strings.NewReplacer("/", "_", "#", "_").Replace(it.Key), runID)
@@ -349,7 +349,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	if runDir, err = filepath.EvalSymlinks(runDir); err != nil {
 		return fail(runner.Error, err)
 	}
-	wt, err := s.g.Worktree(s.ctx, mirror, base, filepath.Join(stepDir, "wt"))
+	wt, err := s.g.Checkout(s.ctx, mirror, base, filepath.Join(stepDir, "wt"))
 	if err != nil {
 		return fail(runner.Error, err)
 	}
@@ -364,8 +364,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	}
 	inline := ex.Name() == "inline"
 	if inline {
-		job.Image = ""                        // the run is in this image, whatever the lane names for a container
-		job.Share = append(job.Share, mirror) // the worktree's git data lives in the mirror
+		job.Image = "" // the run is in this image, whatever the lane names for a container
 		// The job runner's network policy enforces egress here, not ynf (ADR-007): say what the
 		// lane expects, so a mismatch is visible.
 		e.log().Info("egress is the job runner's", "item", it.Key, "lane", lane.Name, "expects", strings.Join(job.Egress, ","))

@@ -1785,7 +1785,7 @@ func TestALaneIsHeldToItsImagesHarness(t *testing.T) {
 }
 
 // TestInlineRunsTheInstalledHarness: in the factory image, a run is inline: the harness installed
-// there runs by its id, the mirror is handed to the run user with the run's folders, and a lane's
+// there runs by its id, only the run's own folders are handed to the run user (the checkout is a whole repository, so the mirror stays ynf's), and a lane's
 // auto_approve applies once this ynh supports it (ADR-007, ADR-009).
 func TestInlineRunsTheInstalledHarness(t *testing.T) {
 	if _, err := user.Lookup("nobody"); err != nil {
@@ -1829,8 +1829,11 @@ func TestInlineRunsTheInstalledHarness(t *testing.T) {
 		if it.State != item.Proposed || !strings.Contains(string(b), "agent run --harness local/h") || !strings.Contains(string(b), "--auto-approve edits") {
 			t.Fatalf("%s %+v\n%s", it.State, it.LastRun, b)
 		}
-		if !slices.ContainsFunc(handed, func(p string) bool { return strings.Contains(p, filepath.Join("repos", "o", "r")) }) {
-			t.Errorf("the mirror was not handed to the run user: %v", handed)
+		if !slices.ContainsFunc(handed, func(p string) bool { return filepath.Base(p) == "wt" }) {
+			t.Errorf("the checkout was not handed to the run user: %v", handed)
+		}
+		if slices.ContainsFunc(handed, func(p string) bool { return strings.Contains(p, filepath.Join("repos", "o", "r")) }) {
+			t.Errorf("the mirror was handed to the run user: %v", handed)
 		}
 		// The hosts the lane expects the job runner to allow, each once.
 		m := regexp.MustCompile(`egress is the job runner's.* expects=(\S*)`).FindStringSubmatch(logged.String())
