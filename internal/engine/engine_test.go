@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -1807,6 +1809,9 @@ func TestInlineRunsTheInstalledHarness(t *testing.T) {
 			hs.ID = "local/h"
 			return hs, err
 		}
+		var logged bytes.Buffer
+		h.e.Log = slog.New(slog.NewTextHandler(&logged, nil))
+		h.f.lanes = strings.Replace(lanesYAML, "      ynh: {harness: \".\", focus: tidy, auto_approve: edits}\n", "      egress: {allow: [proxy.golang.org, sum.golang.org]}\n      ynh: {harness: \".\", focus: tidy, auto_approve: edits}\n", 1)
 		h.e.HostCapabilities = func(context.Context) (string, error) { return caps, nil }
 		h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "k"}[k] }
 		h.f.labels[1] = []string{"ynf:approved"}
@@ -1826,6 +1831,15 @@ func TestInlineRunsTheInstalledHarness(t *testing.T) {
 		}
 		if !slices.ContainsFunc(handed, func(p string) bool { return strings.Contains(p, filepath.Join("repos", "o", "r")) }) {
 			t.Errorf("the mirror was not handed to the run user: %v", handed)
+		}
+		// The hosts the lane expects the job runner to allow, each once.
+		m := regexp.MustCompile(`egress is the job runner's.* expects=(\S*)`).FindStringSubmatch(logged.String())
+		if m == nil {
+			t.Fatalf("no egress line:\n%s", logged.String())
+		}
+		hosts := strings.Split(strings.Trim(m[1], `"`), ",")
+		if strings.Join(hosts, ",") != "proxy.golang.org,sum.golang.org" {
+			t.Errorf("expects should list the lane's hosts once each: %v\n%s", hosts, logged.String())
 		}
 	}
 }

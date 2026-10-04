@@ -368,7 +368,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		job.Share = append(job.Share, mirror) // the worktree's git data lives in the mirror
 		// The job runner's network policy enforces egress here, not ynf (ADR-007): say what the
 		// lane expects, so a mismatch is visible.
-		e.log().Info("egress is the job runner's", "item", it.Key, "lane", lane.Name, "expects", strings.Join(append(append([]string(nil), job.Egress...), lane.Run.Egress.Allow...), ","))
+		e.log().Info("egress is the job runner's", "item", it.Key, "lane", lane.Name, "expects", strings.Join(job.Egress, ","))
 	}
 	// The harness the lane is held to is the one that will run: inside the image, or in the
 	// folder ynh runs on the host (ADR-012).
