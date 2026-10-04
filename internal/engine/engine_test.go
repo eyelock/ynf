@@ -1098,7 +1098,8 @@ func (s *syncBuffer) String() string {
 }
 
 // startSlow starts a step on issue 1 in the slow lane, whose run waits for the returned gate file,
-// and returns once the item is running, with a channel that receives the step's error.
+// and returns once the item is running and its timer follows the lease, with a channel that
+// receives the step's error.
 func startSlow(t *testing.T, h *harness) (gate string, done chan error) {
 	t.Helper()
 	gate = filepath.Join(t.TempDir(), "gate")
@@ -1106,8 +1107,13 @@ func startSlow(t *testing.T, h *harness) (gate string, done chan error) {
 	h.f.labels[1] = []string{"ynf:slow"}
 	done = make(chan error, 1)
 	go func() { done <- h.e.Sweep(context.Background()) }()
+	// Running is saved a moment before the timer moves to the lease's expiry, so wait for both:
+	// otherwise another instance's sweep can land in between and find the old timer due.
+	key := "item/github.com/o/r/issues/1"
 	for i := 0; ; i++ {
-		if doc, _, err := h.e.Store.Get(context.Background(), "item/github.com/o/r/issues/1"); err == nil && strings.Contains(string(doc), `"state":"running"`) {
+		doc, _, err := h.e.Store.Get(context.Background(), key)
+		due, _ := h.e.Store.Due(context.Background(), h.e.Now(), 10)
+		if err == nil && strings.Contains(string(doc), `"state":"running"`) && !slices.Contains(due, key) {
 			return gate, done
 		}
 		if i > 500 {
