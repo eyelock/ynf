@@ -19,10 +19,14 @@ import (
 
 // handle handles one GitHub webhook event from a file: the CI-native host (ADR-009), where the
 // workflow's own trigger is the intake. GITHUB_EVENT_PATH and GITHUB_EVENT_NAME are the fallbacks.
+// --lane limits it as it does sweep and serve: to the reconciliation sweep and its due items, and
+// to the items an issue or pull request event touches, so a workflow can run one lane on its own
+// schedule.
 func (a *app) handle(ctx context.Context, args []string) error {
 	fs := a.flags("handle")
 	path := fs.String("github-event", os.Getenv("GITHUB_EVENT_PATH"), "")
 	name := fs.String("github-event-name", os.Getenv("GITHUB_EVENT_NAME"), "")
+	fs.Var(&a.lanes, "lane", "")
 	if err := fs.Parse(args); err != nil {
 		return withCode(ExitUsage, err)
 	}

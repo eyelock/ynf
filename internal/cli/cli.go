@@ -52,7 +52,7 @@ Usage:
   ynf serve [--interval 1m] [--listen :8080 [--webhook-secret-env YNF_WEBHOOK_SECRET] [--start-token-env YNF_START_TOKEN]] [--lane name]...
   ynf start <ref> [--repo host/owner/name] [--lane name] [--auto-approve edits|all] [--detach]
   ynf start --prompt <text> [--label prefix:value]... --repo owner/name [--lane name] [--auto-approve edits|all] [--detach]
-  ynf handle --github-event <file> --github-event-name <name>    (CI: GITHUB_EVENT_PATH, GITHUB_EVENT_NAME)
+  ynf handle --github-event <file> --github-event-name <name> [--lane name]...    (CI: GITHUB_EVENT_PATH, GITHUB_EVENT_NAME)
   ynf items ls
   ynf items show|log|retry|release <owner/name#number | key>
   ynf replay <owner/name#number | key> [--policy lanes.yaml]

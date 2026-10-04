@@ -6,8 +6,8 @@ three ways that do: a sweep, a long-running worker that also takes webhooks, and
 
 You need the terminal from lesson 1, with `YNF_CONFIG` set.
 
-Always pass `--lane gofmt` to `sweep` and `serve` in this track. The paused lanes still notice their
-tickets, and an item waiting in a paused lane never settles.
+Always pass `--lane gofmt` to `sweep`, `serve` and `handle` in this track. The paused lanes still
+notice their tickets, and an item waiting in a paused lane never settles.
 
 ## One sweep
 
@@ -172,7 +172,7 @@ A third way needs no server at all. A GitHub Actions workflow runs on the reposi
 and `ynf handle` handles the one that triggered it. Try it here with the payload you just wrote:
 
 ```bash
-ynf handle --github-event ~/ynf-tutorial/pr.json --github-event-name pull_request
+ynf handle --github-event ~/ynf-tutorial/pr.json --github-event-name pull_request --lane gofmt
 ```
 
 Expected, after the log:
@@ -181,16 +181,8 @@ Expected, after the log:
 pull_request on <you>/ynf-sandbox: issues [], pull requests [14]
 ```
 
-`handle` steps the items the event touches, and sweeps the repository for new tickets. It has no
-`--lane`, so it sweeps every lane, including the paused ones. Run `ynf items ls` and you'll see
-items for the lint and docs tickets, and the slow one from lesson 6, all waiting in `ready`:
-
-```text
-github.com/<you>/ynf-sandbox#12   lint-paydown  ready      lane lint-paydown is paused (the ynf track runs no agents); waiting
-```
-
-That's pausing doing its job: the tickets are noticed, and nothing starts. The `deps` ticket
-appears as `ignored`, since its lane is switched off.
+`handle` steps the items the event touches. `--lane` limits it, as it does for `sweep` and `serve`:
+only items in the named lanes are stepped. A workflow can use it to give one lane its own schedule.
 
 A workflow that does this on GitHub looks like this. You don't need to set it up for this track:
 
@@ -215,7 +207,8 @@ jobs:
 
 `handle` reads the event from `GITHUB_EVENT_PATH` and `GITHUB_EVENT_NAME`, which Actions sets. A
 `schedule` or `workflow_dispatch` event runs a full sweep instead, which catches anything a missed
-event would have. Two things differ from your laptop:
+event would have; with `--lane` it sweeps only that lane, so each lane can have its own
+`schedule`. Two things differ from your laptop:
 
 - **State must outlive the job.** Each job starts on a fresh machine, so the config's `store` is an
   S3 bucket (`s3://bucket/prefix?region=…`) rather than a file.
