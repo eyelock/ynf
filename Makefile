@@ -10,7 +10,10 @@
 #                 builds: YNH_SRC=<ynh checkout> builds its ynh in; YNM_SRC=<ynm checkout> builds
 #                 its ynm (pnpm). FACTORY_IMAGE names it (default ynf-factory:dev).
 
-VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+# As ynh stamps its builds: a release tag when built exactly at one with nothing changed, otherwise
+# dev-<branch>-<commit>, and -dirty with uncommitted changes. Releases are stamped by GoReleaser.
+DEV_VERSION := dev-$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null | tr '/' '-' || echo unknown)-$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)$(shell git diff --quiet 2>/dev/null || echo '-dirty')
+VERSION     ?= $(shell git diff --quiet 2>/dev/null && git describe --tags --exact-match 2>/dev/null || echo "$(DEV_VERSION)")
 LDFLAGS     := -s -w -X github.com/eyelock/ynf.Version=$(VERSION)
 INSTALL_DIR ?= $(HOME)/.ynf/bin
 COVERAGE    ?= 80
