@@ -12,8 +12,9 @@
 #   make e2e-only   the same, without the rebuild
 #   make reset also empties the sandbox's ynm namespace (factory/eyelock/ynf-sandbox), so every
 #   e2e run starts from the same memory; e2e checks each item that ran left its memories
-#   make agent-image  build ynf-sandbox-agent:latest, the base the ynh lanes' harness images use
-#                   (YNH_SRC=path to a ynh checkout; its origin/develop is built into the image)
+#   make agent-image  build ynf-sandbox-agent:latest, the base the ynh lanes' harness images use,
+#                   on the ynh release image YNH_BASE; YNH_SRC=path to a ynh checkout builds its
+#                   origin/develop into the image instead, to try ynh before it is released
 # Deleting needs the delete_repo scope: gh auth refresh -s delete_repo
 # State is in s3://ynf-terraform-state.eyelock.net/sandbox/, through the ynf-terraform AWS profile
 # (infra/terraform-state).
@@ -55,14 +56,18 @@ e2e: reset e2e-only
 e2e-only:
 	cd e2e && go run . -root .. -lanes $(LANES)
 
-YNH_SRC ?= ../../ynh
+YNH_BASE ?= ghcr.io/eyelock/ynh:0.9.0
+YNH_SRC ?=
 AGENT_IMAGE ?= ynf-sandbox-agent:latest
 
 agent-image:
 	@set -e; arch=$$(docker version --format '{{.Server.Arch}}'); ctx=$$(mktemp -d); \
-	trap 'rm -rf "$$ctx"; git -C $(YNH_SRC) worktree remove --force "$$ctx/src" 2>/dev/null || true' EXIT; \
+	trap 'rm -rf "$$ctx"; [ -z "$(YNH_SRC)" ] || git -C $(YNH_SRC) worktree remove --force "$$ctx/src" 2>/dev/null || true' EXIT; \
 	cp images/agent/Dockerfile "$$ctx/"; mkdir -p "$$ctx/ynh"; \
-	git -C $(YNH_SRC) fetch -q origin develop; \
-	git -C $(YNH_SRC) worktree add -q --detach "$$ctx/src" origin/develop; \
-	(cd "$$ctx/src" && CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -o "$$ctx/ynh/ynh" ./cmd/ynh); \
-	docker build -q -t $(AGENT_IMAGE) "$$ctx"
+	if [ -n "$(YNH_SRC)" ]; then \
+	  git -C $(YNH_SRC) fetch -q origin develop; \
+	  git -C $(YNH_SRC) worktree add -q --detach "$$ctx/src" origin/develop; \
+	  (cd "$$ctx/src" && CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -o "$$ctx/ynh/ynh" ./cmd/ynh); \
+	fi; \
+	docker build -q --build-arg YNH_BASE=$(YNH_BASE) -t $(AGENT_IMAGE) "$$ctx"; \
+	docker run --rm --network none --entrypoint ynh $(AGENT_IMAGE) version

@@ -6,6 +6,8 @@ change as a draft pull request, and follows it through CI and review. A human al
 
 ynf is the runtime layer of [ynh](https://github.com/eyelock/ynh)'s factory pattern, and works
 with ynh and [ynm](https://github.com/eyelock/ynm) when they are installed, without needing either.
+A lane that runs an agent unsupervised (`run.ynh.auto_approve`) needs ynh 0.9.0 or later in its
+agent image.
 
 ```bash
 export HOMEBREW_GITHUB_API_TOKEN="$(gh auth token)"   # while the repository is private
