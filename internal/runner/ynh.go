@@ -87,6 +87,9 @@ func (y YnhRunner) Command(s Spec) ([]string, error) {
 	if y.Cfg.Sandbox != "" {
 		argv = append(argv, "--sandbox", y.Cfg.Sandbox)
 	}
+	if y.Cfg.Model != "" {
+		argv = append(argv, "--model", y.Cfg.Model)
+	}
 	// Approval prompts are only safe to switch off inside containment ynf owns (ADR-007).
 	switch {
 	case (s.InImage || s.Contained) && y.Cfg.AutoApprove != "":

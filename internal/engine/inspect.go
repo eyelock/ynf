@@ -116,6 +116,7 @@ type LaneRun struct {
 	Executor string          `json:"executor"`
 	Image    string          `json:"image,omitempty"`
 	Harness  string          `json:"harness,omitempty"` // what the lane names
+	Model    string          `json:"model,omitempty"`   // the model the lane pins; empty is the vendor's default
 	Where    string          `json:"where"`             // where the harness comes from
 	Read     *runner.Harness `json:"read,omitempty"`    // the harness, when it could be read
 	Problem  string          `json:"problem,omitempty"` // why it could not be read, or does not fit the lane
@@ -149,7 +150,7 @@ func (e *Engine) LaneRuns(ctx context.Context, repo string) ([]LaneRun, error) {
 			out = append(out, lr)
 			continue
 		}
-		lr.Harness = l.Run.Ynh.Harness
+		lr.Harness, lr.Model = l.Run.Ynh.Harness, l.Run.Ynh.Model
 		var image string
 		switch {
 		case ex.Name() == "inline":

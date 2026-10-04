@@ -664,6 +664,7 @@ echo '{"exit_code":0,"reason":"converged","session_id":"S-ynh-7","backend":"clau
 func TestYnhRunnerOnTheHost(t *testing.T) {
 	h := newHarness(t)
 	calls := fakeYnh(t)
+	h.f.lanes = strings.Replace(lanesYAML, `      ynh: {harness: ".", focus: tidy}`, `      ynh: {harness: ".", focus: tidy, model: claude-sonnet-5-5}`, 1)
 	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "sk-test"}[k] }
 	ctx := context.Background()
 	h.f.labels[1] = []string{"ynf:agentic"}
@@ -674,7 +675,7 @@ func TestYnhRunnerOnTheHost(t *testing.T) {
 		t.Fatalf("%s %s", it.State, it.Reason)
 	}
 	b, _ := os.ReadFile(calls)
-	if !strings.Contains(string(b), "agent run --harness . --task @") || strings.Contains(string(b), "--focus") || !strings.Contains(string(b), "--profile careful") || !strings.Contains(string(b), "key=sk-test") {
+	if !strings.Contains(string(b), "agent run --harness . --task @") || strings.Contains(string(b), "--focus") || !strings.Contains(string(b), "--profile careful") || !strings.Contains(string(b), "--model claude-sonnet-5-5") || !strings.Contains(string(b), "key=sk-test") {
 		t.Fatalf("ynh was called as %s", b)
 	}
 	if !strings.Contains(string(b), "TIDY FOCUS PROMPT") || !strings.Contains(string(b), "> Issue 1") {
@@ -1946,7 +1947,7 @@ func TestLaneRuns(t *testing.T) {
     intake: [{github.search: "label:ynf:carried", every: 5m}]
     run:
       runner: ynh
-      ynh: {harness: ".agents/harness"}
+      ynh: {harness: ".agents/harness", model: sonnet}
     when: {converged: open_pr}
 `
 	runs, err := h.e.LaneRuns(ctx, "o/r")
@@ -1963,7 +1964,7 @@ func TestLaneRuns(t *testing.T) {
 	if r := by["greedy"]; r.Read == nil || !strings.Contains(r.Problem, "max_turns") {
 		t.Fatalf("a lane asking for more than its harness: %+v", r)
 	}
-	if r := by["carried"]; r.Read != nil || r.Problem != "" || !strings.Contains(r.Where, "carried in the repository") {
+	if r := by["carried"]; r.Read != nil || r.Problem != "" || r.Model != "sonnet" || !strings.Contains(r.Where, "carried in the repository") {
 		t.Fatalf("a carried harness: %+v", r)
 	}
 	if r := by["fmt"]; r.Runner != "command" || r.Where != "a command, not a harness" {

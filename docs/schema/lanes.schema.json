@@ -344,6 +344,12 @@
                 "srt"
               ]
             },
+            "model": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:-]*$",
+              "description": "ynh's --model: the model the agent runs on, as the vendor names it (for the claude vendor, an alias such as sonnet or a full name such as claude-sonnet-5-5). Letters, digits and . - _ / :, not starting with a dash. Omit it for the vendor's default. The effort level is reported, not set: ynh has no way to be told one."
+            },
             "auto_approve": {
               "enum": [
                 "edits",
