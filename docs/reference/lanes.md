@@ -11,7 +11,7 @@ carried out today.
 |---|---|---|
 | `kind` | `originate` (ynf opens the branch and pull request) or `adopt` (someone else's pull request) | both. An adopted pull request is watched until its guard holds, never adopted from a fork or while a draft, and gets ynf's commit pushed on top, never forced; if the author pushes while ynf works, ynf starts again from their new head |
 | `enabled` | `false` switches the lane off: its items are tracked and ignored | yes |
-| `intake` | Where work comes from | `github.search`, run by every sweep; GitHub webhooks (`ynf serve --listen`, `ynf step`) step tracked items at once and sweep for new ones; `jira.search` and topics are read and skipped |
+| `intake` | Where work comes from | `github.search`, run by every sweep; GitHub webhooks (`ynf serve --listen`, `ynf handle`) step tracked items at once and sweep for new ones; `jira.search` and topics are read and skipped |
 | `guards.eligible` | A CEL expression over structured facts; false means ignored | yes |
 | `run.runner` | `command` or `ynh` | both. On docker, a `ynh` lane runs in an agent image ynf builds from the harness with `ynh image --entrypoint agent` (ynh on PATH), or `run.image` |
 | `run.executor` | `docker`, `process`, `ecs`, `k8s-job`, `ci-inline` | `docker`; `process` with `--interactive` |

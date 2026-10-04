@@ -62,6 +62,10 @@ type Engine struct {
 	// BuildImage builds a ynh agent image for a harness in a worktree (`ynh image --entrypoint
 	// agent`) and returns its tag. Nil means ynh is not available (ADR-012).
 	BuildImage func(ctx context.Context, worktree string, cfg policy.Ynh) (string, error)
+	// HostAutoApprove is --auto-approve asked for by the person at the terminal (ynf start), for
+	// runs on the host only; HostCapabilities reports the host ynh's capabilities to check it.
+	HostAutoApprove  string
+	HostCapabilities func(ctx context.Context) (string, error)
 	// ImageCapabilities reports the capabilities version of the ynh inside an agent image; nil
 	// skips the check.
 	ImageCapabilities func(ctx context.Context, image string) (string, error)
@@ -313,10 +317,13 @@ func (e *Engine) forgeHost() string {
 	return e.ForgeHost
 }
 
-// tracker is the tracker instance an item's ticket lives on.
+// tracker is the tracker instance an item's ticket lives on. Ad hoc work's is ynf's own store.
 func (e *Engine) tracker(t tracker.Ref) (tracker.Tracker, error) {
 	if tr, ok := e.Trackers[t.Host]; ok {
 		return tr, nil
+	}
+	if t.Host == AdhocHost {
+		return AdhocTracker(e.Store), nil
 	}
 	return nil, fmt.Errorf("no tracker is configured for %s (%s)", t.Host, t)
 }

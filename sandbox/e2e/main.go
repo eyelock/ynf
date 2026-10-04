@@ -40,6 +40,7 @@ type fixture struct {
 		Result     results  `yaml:"result"`
 		Signatures []string `yaml:"signatures"`
 		Crash      bool     `yaml:"crash"`
+		Start      bool     `yaml:"start"`
 	} `yaml:"expect"`
 }
 
@@ -176,6 +177,19 @@ func run(root, repo string, lanes []string, timeout time.Duration) error {
 	}
 	fmt.Printf("running ynf %s\nynf log (also below as it happens): %s\n\n", strings.Join(lanes, ", "), logPath)
 	start := time.Now()
+	for _, f := range ff.Fixtures {
+		if !f.Expect.Start || !slices.Contains(lanes, f.Lane) {
+			continue
+		}
+		n, ok := numbers[f.Title]
+		if !ok {
+			return fmt.Errorf("no issue titled %q in the sandbox", f.Title)
+		}
+		fmt.Printf("ynf start %s#%d --lane %s (%s)\n", repo, n, f.Lane, f.ID)
+		if out, err := stream(ynf, "--config", cfg, "--log-file", logPath, "start", fmt.Sprintf("%s#%d", repo, n), "--lane", f.Lane); err != nil {
+			return fmt.Errorf("ynf start %s: %w\n%s", f.ID, err, out)
+		}
+	}
 	for _, f := range ff.Fixtures {
 		if !f.Expect.Crash || !slices.Contains(lanes, f.Lane) {
 			continue

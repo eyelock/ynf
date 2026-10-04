@@ -122,10 +122,15 @@ func (it Item) Subject() string { return it.Ticket.String() }
 func (it Item) Ref() string { return it.Ticket.String() }
 
 // BranchName is the deterministic branch ynf uses for an originated item (ADR-005: idempotent side
-// effects): ynf/issue-77 for a GitHub issue, ynf/plat-881 for a key from elsewhere.
+// effects): ynf/issue-77 for a GitHub issue, ynf/plat-881 for a key from elsewhere, and
+// ynf/adhoc-<the id's last 8> for work started from a prompt.
 func (it Item) BranchName() string {
 	if _, n, ok := githubIssue(it.Ticket.Key); ok {
 		return fmt.Sprintf("ynf/issue-%d", n)
+	}
+	if it.Ticket.Host == "adhoc" {
+		k := strings.ToLower(it.Ticket.Key)
+		return "ynf/adhoc-" + k[max(0, len(k)-8):]
 	}
 	var b strings.Builder
 	for _, r := range strings.ToLower(it.Ticket.Key) {

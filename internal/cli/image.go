@@ -62,6 +62,32 @@ var (
 	capsCache = map[string]string{}
 )
 
+// hostCapabilities asks this machine's ynh for its capabilities version.
+func hostCapabilities(ctx context.Context) (string, error) {
+	out, err := stdoutOf(ctx, "ynh", "version", "--format", "json")
+	if err != nil {
+		return "", err
+	}
+	var v struct {
+		Capabilities string `json:"capabilities"`
+	}
+	if err := json.Unmarshal([]byte(out), &v); err != nil || v.Capabilities == "" {
+		return "", fmt.Errorf("ynh version: %q", tailLines(out, 3))
+	}
+	return v.Capabilities, nil
+}
+
+// stdoutOf runs a command for its standard output only, so warnings on stderr cannot corrupt it.
+func stdoutOf(ctx context.Context, name string, args ...string) (string, error) {
+	c := exec.CommandContext(ctx, name, args...)
+	var out, errb bytes.Buffer
+	c.Stdout, c.Stderr = &out, &errb
+	if err := c.Run(); err != nil {
+		return "", fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, tailLines(errb.String(), 5))
+	}
+	return out.String(), nil
+}
+
 // imageCapabilities asks the ynh inside an agent image for its capabilities version, once per
 // image: the image's ynh runs the agent, not the host's.
 func imageCapabilities(ctx context.Context, image string) (string, error) {

@@ -37,6 +37,9 @@ type Spec struct {
 	InImage bool
 	// Focus is the lane's focus, resolved from the harness: its prompt is already in the task.
 	Focus *Focus
+	// HostAutoApprove is --auto-approve asked for by the person who started the work, for a run on
+	// their own machine (ADR-007). A lane's setting never applies outside containment.
+	HostAutoApprove string
 }
 
 // Result is a run's outcome in ynf's terms.

@@ -278,11 +278,11 @@ func TestPauseResumeStats(t *testing.T) {
 	}
 }
 
-func TestStepFromAGitHubEvent(t *testing.T) {
+func TestHandleAGitHubEvent(t *testing.T) {
 	e := setup(t)
 	ev := filepath.Join(e.dir, "event.json")
 	_ = os.WriteFile(ev, []byte(`{"repository":{"full_name":"o/r"},"issue":{"number":5}}`), 0o644)
-	if code, out, stderr := e.run("step", "--github-event", ev, "--github-event-name", "issues"); code != 0 || !strings.Contains(out, "issues on o/r: issues [5]") {
+	if code, out, stderr := e.run("handle", "--github-event", ev, "--github-event-name", "issues"); code != 0 || !strings.Contains(out, "issues on o/r: issues [5]") {
 		t.Fatalf("%d %s %s", code, out, stderr)
 	}
 	if code, out, _ := e.run("items", "ls"); code != 0 || !strings.Contains(out, "ignored") {
@@ -290,18 +290,18 @@ func TestStepFromAGitHubEvent(t *testing.T) {
 	}
 	t.Setenv("GITHUB_EVENT_PATH", ev)
 	t.Setenv("GITHUB_EVENT_NAME", "schedule")
-	if code, out, _ := e.run("step"); code != 0 || !strings.Contains(out, "o/r#5") {
+	if code, out, _ := e.run("handle"); code != 0 || !strings.Contains(out, "o/r#5") {
 		t.Fatalf("a scheduled step sweeps: %d %s", code, out)
 	}
 	t.Setenv("GITHUB_EVENT_NAME", "")
-	if code, _, _ := e.run("step"); code != cli.ExitUsage {
+	if code, _, _ := e.run("handle"); code != cli.ExitUsage {
 		t.Fatalf("no event name: %d", code)
 	}
-	if code, _, _ := e.run("step", "--github-event", "/no/such", "--github-event-name", "issues"); code != cli.ExitUsage {
+	if code, _, _ := e.run("handle", "--github-event", "/no/such", "--github-event-name", "issues"); code != cli.ExitUsage {
 		t.Fatalf("missing file: %d", code)
 	}
 	_ = os.WriteFile(ev, []byte(`{"repository":{"full_name":"x/y"},"issue":{"number":1}}`), 0o644)
-	if code, _, _ := e.run("step", "--github-event", ev, "--github-event-name", "issues"); code == 0 {
+	if code, _, _ := e.run("handle", "--github-event", ev, "--github-event-name", "issues"); code == 0 {
 		t.Fatal("an unenrolled repository's event was handled")
 	}
 }
@@ -346,5 +346,39 @@ func TestLogFileAndFormat(t *testing.T) {
 	}
 	if code, _, _ := e.run("--log-file", "/no/such/dir/ynf.log", "items", "ls"); code != cli.ExitUsage {
 		t.Fatalf("unwritable log file: %d", code)
+	}
+}
+
+// TestStart: an instruction from the command line; refusals exit 33 before anything is created.
+func TestStart(t *testing.T) {
+	e := setup(t)
+	code, out, stderr := e.run("--format", "json", "start", "o/r#5", "--detach")
+	if code != 0 || !strings.Contains(out, `"key": "item/127.0.0.1/o/r/issues/5"`) || !strings.Contains(out, `"lane": "fmt"`) {
+		t.Fatalf("%d %s %s", code, out, stderr)
+	}
+	if code, out, _ := e.run("start", "127.0.0.1/o/r#5", "--detach"); code != 0 || !strings.Contains(out, "a running ynf serve takes it on") {
+		t.Fatalf("a host-qualified reference: %d %s", code, out)
+	}
+	for _, c := range []struct {
+		args []string
+		code int
+		want string
+	}{
+		{[]string{"start", "o/r#5", "--lane", "off", "--detach"}, cli.ExitStartRefused, "switched off"},
+		{[]string{"start", "--prompt", "tidy", "--detach"}, cli.ExitStartRefused, "say which repository"},
+		{[]string{"start", "--prompt", "tidy", "--repo", "github.example/o/r", "--detach"}, cli.ExitStartRefused, "this ynf works with the forge at 127.0.0.1"},
+		{[]string{"start", "--prompt", "tidy", "--repo", "a/b/c/d"}, cli.ExitStartRefused, "not owner/name"},
+		{[]string{"start"}, cli.ExitUsage, "a reference or --prompt"},
+		{[]string{"start", "o/r#5", "--prompt", "x"}, cli.ExitUsage, "not both"},
+		{[]string{"start", "o/r#5", "extra"}, cli.ExitUsage, "one reference"},
+		{[]string{"start", "o/r#5", "--auto-approve", "everything"}, cli.ExitUsage, "want edits or all"},
+		{[]string{"start", "o/r#5", "--auto-approve", "edits", "--detach"}, cli.ExitUsage, "not --detach"},
+		{[]string{"start", "not-a-ref"}, cli.ExitUsage, "is not a reference"},
+		{[]string{"start", "o/r#5", "--bogus"}, cli.ExitUsage, ""},
+	} {
+		code, _, stderr := e.run(c.args...)
+		if code != c.code || !strings.Contains(stderr, c.want) {
+			t.Errorf("%v: %d %s", c.args, code, stderr)
+		}
 	}
 }

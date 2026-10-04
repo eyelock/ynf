@@ -355,7 +355,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 			labels = t.Labels
 		}
 	}
-	argv, err := r.Command(runner.Spec{Lane: lane, Labels: labels, TaskFile: cr + "/task.md", RunDir: cr, Feedback: feedback, InImage: inImage, Focus: focus})
+	argv, err := r.Command(runner.Spec{Lane: lane, Labels: labels, TaskFile: cr + "/task.md", RunDir: cr, Feedback: feedback, InImage: inImage, Focus: focus, HostAutoApprove: e.HostAutoApprove})
 	if err != nil {
 		return fail(runner.OperatorError, err)
 	}
@@ -417,8 +417,17 @@ func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, wt, 
 		return job, false, err
 	}
 	if !ex.Contained() {
-		if y.Cfg.AutoApprove != "" {
+		if y.Cfg.AutoApprove != "" && e.HostAutoApprove == "" {
 			e.log().Warn("auto_approve applies only inside containment; this run keeps its approval prompts", "lane", lane.Name, "executor", ex.Name())
+		}
+		if e.HostAutoApprove != "" && e.HostCapabilities != nil {
+			caps, err := e.HostCapabilities(s.ctx)
+			if err != nil {
+				return job, false, fmt.Errorf("read this machine's ynh capabilities: %w", err)
+			}
+			if !atLeast(caps, autoApproveCapabilities) {
+				return job, false, fmt.Errorf("--auto-approve needs ynh capabilities %s; this machine's ynh has %s", autoApproveCapabilities, caps)
+			}
 		}
 		return job, false, nil
 	}

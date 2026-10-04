@@ -165,6 +165,7 @@ func (a *app) sweep(ctx context.Context, args []string, forever bool) error {
 	}
 	listen := fs.String("listen", "", "")
 	secretEnv := fs.String("webhook-secret-env", "YNF_WEBHOOK_SECRET", "")
+	startTokenEnv := fs.String("start-token-env", "YNF_START_TOKEN", "")
 	fs.Var(&a.lanes, "lane", "")
 	if err := fs.Parse(args); err != nil {
 		return withCode(ExitUsage, err)
@@ -177,7 +178,7 @@ func (a *app) sweep(ctx context.Context, args []string, forever bool) error {
 		if !forever {
 			return withCode(ExitUsage, errors.New("--listen is for serve"))
 		}
-		addr, err := a.listen(ctx, e, *listen, *secretEnv)
+		addr, err := a.listen(ctx, e, *listen, *secretEnv, *startTokenEnv)
 		if err != nil {
 			return err
 		}

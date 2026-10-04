@@ -2,29 +2,32 @@ package cli
 
 import (
 	"context"
+	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/eyelock/ynf/internal/engine"
 	"github.com/eyelock/ynf/internal/store"
 )
 
-// step handles one GitHub webhook event from a file: the CI-native host (ADR-009), where the
+// handle handles one GitHub webhook event from a file: the CI-native host (ADR-009), where the
 // workflow's own trigger is the intake. GITHUB_EVENT_PATH and GITHUB_EVENT_NAME are the fallbacks.
-func (a *app) step(ctx context.Context, args []string) error {
-	fs := a.flags("step")
+func (a *app) handle(ctx context.Context, args []string) error {
+	fs := a.flags("handle")
 	path := fs.String("github-event", os.Getenv("GITHUB_EVENT_PATH"), "")
 	name := fs.String("github-event-name", os.Getenv("GITHUB_EVENT_NAME"), "")
 	if err := fs.Parse(args); err != nil {
 		return withCode(ExitUsage, err)
 	}
 	if *path == "" || *name == "" {
-		return withCode(ExitUsage, errors.New("step needs --github-event <file> and --github-event-name <name> (or GITHUB_EVENT_PATH and GITHUB_EVENT_NAME)"))
+		return withCode(ExitUsage, errors.New("handle needs --github-event <file> and --github-event-name <name> (or GITHUB_EVENT_PATH and GITHUB_EVENT_NAME)"))
 	}
 	body, err := os.ReadFile(*path)
 	if err != nil {
@@ -56,7 +59,10 @@ func (a *app) step(ctx context.Context, args []string) error {
 type webhooks struct {
 	e      *engine.Engine
 	secret string
-	queue  chan delivery
+	// startToken enables POST /start, which starts work, for callers that present it; without
+	// one the endpoint does not exist.
+	startToken string
+	queue      chan delivery
 }
 
 type delivery struct {
@@ -70,6 +76,9 @@ func (w *webhooks) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(rw, "ok\n")
 		return
 	case "/webhook/github":
+	case "/start":
+		w.start(rw, r)
+		return
 	default:
 		http.NotFound(rw, r)
 		return
@@ -103,6 +112,46 @@ func (w *webhooks) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// start is POST /start: an instruction, recorded for this worker's loop to step (ADR-003).
+func (w *webhooks) start(rw http.ResponseWriter, r *http.Request) {
+	if w.startToken == "" {
+		http.NotFound(rw, r)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(rw, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if subtle.ConstantTimeCompare([]byte(got), []byte(w.startToken)) != 1 {
+		http.Error(rw, "a valid bearer token is required", http.StatusUnauthorized)
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(rw, r.Body, 1<<20))
+	if err != nil {
+		http.Error(rw, "body too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	req, err := startRequest(w.e, body)
+	if err != nil {
+		http.Error(rw, err.Error(), http.StatusBadRequest)
+		return
+	}
+	it, err := w.e.Start(r.Context(), req)
+	var refused *engine.RefusedError
+	switch {
+	case errors.As(err, &refused):
+		http.Error(rw, err.Error(), http.StatusUnprocessableEntity)
+		return
+	case err != nil:
+		http.Error(rw, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	rw.Header().Set("Content-Type", "application/json")
+	rw.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(rw).Encode(map[string]string{"item": it.Key, "ref": it.Ref(), "lane": it.Lane})
+}
+
 func (w *webhooks) work(ctx context.Context) {
 	for {
 		select {
@@ -118,7 +167,7 @@ func (w *webhooks) work(ctx context.Context) {
 
 // listen starts the webhook receiver. It refuses to start without a secret: an endpoint that
 // accepts unsigned events would let anyone drive the factory.
-func (a *app) listen(ctx context.Context, e *engine.Engine, addr, secretEnv string) (string, error) {
+func (a *app) listen(ctx context.Context, e *engine.Engine, addr, secretEnv, startTokenEnv string) (string, error) {
 	secret := os.Getenv(secretEnv)
 	if secret == "" {
 		return "", withCode(ExitPolicy, fmt.Errorf("--listen needs a webhook secret in %s", secretEnv))
@@ -127,7 +176,7 @@ func (a *app) listen(ctx context.Context, e *engine.Engine, addr, secretEnv stri
 	if err != nil {
 		return "", err
 	}
-	w := &webhooks{e: e, secret: secret, queue: make(chan delivery, 256)}
+	w := &webhooks{e: e, secret: secret, startToken: os.Getenv(startTokenEnv), queue: make(chan delivery, 256)}
 	srv := &http.Server{Handler: w, ReadHeaderTimeout: 10 * time.Second}
 	go w.work(ctx)
 	go func() { _ = srv.Serve(ln) }()
