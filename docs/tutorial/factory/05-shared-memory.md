@@ -116,23 +116,35 @@ Expected: a result with one hit, the occurrence you just made: subject `sig/outc
 `sig/outcome/error on adhoc/<id> (gofmt), occurrence 1, run <run id>`, in the namespace `$NS`.
 Lesson 4's memories aren't there: they're in your own store, which this server has never seen.
 
-The server kept the record as ynf sent it. `memory_recall` leaves out the structured part; the
-store's raw records have it:
+The server kept the record as ynf sent it, and `memory_recall` returns the structured part too:
+
+```bash
+curl -s -X POST http://localhost:3999/mcp \
+  -H 'Authorization: Bearer demo' -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_recall","arguments":{"namespace":"'"$NS"'","tags":["ynf.failure.v1"]}}}' \
+  | grep '^data:' | cut -c7- | python3 -c '
+import json, sys
+hit = json.load(sys.stdin)["result"]["structuredContent"]["data"][0]
+print(hit["dataSchema"], hit["source"])
+print(hit["data"])'
+```
+
+Expected: the schema `ynf.failure.v1`, `source` naming the step that wrote it, and `data` with the
+signature, the lane, the item and the occurrence count.
+
+Who wrote it is in the store's raw record, its `provenance`:
 
 ```bash
 ynm export --cwd "$TUTORIAL/shared.git" | python3 -c '
 import json, sys
 for line in sys.stdin:
-    r = json.loads(line)
-    print(r["namespace"], r["level"], r["dataSchema"], r["provenance"])
-    print(r["data"])'
+    print(json.loads(line)["provenance"]["actor"])'
 ```
 
-Expected: the namespace `$NS`, level `distributed`, the schema `ynf.failure.v1`, and `data` with
-the signature, the lane, the item and the occurrence count. The `provenance` has `source` naming
-the step that wrote it and `actor` naming the writer: here `user:` and the name ynm runs as, because a
-static token names no one, so the server records itself. ynm files a write under the caller only
-when it names no namespace, and ynf always names one, so the token does not move the record.
+Expected: `token:static`. A static token names no one, so every write made with it is recorded the
+same way. ynm files a write under the caller only when it names no namespace, and ynf always names
+one, so the token does not move the record.
 
 ## In production: a machine token
 
@@ -140,7 +152,7 @@ A static token is one shared secret: everyone who has it is the same writer. A r
 signs people and machines in through an identity provider, and ynm records each write's author in
 its audit log. A factory's workers aren't people, so they use the **client-credentials grant**: an
 Auth0 machine-to-machine application, a Keycloak service account or similar, whose token carries
-`memory:read` and `memory:write`. Its subject is the writer ynm records, in place of the server's own name that the static token
+`memory:read` and `memory:write`. Its subject is the writer ynm records, in place of the `token:static` that the shared token
 gave.
 
 Nothing in ynf's config changes but the endpoint. The token arrives in the variable `token_env`

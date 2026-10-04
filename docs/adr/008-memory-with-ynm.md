@@ -114,11 +114,11 @@ account), whose subject is the writer in ynm's audit log. A git remote that ynm 
 works where writers are few. ynm is personal by default and a hosted store keeps nothing at the
 personal level, so a write to a shared store sets `level: distributed` explicitly; over http that is
 the default. The server stores the record as ynf sends it: namespace, subject, tags, level,
-`dataSchema`, `data` and source arrive unchanged. ynf always names its namespace, and ynm files only
+`dataSchema`, `data` and source arrive unchanged, and `memory_recall` returns them all. ynf always names its namespace, and ynm files only
 a record that names none under the caller (`user/<person id>` for a signed-in person, else `common`),
 so a static token does not move it. What a token decides is the writer. A per-identity token names
-the person or machine in ynm's audit log; a shared static token vouches for no one, and the writer
-is the server's own user, the same for every worker. A test runs this against a real
+the person or machine in ynm's audit log; a shared static token vouches for no one, and every write
+made with it is recorded as `token:static`, the same for every worker. A test runs this against a real
 `ynm serve --http` when ynm is on PATH. The factory image carries ynm for the CLI path (ADR-009); the agent's own memory, if
 any, is the harness's configuration.
 
