@@ -700,7 +700,7 @@ func (s *step) openPR(it item.Item, rp *RepoPolicy, lane policy.Lane) event.Even
 			return done(false, err.Error(), nil)
 		}
 	}
-	_ = s.comment(it, marker(s.id, decide.OpenPR), "**ynf** proposed "+prLink(it, n)+".")
+	s.commentQuietly(it, decide.OpenPR, "**ynf** proposed "+prLink(it, n)+".")
 	return done(true, "", map[string]any{"pr": n, "branch": branch, "head": sha})
 }
 
@@ -744,7 +744,7 @@ func (s *step) pushCommit(it item.Item, lane policy.Lane) event.Event {
 		// Someone pushed between the check and the push: never overwrite, start again.
 		return done(false, err.Error(), map[string]any{"head_moved": true})
 	}
-	_ = s.comment(it, marker(s.id, decide.PushCommit),
+	s.commentQuietly(it, decide.PushCommit,
 		fmt.Sprintf("**ynf** added %.7s to this pull request (lane `%s`). The pull request stays yours: review the commit, and merge or revert it as you would any other.", sha, lane.Name))
 	return done(true, "", map[string]any{"head": sha})
 }
@@ -894,6 +894,15 @@ func (s *step) label(it item.Item, lane policy.Lane) {
 	}
 	s.e.log().Info("action", "item", it.Key, "action", decide.Label, "ok", err == nil, "add", strings.Join(c.Add, ","), "remove", strings.Join(c.Remove, ","))
 	s.recordAction(it.Key, ActionRecord{Action: decide.Label, OK: err == nil, Detail: errString(err)})
+}
+
+// commentQuietly tells the ticket what an action did. The action itself has succeeded, so a
+// comment that fails doesn't undo it; but it is logged, or a ticket that never hears about its
+// pull request would go unnoticed.
+func (s *step) commentQuietly(it item.Item, kind, body string) {
+	if err := s.comment(it, marker(s.id, kind), body); err != nil {
+		s.e.log().Warn("ticket comment", "item", it.Key, "action", kind, "err", err)
+	}
 }
 
 // comment posts on the item's ticket through its tracker.

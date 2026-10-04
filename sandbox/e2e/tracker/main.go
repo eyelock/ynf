@@ -21,7 +21,7 @@ type Ticket struct {
 	Labels   []string `json:"labels"`
 	Status   string   `json:"status"`
 	Repo     string   `json:"repo,omitempty"`
-	Comments []string `json:"comments,omitempty"`
+	Comments []string `json:"comments"` // always present, as a real tracker's comment list is
 }
 
 type data struct {
@@ -76,6 +76,9 @@ func main() {
 		err := d.update(func(ts map[string]*Ticket) error {
 			if got = ts[a.Key]; got == nil {
 				return fmt.Errorf("no ticket %s", a.Key)
+			}
+			if got.Comments == nil {
+				got.Comments = []string{}
 			}
 			return nil
 		})
