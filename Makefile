@@ -1,4 +1,5 @@
 # ynf: your named factory.
+#   make help     this list
 #   make deps     check the prerequisites (Go, golangci-lint) and download the modules
 #   make check    format, vet, lint, tests with the race detector, and the coverage gate
 #   make build    bin/ynf
@@ -25,9 +26,12 @@ FACTORY_IMAGE ?= ynf-factory:dev
 YNH_SRC       ?=
 YNM_SRC       ?=
 
-.PHONY: deps docs check build install test cover lint vet fmt fmt-check e2e calibrate clean factory-image
+.PHONY: help deps docs check build install test cover lint vet fmt fmt-check e2e calibrate clean factory-image
 
 check: fmt-check vet lint cover
+
+help:
+	@sed -n '2,/^$$/p' Makefile | sed -e 's/^# \{0,1\}//'
 
 deps:
 	@command -v go >/dev/null 2>&1 || { echo "Installing Go..."; brew install go; }

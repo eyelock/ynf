@@ -25,6 +25,7 @@
   * [Connect a tracker](/how-to/connect-a-tracker.md)
   * [Run the factory image](/how-to/run-the-factory-image.md)
   * [Test against the sandbox](/how-to/test-against-the-sandbox.md)
+  * [Cut a release](/how-to/cut-a-release.md)
 
 * **Reference**
   * [Reference overview](/reference/README.md)

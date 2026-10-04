@@ -1,0 +1,28 @@
+name: Protect Main
+
+# main only moves by release: PRs into it come from develop, release/* or hotfix/*.
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  check-source-branch:
+    name: Verify PR source branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check that PR targets main only from develop, hotfix/*, or release/*
+        run: |
+          SOURCE="${{ github.head_ref }}"
+          echo "PR source branch: $SOURCE"
+
+          if [[ "$SOURCE" == "develop" ]] || [[ "$SOURCE" == hotfix/* ]] || [[ "$SOURCE" == release/* ]]; then
+            echo "✅ Source branch '$SOURCE' is allowed to target main"
+          else
+            echo "❌ PRs to main must come from 'develop', 'hotfix/*', or 'release/*'"
+            echo "   Source branch '$SOURCE' is not allowed."
+            echo "   Open your PR against 'develop' instead."
+            exit 1
+          fi
