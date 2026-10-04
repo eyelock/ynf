@@ -212,11 +212,21 @@ func TestALaneOnlyTightensItsHarness(t *testing.T) {
 func TestYnhUsage(t *testing.T) {
 	out := []byte(`{"exit_code":10,"reason":"turn cap reached (12/12)","backend":"claude","model":"opus","effort":"high","ynh_version":"0.9.0",
 		"auto_approve":"edits","bound_by":"turns","harness":{"name":"lint","version":"1.4.0","sha":"abc"},
-		"consumed":{"turns":12,"tokens":13261,"wall_ms":300000,"cost_usd":0.42}}`)
+		"consumed":{"turns":12,"tokens":13261,"input_tokens":61,"output_tokens":13200,"cache_read_tokens":119551,"wall_ms":300000,"cost_usd":0.42}}`)
 	r := runner.YnhRunner{}.Interpret(10, out, "")
 	u := r.Usage
 	if r.Outcome != runner.Budget || r.Model != "claude/opus" || u.Effort != "high" || u.Turns != 12 || u.Tokens != 13261 ||
-		u.CostUSD != 0.42 || u.BoundBy != "turns" || u.Harness != "lint@1.4.0" || u.HarnessSHA != "abc" || u.RunnerVersion != "0.9.0" || u.AutoApprove != "edits" {
+		u.CostUSD != 0.42 || u.BoundBy != "turns" || u.Harness != "lint@1.4.0" || u.HarnessSHA != "abc" || u.RunnerVersion != "0.9.0" || u.AutoApprove != "edits" ||
+		u.InputTokens != 61 || u.OutputTokens != 13200 || u.CacheReadTokens != 119551 || u.Backend != "claude" {
+		t.Fatalf("%+v", r)
+	}
+}
+
+// TestYnhWithNoModel: a run on the vendor's default model reports its backend but no model, so
+// ynf records no model rather than guessing one.
+func TestYnhWithNoModel(t *testing.T) {
+	r := runner.YnhRunner{}.Interpret(0, []byte(`{"exit_code":0,"backend":"claude","effort":"medium","consumed":{"turns":1,"tokens":2060}}`), "")
+	if r.Model != "" || r.Backend != "claude" {
 		t.Fatalf("%+v", r)
 	}
 }

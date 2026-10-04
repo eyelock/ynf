@@ -139,7 +139,8 @@ type ModelStats struct {
 	Runs      int     `json:"runs"`
 	Converged int     `json:"converged"`
 	Turns     int     `json:"turns"`  // total, over runs that reported them
-	Tokens    int     `json:"tokens"` // total
+	Tokens    int     `json:"tokens"` // total, input and output
+	CacheRead int     `json:"cache_read_tokens,omitempty"`
 	CostUSD   float64 `json:"cost_usd,omitempty"`
 	Proposed  int     `json:"proposed"`
 	Merged    int     `json:"merged"`
@@ -264,13 +265,20 @@ func (e *Engine) addModelStats(ctx context.Context, s *Stats, it item.Item) erro
 			continue
 		}
 		model := r.Model
-		if model == "" {
-			model = r.Runner // a command, or a runner that reports no model
+		switch {
+		case model != "":
+		case r.Backend != "":
+			model = r.Backend + " (model not reported)" // the vendor's default, which it did not name
+		case r.Runner == "command":
+			model = "none (command)"
+		default:
+			model = r.Runner + " (model not reported)"
 		}
 		m := find(model, r.Effort)
 		m.Runs++
 		m.Turns += r.Turns
 		m.Tokens += r.Tokens
+		m.CacheRead += r.CacheReadTokens
 		m.CostUSD += r.CostUSD
 		if r.Outcome == "converged" {
 			m.Converged++

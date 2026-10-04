@@ -44,7 +44,7 @@ an issue on GitHub Enterprise Server is `item/github.acme.internal/…`.
 | `ynf items release <item>` | Clears the item's lease, for one left by an instance that died. |
 | `ynf pause <lane> --reason <text> [--repo <owner/name>]` | Pauses a lane: its tracked items carry on, but nothing new starts. Recorded with who and why. |
 | `ynf resume <lane> --reason <text> [--repo <owner/name>]` | Resumes a lane, with a reason, also recorded: stop conditions are changed deliberately (ADR-010). |
-| `ynf stats [--lane <name>]...` | Every lane's items, proposals, merged, rejected, yield, whether it is paused and why, its top failure signatures, and its runs by model and effort: runs, converged, turns and tokens per run, cost where reported, and the proposals, merges and rejections of each model's changes. |
+| `ynf stats [--lane <name>]...` | Every lane's items, proposals, merged, rejected, yield, whether it is paused and why, its top failure signatures, and its runs by model and effort: runs, converged, turns per run (a ynh turn is one plan-and-check iteration, not one model call), input and output tokens and cache-read tokens per run, cost where reported, and the proposals, merges and rejections of each model's changes. A run on the vendor's default model is listed as `<backend> (model not reported)`, and a command lane as `none (command)`. |
 | `ynf replay <item> [--policy <file>]` | Recomputes every recorded decision, under the recorded lane or the same-named lane in `<file>`, and says which differ. |
 
 ## What the log shows
