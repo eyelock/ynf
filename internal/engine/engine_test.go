@@ -987,6 +987,7 @@ func TestMemoryIsWrittenNotRelayed(t *testing.T) {
 	h := newHarness(t)
 	mem := &fakeMemory{}
 	h.e.Memory = mem
+	h.e.MemoryLevel = "distributed"
 	ctx := context.Background()
 	h.f.labels[1] = []string{"ynf:fmt", "pkg:internal/format"}
 	if err := h.e.Sweep(ctx); err != nil {
@@ -1000,20 +1001,23 @@ func TestMemoryIsWrittenNotRelayed(t *testing.T) {
 	if it := h.item(t, 1); it.State != item.Escalated {
 		t.Fatalf("%s %s", it.State, it.Reason)
 	}
-	var outcome, failure *memory.Record
-	for i, r := range mem.records {
-		switch r.DataSchema {
-		case "ynf.step.v1":
-			outcome = &mem.records[i]
-		case "ynf.failure.v1":
-			failure = &mem.records[i]
+	var failures []memory.Record
+	for _, r := range mem.records {
+		if r.DataSchema == "ynf.step.v1" {
+			t.Fatalf("a step record reached memory: ynf's store is the run history: %+v", r)
+		}
+		if r.DataSchema == "ynf.failure.v1" {
+			failures = append(failures, r)
 		}
 	}
-	if outcome == nil || outcome.Subject != item.IssueKey("github.com", "o/r", 1) || outcome.Namespace != "factory/github.com/o/r" || outcome.Data["outcome"] != "converged" {
-		t.Fatalf("outcome memory: %+v", outcome)
+	if len(failures) != 1 {
+		t.Fatalf("failure memories: %+v", mem.records)
 	}
-	if failure == nil || failure.Subject != "sig/ci/lint" || failure.Type != "episodic" || !slices.Contains(failure.Tags, "failure") {
-		t.Fatalf("failure memory: %+v", failure)
+	f := failures[0]
+	if f.Subject != "sig/ci/lint" || f.Type != "episodic" || f.Level != "distributed" || f.Namespace != "factory/github.com/o/r" ||
+		!slices.Contains(f.Tags, "ynf.failure.v1") || !slices.Contains(f.Tags, "failure") ||
+		!strings.Contains(f.Content, "occurrence 1") || !strings.Contains(f.Content, "run `") || f.Data["step"] == "" {
+		t.Fatalf("failure memory: %+v", f)
 	}
 	entries, _ := h.e.Store.Log(ctx, item.IssueKey("github.com", "o/r", 1))
 	for _, en := range entries {
@@ -1823,5 +1827,34 @@ func TestInlineRunsTheInstalledHarness(t *testing.T) {
 		if !slices.ContainsFunc(handed, func(p string) bool { return strings.Contains(p, filepath.Join("repos", "o", "r")) }) {
 			t.Errorf("the mirror was not handed to the run user: %v", handed)
 		}
+	}
+}
+
+// TestStatsByModel: each lane's runs are broken down by the model the runner reported, from ynf's
+// own run records, with the proposal attributed to the model whose change was proposed.
+func TestStatsByModel(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:agent"}
+	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "github.com", Key: "o/r#1"}, Lane: "agent"}); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := h.e.Stats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(stats, func(s engine.Stats) bool { return s.Lane == "agent" })
+	if i < 0 || len(stats[i].Models) != 1 {
+		t.Fatalf("%+v", stats)
+	}
+	m := stats[i].Models[0]
+	if m.Model != "claude/opus" || m.Runs != 1 || m.Converged != 1 || m.Proposed != 1 || m.Merged != 0 {
+		t.Fatalf("%+v", m)
+	}
+	entries, _ := h.e.Store.Log(ctx, "item/github.com/o/r/issues/1")
+	if !slices.ContainsFunc(entries, func(en store.LogEntry) bool {
+		return en.Kind == "run" && strings.Contains(string(en.Body), `"model":"claude/opus"`)
+	}) {
+		t.Fatal("the run record lacks its model")
 	}
 }

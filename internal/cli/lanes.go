@@ -118,5 +118,25 @@ func (a *app) stats(ctx context.Context, args []string) error {
 			fmt.Fprintf(&b, "  %4d  %s\n", s.Signatures[sig], sig)
 		}
 	}
+	for _, s := range stats {
+		if len(s.Models) == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "\n%s %s, by model and effort:\n", s.Repo, s.Lane)
+		mw := tabwriter.NewWriter(&b, 0, 4, 2, ' ', 0)
+		_, _ = fmt.Fprintln(mw, "  MODEL\tEFFORT\tRUNS\tCONVERGED\tTURNS/RUN\tTOKENS/RUN\tCOST\tPROPOSED\tMERGED\tREJECTED")
+		for _, m := range s.Models {
+			effort, cost := m.Effort, "-"
+			if effort == "" {
+				effort = "-"
+			}
+			if m.CostUSD > 0 {
+				cost = fmt.Sprintf("$%.2f", m.CostUSD)
+			}
+			_, _ = fmt.Fprintf(mw, "  %s\t%s\t%d\t%d\t%.1f\t%d\t%s\t%d\t%d\t%d\n", m.Model, effort, m.Runs, m.Converged,
+				float64(m.Turns)/float64(m.Runs), m.Tokens/m.Runs, cost, m.Proposed, m.Merged, m.Rejected)
+		}
+		_ = mw.Flush()
+	}
 	return a.out(map[string]any{"lanes": stats}, b.String())
 }

@@ -15,10 +15,22 @@ The most useful pattern is one no single run can see: **converged locally, faile
 the harness's sensors and the real gate disagree, which is drift ynh's `version_command` and
 `--calibrate` exist to catch.
 
+## Two places: the history and the patterns
+
+ynf keeps the whole history itself. Every decision, run and action is in the item's log in ynf's
+own store, with each run's model, effort, turns, tokens and cost: that is what `ynf replay` reads
+and what `ynf stats` breaks down by model. ynm gets only the patterns. Its consolidation is built
+to merge memories it judges to say the same thing and to retire ones a newer memory supersedes,
+which is right for knowledge and wrong for a history: "attempt 1 failed" and "attempt 2
+converged" would be pruned into something that never happened. So steps stay in ynf's store, and
+ynm holds failure occurrences.
+
 ## Signatures
 
-For each failure in a step, ynf writes an episodic memory to ynm whose subject is a **failure
-signature**: a short, normalised, deterministic key.
+For each occurrence of a failure, ynf writes an episodic memory to ynm whose subject is a
+**failure signature**: a short, normalised, deterministic key. Each occurrence's text names its
+item, run, step and time, so consolidation never takes two occurrences for one, and each is tagged
+`ynf.failure.v1`, which is how to select ynf's records.
 
 ```
 sig/ci-diverges/golangci-lint/errcheck

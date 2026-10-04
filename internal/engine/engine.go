@@ -96,6 +96,9 @@ type Engine struct {
 	Memory memory.Memory
 	// MemoryNamespace is the namespace for a repository; default factory/<owner>/<name>.
 	MemoryNamespace func(repo string) string
+	// MemoryLevel is the ynm level ynf writes at: empty or personal for one person's store,
+	// distributed for a shared one (ADR-008).
+	MemoryLevel string
 	// ProgressEvery is how often a run in progress is logged; default 30s, negative for never.
 	ProgressEvery time.Duration
 

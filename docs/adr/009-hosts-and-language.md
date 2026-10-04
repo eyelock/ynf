@@ -24,7 +24,7 @@ wrappers that differ only in which adapters they plug in:
 | Intake | `ynf start`, searches | `POST /start`, webhooks behind a load balancer, topics, searches | `ynf start` or `ynf handle` as the job's command | workflow `on:` triggers and `schedule:` |
 | Store | SQLite | S3 or DynamoDB | S3 or DynamoDB | S3 or DynamoDB |
 | Executor (ADR-007) | `process` for attended work, `docker` | `docker` | `inline` | `inline` |
-| Memory (ADR-008) | the developer's ynm store | a git remote, or hosted ynm | a git remote, or hosted ynm | a git remote, or hosted ynm |
+| Memory (ADR-008) | the developer's ynm store | hosted ynm over HTTP | hosted ynm over HTTP | hosted ynm over HTTP |
 | Clock | in-process scheduler | in-process scheduler on every worker, deduplicated by leases | none: the job is one piece of work | a cron workflow running `ynf sweep` |
 
 ```

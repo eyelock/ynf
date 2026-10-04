@@ -114,15 +114,34 @@ func (y YnhRunner) Interpret(exit int, stdout []byte, _ string) Result {
 	}
 	r := Result{Outcome: outcome}
 	var res struct {
-		Reason    string `json:"reason"`
-		SessionID string `json:"session_id"`
-		Backend   string `json:"backend"`
-		Model     string `json:"model"`
+		Reason      string `json:"reason"`
+		SessionID   string `json:"session_id"`
+		Backend     string `json:"backend"`
+		Model       string `json:"model"`
+		Effort      string `json:"effort"`
+		YnhVersion  string `json:"ynh_version"`
+		AutoApprove string `json:"auto_approve"`
+		BoundBy     string `json:"bound_by"`
+		Harness     struct {
+			Name, Version, SHA string
+		} `json:"harness"`
+		Consumed struct {
+			Turns   int     `json:"turns"`
+			Tokens  int     `json:"tokens"`
+			CostUSD float64 `json:"cost_usd"`
+		} `json:"consumed"`
 	}
 	if json.Unmarshal(stdout, &res) == nil {
 		r.Detail, r.Session = res.Reason, res.SessionID
 		if res.Model != "" {
 			r.Model = res.Backend + "/" + res.Model
+		}
+		r.Usage = Usage{
+			Effort: res.Effort, Turns: res.Consumed.Turns, Tokens: res.Consumed.Tokens, CostUSD: res.Consumed.CostUSD,
+			BoundBy: res.BoundBy, HarnessSHA: res.Harness.SHA, RunnerVersion: res.YnhVersion, AutoApprove: res.AutoApprove,
+		}
+		if res.Harness.Name != "" {
+			r.Harness = res.Harness.Name + "@" + res.Harness.Version
 		}
 	}
 	if !ok {

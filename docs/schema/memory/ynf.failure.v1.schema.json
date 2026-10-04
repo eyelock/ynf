@@ -2,13 +2,50 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://eyelock.github.io/ynf/schema/memory/ynf.failure.v1.schema.json",
   "title": "ynf.failure.v1",
-  "description": "The data of an episodic memory ynf writes when a failure signature occurs (ADR-008). Its subject is the signature, so ynm's consolidation clusters the same failure across items.",
+  "description": "The data of an episodic memory ynf writes for each occurrence of a failure signature (ADR-008). Its subject is the signature, so ynm's consolidation clusters the same failure across items; each occurrence's text names its item, run, step and time, so consolidation never takes two occurrences for one fact. It is tagged ynf.failure.v1, which is how to select it: ynm filters by tag, not by dataSchema.",
   "type": "object",
-  "required": ["signature", "item", "lane", "count"],
+  "required": [
+    "signature",
+    "item",
+    "lane",
+    "count"
+  ],
   "properties": {
-    "signature": { "type": "string", "pattern": "^sig/", "examples": ["sig/ci/lint", "sig/egress/denied/www.iana.org", "sig/outcome/stuck"] },
-    "item": { "type": "string" },
-    "lane": { "type": "string" },
-    "count": { "type": "integer", "minimum": 1, "description": "Times this signature has occurred on this item." }
+    "signature": {
+      "type": "string",
+      "pattern": "^sig/",
+      "examples": [
+        "sig/ci/lint",
+        "sig/egress/denied/www.iana.org",
+        "sig/outcome/stuck"
+      ]
+    },
+    "item": {
+      "type": "string"
+    },
+    "lane": {
+      "type": "string"
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Times this signature has occurred on this item."
+    },
+    "run_id": {
+      "type": "string",
+      "description": "The run whose outcome produced it, when there was one."
+    },
+    "step": {
+      "type": "string",
+      "description": "The step that saw it."
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "model": {
+      "type": "string",
+      "description": "The model of the step's run, when the runner reported one."
+    }
   }
 }

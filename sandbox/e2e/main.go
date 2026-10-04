@@ -459,6 +459,7 @@ type memoryRecord struct {
 	Current  struct {
 		Namespace  string         `json:"namespace"`
 		Subject    string         `json:"subject"`
+		Tags       []string       `json:"tags"`
 		DataSchema string         `json:"dataSchema"`
 		Data       map[string]any `json:"data"`
 	} `json:"current"`
@@ -509,10 +510,11 @@ func forgetMemory(repo string) error {
 	return nil
 }
 
-// checkMemory checks an item that ran left its memories: a ynf.step.v1 memory for its last run,
-// and a ynf.failure.v1 memory for each failure signature it counted.
+// checkMemory checks what an item that ran left in memory (ADR-008): no step records, since ynf's
+// own store is the run history, and a ynf.failure.v1 memory for each failure signature it counted,
+// tagged with its schema and naming its item.
 func checkMemory(f fixture, numbers map[string]int, items []item, repo string, memories []memoryRecord) (string, error) {
-	_, key, _, err := subject(f, numbers, repo)
+	_, key, name, err := subject(f, numbers, repo)
 	if err != nil {
 		return "", err
 	}
@@ -521,28 +523,26 @@ func checkMemory(f fixture, numbers map[string]int, items []item, repo string, m
 		return "", nil // nothing ran, so nothing to remember
 	}
 	it := items[i]
-	has := func(schema, subject string, match func(map[string]any) bool) bool {
-		return slices.ContainsFunc(memories, func(m memoryRecord) bool {
-			return m.Current.DataSchema == schema && m.Current.Subject == subject && match(m.Current.Data)
-		})
+	if slices.ContainsFunc(memories, func(m memoryRecord) bool { return m.Current.DataSchema == "ynf.step.v1" }) {
+		return "", fmt.Errorf("%s: a step record reached memory; ynf's own store is the run history", name)
 	}
-	if !has("ynf.step.v1", it.Key, func(d map[string]any) bool { return d["run_id"] == it.LastRun.ID }) {
-		return "", fmt.Errorf("#%d: no ynf.step.v1 memory for its last run %s", it.Number, it.LastRun.ID)
-	}
-	n := 1
+	n := 0
 	for sig := range it.Counters {
 		if !strings.HasPrefix(sig, "sig/") {
 			continue
 		}
-		if !has("ynf.failure.v1", sig, func(d map[string]any) bool { return d["item"] == it.Key }) {
-			return "", fmt.Errorf("#%d: no ynf.failure.v1 memory for %s", it.Number, sig)
+		if !slices.ContainsFunc(memories, func(m memoryRecord) bool {
+			c := m.Current
+			return c.DataSchema == "ynf.failure.v1" && c.Subject == sig && c.Data["item"] == it.Key && slices.Contains(c.Tags, "ynf.failure.v1")
+		}) {
+			return "", fmt.Errorf("%s: no ynf.failure.v1 memory for %s", name, sig)
 		}
 		n++
 	}
-	if n == 1 {
-		return ", its memory written", nil
+	if n == 0 {
+		return ", no failures to remember", nil
 	}
-	return fmt.Sprintf(", its %d memories written", n), nil
+	return fmt.Sprintf(", %d failure memories written", n), nil
 }
 
 // trackerTicket is a ticket in the sandbox tracker's data file (sandbox/e2e/tracker).

@@ -116,3 +116,30 @@ func TestMemorySettings(t *testing.T) {
 		t.Fatalf("explicit: %v %s %s", on, ns, cwd)
 	}
 }
+
+// TestMemoryTransport: cli by default; over http, the endpoint and token variable, and distributed
+// unless a level is given, since a hosted store keeps nothing personal (ADR-008).
+func TestMemoryTransport(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "c.yaml")
+	for _, c := range []struct{ yaml, transport, endpoint, tokenEnv, level string }{
+		{"version: 1\nrepos: [o/r]\n", "cli", "", "", ""},
+		{"version: 1\nrepos: [o/r]\nmemory: {level: distributed}\n", "cli", "", "", "distributed"},
+		{"version: 1\nrepos: [o/r]\nmemory: {transport: http, endpoint: \"https://ynm/mcp\", token_env: T}\n", "http", "https://ynm/mcp", "T", "distributed"},
+		{"version: 1\nrepos: [o/r]\nmemory: {transport: http, endpoint: \"https://ynm/mcp\", token_env: T, level: personal}\n", "http", "https://ynm/mcp", "T", "personal"},
+	} {
+		write(t, p, c.yaml)
+		cfg, err := config.Load(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tr, ep, te, lv := cfg.MemoryTransport()
+		if tr != c.transport || ep != c.endpoint || te != c.tokenEnv || lv != c.level {
+			t.Errorf("%s: %s %s %s %s", c.yaml, tr, ep, te, lv)
+		}
+	}
+	write(t, p, "version: 1\nrepos: [o/r]\nmemory: {transport: ftp}\n")
+	if _, err := config.Load(p); err == nil {
+		t.Fatal("an unknown transport")
+	}
+}

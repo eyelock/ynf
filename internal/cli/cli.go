@@ -304,10 +304,15 @@ func (a *app) engine() (*engine.Engine, error) {
 	}
 	var mu sync.Mutex
 	entropy := ulid.Monotonic(cryptoReader{}, 0)
-	mem, ns := memoryFor(c)
+	mem, ns, level, err := memoryFor(c)
+	if err != nil {
+		_ = st.Close()
+		return nil, withCode(ExitPolicy, err)
+	}
 	a.eng = &engine.Engine{
 		Memory:          mem,
 		MemoryNamespace: ns,
+		MemoryLevel:     level,
 		Store:           st, Forge: fg, ForgeHost: fg.Host(),
 		Trackers:          map[string]tracker.Tracker{fg.Host(): forge.IssueTracker(fg)},
 		Git:               workspace.Workspace{Root: c.WorkPath(), Token: token, Author: workspace.Author{Name: name, Email: email}},

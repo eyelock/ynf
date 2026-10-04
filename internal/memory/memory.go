@@ -9,14 +9,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os/exec"
 	"strings"
+	"sync"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // Record is one memory ynf writes.
 type Record struct {
 	Type       string // episodic
-	Namespace  string // factory/<owner>/<repo>
+	Namespace  string // factory/<host>/<owner>/<repo>
+	Level      string // personal or distributed; empty is ynm's default, personal
 	Subject    string // the item key, or a failure signature
 	Summary    string // one line
 	Content    string // markdown
@@ -47,6 +52,9 @@ func (y Ynm) bin() string {
 // Remember implements Memory.
 func (y Ynm) Remember(ctx context.Context, r Record) error {
 	args := []string{"remember", "--json", "--type", r.Type, "--content", r.Content, "--namespace", r.Namespace}
+	if r.Level != "" {
+		args = append(args, "--level", r.Level)
+	}
 	if r.Subject != "" {
 		args = append(args, "--subject", r.Subject)
 	}
@@ -92,4 +100,102 @@ func Detect() Memory {
 		return nil
 	}
 	return Ynm{}
+}
+
+// YnmHTTP talks to a hosted ynm over its MCP HTTP endpoint (ADR-008): the shared store for a pool
+// of workers or CI, where many writers go through one server. It authenticates with a bearer token,
+// such as a machine token from the identity provider's client-credentials grant, whose subject is
+// the writer in ynm's audit log.
+type YnmHTTP struct {
+	Endpoint string
+	Token    string
+	// Transport overrides the connection, for tests.
+	Transport func() mcp.Transport
+
+	mu      sync.Mutex
+	session *mcp.ClientSession
+}
+
+// Remember implements Memory, through ynm's memory_remember tool.
+func (y *YnmHTTP) Remember(ctx context.Context, r Record) error {
+	args := map[string]any{"type": r.Type, "content": r.Content, "namespace": r.Namespace}
+	for k, v := range map[string]string{"level": r.Level, "subject": r.Subject, "summary": r.Summary, "dataSchema": r.DataSchema, "source": r.Source} {
+		if v != "" {
+			args[k] = v
+		}
+	}
+	if len(r.Tags) > 0 {
+		args["tags"] = r.Tags
+	}
+	if r.Data != nil {
+		args["data"] = r.Data
+	}
+	for attempt := 0; ; attempt++ {
+		s, err := y.connect(ctx)
+		if err != nil {
+			return fmt.Errorf("ynm at %s: %w", y.Endpoint, err)
+		}
+		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "memory_remember", Arguments: args})
+		if err != nil {
+			y.Close()
+			if attempt == 0 && ctx.Err() == nil {
+				continue // a session that went away: once more, fresh
+			}
+			return fmt.Errorf("ynm memory_remember: %w", err)
+		}
+		if res.IsError {
+			var msg []string
+			for _, c := range res.Content {
+				if t, ok := c.(*mcp.TextContent); ok {
+					msg = append(msg, t.Text)
+				}
+			}
+			return fmt.Errorf("ynm memory_remember: %s", strings.Join(msg, " "))
+		}
+		return nil
+	}
+}
+
+func (y *YnmHTTP) connect(ctx context.Context) (*mcp.ClientSession, error) {
+	y.mu.Lock()
+	defer y.mu.Unlock()
+	if y.session != nil {
+		return y.session, nil
+	}
+	var t mcp.Transport
+	if y.Transport != nil {
+		t = y.Transport()
+	} else {
+		hc := &http.Client{Transport: bearer{y.Token, http.DefaultTransport}}
+		t = &mcp.StreamableClientTransport{Endpoint: y.Endpoint, HTTPClient: hc}
+	}
+	s, err := mcp.NewClient(&mcp.Implementation{Name: "ynf", Version: "1"}, nil).Connect(ctx, t, nil)
+	if err != nil {
+		return nil, err
+	}
+	y.session = s
+	return s, nil
+}
+
+// Close ends the session.
+func (y *YnmHTTP) Close() {
+	y.mu.Lock()
+	defer y.mu.Unlock()
+	if y.session != nil {
+		_ = y.session.Close()
+		y.session = nil
+	}
+}
+
+type bearer struct {
+	token string
+	next  http.RoundTripper
+}
+
+func (b bearer) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	if b.token != "" {
+		r.Header.Set("Authorization", "Bearer "+b.token)
+	}
+	return b.next.RoundTrip(r)
 }
