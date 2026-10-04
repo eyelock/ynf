@@ -276,3 +276,17 @@ func TestCommentsThatDoNotFit(t *testing.T) {
 		t.Fatalf("%q", f.comments)
 	}
 }
+
+// TestCommentWhenTheTicketHasNoCommentsYet: a comments mapping that yields null is a ticket with no
+// comments yet, so the comment is posted; it is not mistaken for a mapping that doesn't fit.
+func TestCommentWhenTheTicketHasNoCommentsYet(t *testing.T) {
+	f := &fakeJira{status: "To Do"}
+	c := config(t, map[string]any{"issueKey": "{key}", "labels": "{labels}"})
+	c.Fields.Comments = "null"
+	if err := connect(t, f, c).Comment(context.Background(), "PLAT-881", "<!-- a -->", "proposed"); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.comments) != 1 {
+		t.Fatalf("%q", f.comments)
+	}
+}

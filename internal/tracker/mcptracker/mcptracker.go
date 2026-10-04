@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	"cel.dev/cel-go/cel"
+	"cel.dev/cel-go/common/types"
 	"github.com/eyelock/ynf/internal/facts"
 	"github.com/eyelock/ynf/internal/tracker"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -363,12 +364,16 @@ func (t *Tracker) Comment(ctx context.Context, key, marker, body string) error {
 		if err != nil {
 			return fmt.Errorf("fields.comments: %w", err)
 		}
-		raw, err := out.ConvertToNative(reflect.TypeFor[[]string]())
-		if err != nil {
-			return fmt.Errorf("fields.comments is not a list of strings: %w", err)
-		}
-		if slices.ContainsFunc(raw.([]string), func(c string) bool { return strings.Contains(c, marker) }) {
-			return nil
+		// null is a ticket with no comments yet, as it is for the string fields; a key that is
+		// missing altogether is still an error, so a mistyped mapping is not taken for "none".
+		if out.Type() != types.NullType {
+			raw, err := out.ConvertToNative(reflect.TypeFor[[]string]())
+			if err != nil {
+				return fmt.Errorf("fields.comments is not a list of strings: %w", err)
+			}
+			if slices.ContainsFunc(raw.([]string), func(c string) bool { return strings.Contains(c, marker) }) {
+				return nil
+			}
 		}
 	}
 	_, err := t.call(ctx, t.cfg.Comment, map[string]any{"key": key, "text": body + "\n\n" + marker})

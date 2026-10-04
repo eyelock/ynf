@@ -146,16 +146,17 @@ lanes:
 
 // fakeForge is an in-memory forge.
 type fakeForge struct {
-	mu       sync.Mutex
-	labels   map[int][]string // issue -> labels
-	closed   map[int]bool
-	prs      map[int]*facts.PR
-	byBranch map[string]int
-	opened   []forge.NewPR
-	comments []string
-	lanes    string
-	nextPR   int
-	files    map[string][]byte // repo:path, overriding lanes
+	mu           sync.Mutex
+	failComments bool             // every Comment fails, as a tracker whose comment tool is down would
+	labels       map[int][]string // issue -> labels
+	closed       map[int]bool
+	prs          map[int]*facts.PR
+	byBranch     map[string]int
+	opened       []forge.NewPR
+	comments     []string
+	lanes        string
+	nextPR       int
+	files        map[string][]byte // repo:path, overriding lanes
 }
 
 func newForge() *fakeForge {
@@ -220,6 +221,9 @@ func (f *fakeForge) OpenPR(_ context.Context, _ string, p forge.NewPR) (int, err
 func (f *fakeForge) Comment(_ context.Context, _ string, n int, marker, body string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failComments {
+		return errors.New("comment tool unavailable")
+	}
 	for _, c := range f.comments {
 		if strings.Contains(c, marker) {
 			return nil
@@ -2027,5 +2031,24 @@ func TestStartChecksTheLanesLabels(t *testing.T) {
 	}
 	if body := git(t, h.remote, "show", it.Branch+":internal/format/f.go"); !strings.Contains(body, "func F() int") {
 		t.Fatalf("the lane did not run on the label's package: %s", body)
+	}
+}
+
+// TestAFailedTicketCommentIsLogged: the pull request is still proposed when the ticket can't be told
+// about it, but the failure is logged rather than lost.
+func TestAFailedTicketCommentIsLogged(t *testing.T) {
+	h := newHarness(t)
+	var logged bytes.Buffer
+	h.e.Log = slog.New(slog.NewTextHandler(&logged, nil))
+	h.f.failComments = true
+	h.f.labels[1] = []string{"ynf:fmt", "pkg:internal/format"}
+	if err := h.e.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Proposed {
+		t.Fatalf("%s %s", it.State, it.Reason)
+	}
+	if !strings.Contains(logged.String(), `msg="ticket comment"`) || !strings.Contains(logged.String(), "comment tool unavailable") {
+		t.Fatalf("the failed comment was not logged:\n%s", logged.String())
 	}
 }
