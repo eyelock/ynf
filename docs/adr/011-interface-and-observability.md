@@ -70,8 +70,8 @@ be several or none. Both feed the same `step` (ADR-009). `ynf start`:
 **Connections are inspectable.** `ynf trackers get <ref>` prints the structured ticket ynf would
 read, and `ynf harness show` prints what ynf reads from an image (its harness, focuses, budgets,
 sensors, passthrough variables and ynh capabilities), so a configuration can be checked without
-starting work. `ynf doctor` also checks every tracker and forge is reachable, ynh's and ynm's
-capabilities, and that images can be pulled.
+starting work. `ynf doctor` also checks every tracker and forge is reachable, and that git, docker, ynh
+and ynm are installed (ynh and ynm are optional).
 
 Every command takes `--format json` and returns one object.
 

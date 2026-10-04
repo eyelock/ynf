@@ -46,7 +46,8 @@ Those are the three that say the most, and ynf produces these kinds:
   adopted, once per failed check.
 - `sig/stuck/sensor:<name>`: a run ended without converging with this sensor still failing, once
   per failing sensor.
-- `sig/budget/<cap>/harness:<name>@<version>`: a run ended on a cap, `turns`, `tokens` or `wall`.
+- `sig/budget/<cap>/harness:<name>@<version>`: a run ended on a cap, `turns`, `tokens` or `wall`;
+  the harness part is left off when the run reported none.
 - `sig/outcome/<outcome>`: a run ended without converging and reported nothing more specific. A
   failure is counted under the specific signatures above or this one, never both.
 - `sig/egress/denied/<host>`: the run asked for a host the lane does not allow.

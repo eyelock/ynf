@@ -65,7 +65,7 @@ consolidate lifecycle as the ADRs.
   configuration.
 
 ### Memory
-- FR-19 Write each step's outcome and each observed failure to ynm, keyed so recurring failures
+- FR-19 Write each observed failure to ynm, keyed so recurring failures
   cluster.
 - FR-20 Supply relevant memory (prior attempts on the item, known failure patterns) to the next
   harness run as context.
