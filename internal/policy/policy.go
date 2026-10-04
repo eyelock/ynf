@@ -117,6 +117,9 @@ type Ynh struct {
 	Focus   string `yaml:"focus" json:"focus,omitempty"`
 	Profile string `yaml:"profile" json:"profile,omitempty"`
 	Sandbox string `yaml:"sandbox" json:"sandbox,omitempty"`
+	// Model is ynh's --model: the model the agent runs on, as the vendor names it. Empty is the
+	// vendor's default. The schema limits it to a plain name, so it never reaches argv as a flag.
+	Model string `yaml:"model" json:"model,omitempty"`
 	// AutoApprove is ynh's --auto-approve (edits or all): the worker runs without approval prompts.
 	// ynf passes it only to a contained run (ADR-007).
 	AutoApprove string            `yaml:"auto_approve" json:"auto_approve,omitempty"`

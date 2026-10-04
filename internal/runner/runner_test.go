@@ -111,6 +111,20 @@ func TestCommandRunnerEdges(t *testing.T) {
 	}
 }
 
+// TestYnhModel: a lane's model is passed as --model, and a lane without one leaves ynh on the
+// vendor's default.
+func TestYnhModel(t *testing.T) {
+	pinned := runner.YnhRunner{Cfg: policy.Ynh{Harness: ".", Model: "claude-sonnet-5-5"}}
+	argv, err := pinned.Command(runner.Spec{TaskFile: "t", RunDir: "r"})
+	if err != nil || !strings.Contains(strings.Join(argv, " "), "--model claude-sonnet-5-5") {
+		t.Fatalf("%v %v", argv, err)
+	}
+	argv, _ = runner.YnhRunner{Cfg: policy.Ynh{Harness: "."}}.Command(runner.Spec{TaskFile: "t", RunDir: "r"})
+	if slices.Contains(argv, "--model") {
+		t.Fatalf("no model was pinned: %v", argv)
+	}
+}
+
 func TestYnhAutoApproveOnlyInAnImage(t *testing.T) {
 	y := runner.YnhRunner{Cfg: policy.Ynh{Harness: ".", AutoApprove: "all"}}
 	in, _ := y.Command(runner.Spec{InImage: true, TaskFile: "t", RunDir: "r"})

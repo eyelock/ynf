@@ -298,3 +298,22 @@ func TestCheckLabels(t *testing.T) {
 		t.Fatal("a lane with no templates needs no labels")
 	}
 }
+
+// TestYnhModelIsASafeName: a lane's model reaches ynh's argv, so only a plain model name loads.
+func TestYnhModelIsASafeName(t *testing.T) {
+	lane := func(model string) []byte {
+		return []byte("version: 1\nlanes:\n  x:\n    kind: originate\n    intake: [{github.search: q, every: 5m}]\n" +
+			"    run: {runner: ynh, ynh: {harness: ., model: " + model + "}}\n    when: {converged: open_pr}\n")
+	}
+	for _, ok := range []string{"sonnet", "claude-sonnet-5-5", "anthropic/claude-3.5-sonnet:beta", "gpt_4o"} {
+		f, err := policy.Load(lane(ok))
+		if err != nil || f.Lanes["x"].Run.Ynh.Model != ok {
+			t.Errorf("%s: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{`"a b"`, `"$(id)"`, `"x;y"`, `"-rf"`, `""`} {
+		if _, err := policy.Load(lane(bad)); err == nil {
+			t.Errorf("%s: loaded, want a schema error", bad)
+		}
+	}
+}

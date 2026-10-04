@@ -105,9 +105,74 @@ the run whose change was proposed.
 **`claude (model not reported)`** is honest rather than broken. The lane didn't name a model, so
 Claude used its default, and ynh reports the backend but not which model that was. When ynh reports
 the model a run actually used ([eyelock/ynh#441](https://github.com/eyelock/ynh/issues/441)), this
-column names it, and nothing in ynf changes. Until then every run on the default model is grouped
-here. A command lane has no model at all: its row says `none (command)`, and its turns, tokens and
-cost are `-`, never reported rather than zero.
+column names it for unpinned runs too, and nothing in ynf changes. Until then every run on the
+default model is grouped here. A command lane has no model at all: its row says `none (command)`,
+and its turns, tokens and cost are `-`, never reported rather than zero.
+
+The effort column is read the same way: it is what ynh reports the run used. A lane can't set it,
+because ynh has no way to be told an effort level yet.
+
+## Pin a model, and compare
+
+A lane can name the model its agent runs on: `run.ynh.model`, passed to ynh as `--model`. Leave it
+out and the vendor chooses, as above. With two copies of a lane on different models, `ynf stats`
+puts them side by side.
+
+Make the copy in the configuration repository, where lesson 1 tried the budget. It has to be a
+whole lane, since there is no lane of that name to lay keys over; give it an intake label nothing
+carries, so only the `ynf start` below ever feeds it:
+
+```bash
+cd "$TUTORIAL/factory"
+cat >> .agents/factory/lanes.yaml <<'EOF'
+  lint-paydown-pinned:
+    kind: originate
+    intake:
+      - github.search: 'repo:eyelock/ynf-sandbox is:issue is:open label:"ynf:lint-pinned"'
+        every: 5m
+    run:
+      runner: ynh
+      env: [ANTHROPIC_API_KEY]
+      ynh:
+        harness: .
+        base: ynf-sandbox-agent:latest
+        focus: tidy
+        auto_approve: edits
+        model: sonnet
+        sensor_scope:
+          lint: 'GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run ./{label.pkg}/...'
+          test: 'go test -count=1 ./{label.pkg}/...'
+          docs: 'sh scripts/check-docs.sh {label.pkg}'
+    when:
+      converged: open_pr
+      ci_failed: { retry: 2, then: escalate }
+      outcome.budget: { retry: 1, then: escalate }
+      outcome.stuck: escalate
+EOF
+git commit -qam "lint-paydown-pinned: the lint lane on sonnet" && git push -q
+cd "$TUTORIAL"
+```
+
+`model` takes a plain name: letters, digits and `.`, `-`, `_`, `/`, `:`, in whatever form the vendor
+accepts. For Claude that's an alias such as `sonnet` or a full name such as `claude-sonnet-5-5`. A
+name with a space or a `$(` is refused when the lanes load, because it ends up on ynh's command
+line. Use a model other than your default, or the two rows will be the same model twice.
+
+Run it on the sandbox's other plain lint ticket, the `internal/report` one, and look again:
+
+```bash
+R=$(gh issue list -R $REPO --search 'ineffassign and staticcheck findings in internal/report in:title' --json number -q '.[0].number')
+ynf start $REPO#$R --lane lint-paydown-pinned
+ynf stats --lane lint-paydown-pinned
+```
+
+Expected: a draft pull request as in lesson 2, and a row that names the model instead of saying it
+wasn't reported, `claude/sonnet` or, on a ynh that resolves aliases, the full name it ran, such as
+`claude/claude-sonnet-5-5`. `ynf stats` without `--lane` lists both lanes. The run on the default
+model still reads `claude (model not reported)`. The two lanes ran different tickets, so this is a
+first look, not a controlled test: with a few dozen tickets through each lane the rows say whether
+the pinned model converges as often, at what cost, and whether its changes merge as often. `ynf
+harness` shows the pin beside the lane, as `model sonnet`.
 
 ## Merge it, and see the yield
 
@@ -145,5 +210,7 @@ merges cheaply might do as well with less.
 - **ynf** recorded that with the run in its own store, then followed the change it proposed through
   review to the merge.
 - **`ynf stats`** joined the two: what each model and effort spent, against what became of its work.
+- **`run.ynh.model`** pinned a lane to a model, so two lanes could be compared. Effort is reported,
+  not set.
 
 Next: [4. When it keeps failing](04-when-it-keeps-failing.md).
