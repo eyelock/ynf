@@ -1843,15 +1843,33 @@ func TestInlineRunsTheInstalledHarness(t *testing.T) {
 		if slices.ContainsFunc(handed, func(p string) bool { return strings.Contains(p, filepath.Join("repos", "o", "r")) }) {
 			t.Errorf("the mirror was handed to the run user: %v", handed)
 		}
-		// The hosts the lane expects the job runner to allow, each once.
+		// The hosts the lane expects the job runner to allow, each once: its own, then the model's.
 		m := regexp.MustCompile(`egress is the job runner's.* expects=(\S*)`).FindStringSubmatch(logged.String())
 		if m == nil {
 			t.Fatalf("no egress line:\n%s", logged.String())
 		}
 		hosts := strings.Split(strings.Trim(m[1], `"`), ",")
-		if strings.Join(hosts, ",") != "proxy.golang.org,sum.golang.org" {
-			t.Errorf("expects should list the lane's hosts once each: %v\n%s", hosts, logged.String())
+		if strings.Join(hosts, ",") != "proxy.golang.org,sum.golang.org,api.anthropic.com" {
+			t.Errorf("expects should list the lane's hosts and the model's once each: %v\n%s", hosts, logged.String())
 		}
+	}
+}
+
+// TestInlineCommandLaneExpectsNoModelHost: a command lane has no model, so the egress an inline run
+// logs as expected is only what the lane lists.
+func TestInlineCommandLaneExpectsNoModelHost(t *testing.T) {
+	h := newHarness(t)
+	h.e.Interactive = false
+	h.e.Executor = func(string) (executor.Executor, error) {
+		return executor.Inline{Chown: func(string, int, int) error { return nil }}, nil
+	}
+	var logged bytes.Buffer
+	h.e.Log = slog.New(slog.NewTextHandler(&logged, nil))
+	h.f.lanes = strings.Replace(lanesYAML, "      command: {argv: [gofmt, -w, \"./{label.pkg}\"]}\n", "      command: {argv: [gofmt, -w, \"./{label.pkg}\"]}\n      egress: {allow: [proxy.golang.org]}\n", 1)
+	h.f.labels[1] = []string{"ynf:fmt", "pkg:internal/format"}
+	_ = h.e.Sweep(context.Background())
+	if !strings.Contains(logged.String(), "expects=proxy.golang.org\n") {
+		t.Errorf("a command lane should expect only its own hosts:\n%s", logged.String())
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -490,6 +491,9 @@ func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, wt, 
 				return job, false, fmt.Errorf("lane %s sets auto_approve, which needs ynh capabilities %s; this image's ynh has %s", lane.Name, autoApproveCapabilities, caps)
 			}
 		}
+		// ynf does not enforce egress here, but the agent still needs its model's API, so the
+		// hosts the log says the job runner must allow include it.
+		job.Egress = withModelHosts(job.Egress, y)
 		return job, false, nil
 	}
 	if !ex.Contained() {
@@ -527,11 +531,22 @@ func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, wt, 
 			return job, false, fmt.Errorf("lane %s sets auto_approve, which needs ynh capabilities %s in the agent image; %s has %s: rebuild its base on a newer ynh", lane.Name, autoApproveCapabilities, job.Image, caps)
 		}
 	}
-	job.Egress = append(job.Egress, runner.ModelHosts[y.Vendor()]...)
+	job.Egress = withModelHosts(job.Egress, y)
 	if y.Cfg.Vendor != "" {
 		job.Env["YNH_VENDOR"] = y.Cfg.Vendor
 	}
 	return job, true, nil
+}
+
+// withModelHosts adds the lane's vendor's model API hosts to the hosts the lane allows, after
+// them and without repeating one the lane already lists.
+func withModelHosts(hosts []string, y runner.YnhRunner) []string {
+	for _, h := range runner.ModelHosts[y.Vendor()] {
+		if !slices.Contains(hosts, h) {
+			hosts = append(hosts, h)
+		}
+	}
+	return hosts
 }
 
 // autoApproveCapabilities is the first ynh capabilities version with --auto-approve.
