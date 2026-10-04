@@ -126,20 +126,18 @@ with one key of its own.
 ynf lanes show --repo <you>/ynf-sandbox deps
 ```
 
-Expected, among the output:
+Expected, among the output (the lanes are printed as YAML; `--format json` prints the same as JSON):
 
-```json
-  "sources": {
-    "deps": {
-      "enabled": "repo@43e2224",
-      "intake": "config@998570c",
-      "kind": "config@998570c",
-      "run.runner": "config@998570c",
-      "run.ynh.focus": "config@998570c",
-      "run.ynh.harness": "config@998570c",
-      "when.converged": "config@998570c"
-    }
-  }
+```yaml
+sources:
+  deps:
+    enabled: repo@43e2224
+    intake: config@998570c
+    kind: config@998570c
+    run.runner: config@998570c
+    run.ynh.focus: config@998570c
+    run.ynh.harness: config@998570c
+    when.converged: config@998570c
 ```
 
 `config@998570c` means the configuration repository set it, at that commit; `repo@43e2224` means

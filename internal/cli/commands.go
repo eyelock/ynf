@@ -22,6 +22,7 @@ import (
 	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/store"
 	"github.com/eyelock/ynf/internal/tracker"
+	"gopkg.in/yaml.v3"
 )
 
 type cryptoReader struct{}
@@ -209,8 +210,23 @@ func (a *app) lanesCmd(ctx context.Context, args []string) error {
 			}
 			shown["sources"] = sources
 		}
-		j, _ := json.MarshalIndent(shown, "", "  ")
-		return a.out(shown, string(j))
+		// Text is YAML, the language lanes are written in; --format json gets the same data as JSON.
+		// It goes through JSON so both show the same keys and leave out the same empty values.
+		j, err := json.Marshal(shown)
+		if err != nil {
+			return err
+		}
+		var plain any
+		if err := yaml.Unmarshal(j, &plain); err != nil {
+			return err
+		}
+		var y strings.Builder
+		enc := yaml.NewEncoder(&y)
+		enc.SetIndent(2)
+		if err := enc.Encode(plain); err != nil {
+			return err
+		}
+		return a.out(shown, y.String())
 	}
 	return withCode(ExitUsage, fmt.Errorf("unknown lanes command %q", args[0]))
 }
@@ -452,7 +468,7 @@ func summarise(en store.LogEntry) string {
 			if r.Executor != "" {
 				via = " via " + r.Executor
 			}
-			return fmt.Sprintf("%s %s%s: %s %s, %d changed (%s)", r.RunID, r.Runner, via, r.Outcome, r.Detail, len(r.Changed), r.Duration)
+			return fmt.Sprintf("%s %s%s: %s, %d changed (%s)", r.RunID, r.Runner, via, strings.TrimSpace(r.Outcome+" "+r.Detail), len(r.Changed), r.Duration)
 		}
 	case "action":
 		var r engine.ActionRecord
