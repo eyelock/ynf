@@ -139,8 +139,11 @@ func TestLanesValidate(t *testing.T) {
 
 func TestLanesShowSweepItemsReplay(t *testing.T) {
 	e := setup(t)
-	if code, out, stderr := e.run("lanes", "show"); code != 0 || !strings.Contains(out, `"fmt"`) {
-		t.Fatalf("show: %d %s %s", code, out, stderr)
+	if code, out, stderr := e.run("lanes", "show"); code != 0 || !strings.Contains(out, "\n  fmt:\n") || strings.Contains(out, `"fmt"`) {
+		t.Fatalf("show is YAML as text: %d %s %s", code, out, stderr)
+	}
+	if code, out, stderr := e.run("--format", "json", "lanes", "show"); code != 0 || !strings.Contains(out, `"fmt"`) {
+		t.Fatalf("show is JSON as json: %d %s %s", code, out, stderr)
 	}
 	if code, _, _ := e.run("lanes", "show", "--repo", "o/r", "nope"); code != cli.ExitPolicy {
 		t.Fatalf("show missing lane: %d", code)
@@ -459,6 +462,9 @@ func TestAConfigurationRepository(t *testing.T) {
 	code, out, stderr := e.run("--format", "json", "lanes", "show", "fmt")
 	if code != 0 || !strings.Contains(out, `"config": {`) || !strings.Contains(out, `"run.command.argv": "repo@c0ffee"`) {
 		t.Fatalf("%d %s %s", code, out, stderr)
+	}
+	if code, out, stderr := e.run("lanes", "show", "fmt"); code != 0 || !strings.Contains(out, "run.command.argv: repo@c0ffee") || !strings.Contains(out, "config:\n") {
+		t.Fatalf("sources as text: %d %s %s", code, out, stderr)
 	}
 	if code, out, _ := e.run("--format", "json", "doctor"); !strings.Contains(out, `"factory"`) || !strings.Contains(out, "o/r at c0ffee") {
 		t.Fatalf("doctor: %d %s", code, out)
