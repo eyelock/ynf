@@ -121,6 +121,8 @@ func TestPostStart(t *testing.T) {
 		switch r.URL.Path {
 		case "/repos/o/r":
 			reply(map[string]any{"default_branch": "main"})
+		case "/repos/o/r/branches/main":
+			reply(map[string]any{"name": "main", "commit": map[string]any{"sha": "c0ffee"}})
 		case "/repos/o/r/contents/.agents/factory/lanes.yaml":
 			reply(map[string]any{"type": "file", "encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte(lanes))})
 		case "/repos/o/r/issues/5":

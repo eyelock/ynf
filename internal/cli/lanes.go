@@ -32,10 +32,14 @@ func (a *app) pause(ctx context.Context, cmd string, args []string) error {
 		return err
 	}
 	if *repo == "" {
-		if len(a.cfg.Repos) != 1 {
+		only, err := onlyRepo(ctx, e)
+		if err != nil {
+			return err
+		}
+		if only == "" {
 			return withCode(ExitUsage, errors.New("--repo is needed with more than one enrolled repository"))
 		}
-		*repo = a.cfg.Repos[0]
+		*repo = only
 	}
 	rp, err := e.Policy(ctx, *repo)
 	if err != nil {

@@ -136,7 +136,11 @@ func (e *Engine) Stats(ctx context.Context) ([]Stats, error) {
 		return nil, err
 	}
 	by := map[string]*Stats{}
-	for _, repo := range e.Repos {
+	enrolled, err := e.Enrolled(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, repo := range enrolled {
 		rp, err := e.Policy(ctx, repo)
 		if err != nil {
 			continue // a repository whose lanes cannot be read is reported by sweep and doctor

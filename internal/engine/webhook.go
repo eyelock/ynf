@@ -103,7 +103,11 @@ func (e *Engine) HandleGitHubEvent(ctx context.Context, name string, body []byte
 	if err != nil {
 		return t, err
 	}
-	if !slices.Contains(e.Repos, t.Repo) {
+	enrolled, err := e.Enrolled(ctx)
+	if err != nil {
+		return t, err
+	}
+	if !slices.Contains(enrolled, t.Repo) {
 		return t, fmt.Errorf("%s is not enrolled", t.Repo)
 	}
 	items, err := e.allItems(ctx)

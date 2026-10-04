@@ -45,6 +45,8 @@ type Forge interface {
 	// effects are idempotent per step (ADR-005).
 	Comment(ctx context.Context, repo string, number int, marker, body string) error
 	DefaultBranch(ctx context.Context, repo string) (string, error)
+	// Head is the commit a branch points at, so policy is read at a resolved commit (ADR-006).
+	Head(ctx context.Context, repo, branch string) (string, error)
 	// File reads a file at ref; ErrNotFound if it does not exist.
 	File(ctx context.Context, repo, ref, path string) ([]byte, error)
 }

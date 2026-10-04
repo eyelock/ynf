@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,6 +45,11 @@ type Engine struct {
 	Forge forge.Forge
 	// ForgeHost is Forge's host as item keys name it; default github.com.
 	ForgeHost string
+	// ConfigRepo is the factory's configuration repository (owner/name on the forge), whose
+	// factory.yaml enrols repositories and whose lanes.yaml every enrolled repository's lanes
+	// are laid over (ADR-006). Empty: Repos is the enrolment and each repository's lanes stand
+	// alone.
+	ConfigRepo string
 	// Trackers are the tracker instances by host (ADR-003).
 	Trackers map[string]tracker.Tracker
 	Git      Git
@@ -88,15 +94,31 @@ type Engine struct {
 
 	mu       sync.Mutex
 	policies map[string]*RepoPolicy
+	factory  *FactoryPolicy
 }
 
 // RepoPolicy is a repository's lane policy, read from its default branch.
 type RepoPolicy struct {
 	Repo     string
 	Base     string // default branch
-	Dir      string // the factory folder it came from
+	SHA      string // the commit it was read at
+	Dir      string // the factory folder it came from; empty when the repository has no lanes of its own
 	Shadowed []string
 	File     *policy.File
+	// Config is the configuration repository's policy the lanes were laid over, if any; Own is
+	// the repository's own lanes.yaml, for telling which layer set a value.
+	Config *FactoryPolicy
+	Own    []byte
+}
+
+// FactoryPolicy is the configuration repository's: its factory.yaml and default lanes, read at a
+// resolved commit.
+type FactoryPolicy struct {
+	Repo  string
+	SHA   string
+	Dir   string
+	File  *policy.Factory
+	Lanes []byte // its lanes.yaml; empty when it has none
 }
 
 func (e *Engine) log() *slog.Logger {
@@ -111,9 +133,91 @@ func (e *Engine) ResetPolicies() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.policies = nil
+	e.factory = nil
 }
 
-// Policy reads a repository's lanes from the first factory folder on its default branch.
+// Factory reads the configuration repository at its default branch's head, once until
+// ResetPolicies; nil when there is none.
+func (e *Engine) Factory(ctx context.Context) (*FactoryPolicy, error) {
+	if e.ConfigRepo == "" {
+		return nil, nil
+	}
+	e.mu.Lock()
+	if e.factory != nil {
+		defer e.mu.Unlock()
+		return e.factory, nil
+	}
+	e.mu.Unlock()
+	sha, files, dir, _, err := e.readFactoryFolder(ctx, e.ConfigRepo, policy.FactoryFile, policy.LanesFile)
+	if err != nil {
+		return nil, fmt.Errorf("the configuration repository %s: %w", e.ConfigRepo, err)
+	}
+	if files[policy.FactoryFile] == nil {
+		return nil, fmt.Errorf("the configuration repository %s has no %s in any of %v", e.ConfigRepo, policy.FactoryFile, policy.FactoryDirs)
+	}
+	f, err := policy.LoadFactory(files[policy.FactoryFile])
+	if err != nil {
+		return nil, fmt.Errorf("%s/%s: %w", e.ConfigRepo, dir, err)
+	}
+	fp := &FactoryPolicy{Repo: e.ConfigRepo, SHA: sha, Dir: dir, File: f, Lanes: files[policy.LanesFile]}
+	e.mu.Lock()
+	e.factory = fp
+	e.mu.Unlock()
+	return fp, nil
+}
+
+// Enrolled is the repositories ynf works on: the configuration repository's enrolment, or Repos.
+func (e *Engine) Enrolled(ctx context.Context) ([]string, error) {
+	fp, err := e.Factory(ctx)
+	if err != nil || fp == nil {
+		return e.Repos, err
+	}
+	out := make([]string, 0, len(fp.File.Repos))
+	for _, r := range fp.File.Repos {
+		parts := strings.Split(r, "/")
+		if len(parts) == 3 {
+			if parts[0] != e.forgeHost() {
+				return nil, fmt.Errorf("%s enrols %s, on %s; this ynf works with the forge at %s", e.ConfigRepo, r, parts[0], e.forgeHost())
+			}
+			r = parts[1] + "/" + parts[2]
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// readFactoryFolder reads names from the first factory folder holding any of them, on repo's
+// default branch at its head commit.
+func (e *Engine) readFactoryFolder(ctx context.Context, repo string, names ...string) (sha string, files map[string][]byte, dir string, shadowed []string, err error) {
+	base, err := e.Forge.DefaultBranch(ctx, repo)
+	if err != nil {
+		return "", nil, "", nil, err
+	}
+	if sha, err = e.Forge.Head(ctx, repo, base); err != nil {
+		return "", nil, "", nil, fmt.Errorf("%s's head: %w", base, err)
+	}
+	found := map[string]map[string][]byte{}
+	for _, d := range policy.FactoryDirs {
+		for _, n := range names {
+			b, err := e.Forge.File(ctx, repo, sha, d+"/"+n)
+			switch {
+			case err == nil:
+				if found[d] == nil {
+					found[d] = map[string][]byte{}
+				}
+				found[d][n] = b
+			case !errors.Is(err, forge.ErrNotFound):
+				return "", nil, "", nil, err
+			}
+		}
+	}
+	dir, shadowed = policy.Resolve(func(d string) bool { return found[d] != nil })
+	return sha, found[dir], dir, shadowed, nil
+}
+
+// Policy reads a repository's lanes from the first factory folder on its default branch, at its
+// head commit, laid key by key over the configuration repository's lanes when there is one
+// (ADR-006): the repository wins.
 func (e *Engine) Policy(ctx context.Context, repo string) (*RepoPolicy, error) {
 	e.mu.Lock()
 	if rp, ok := e.policies[repo]; ok {
@@ -122,32 +226,33 @@ func (e *Engine) Policy(ctx context.Context, repo string) (*RepoPolicy, error) {
 	}
 	e.mu.Unlock()
 
-	base, err := e.Forge.DefaultBranch(ctx, repo)
+	fp, err := e.Factory(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sha, files, dir, shadowed, err := e.readFactoryFolder(ctx, repo, policy.LanesFile)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", repo, err)
 	}
-	found := map[string][]byte{}
-	for _, d := range policy.FactoryDirs {
-		b, err := e.Forge.File(ctx, repo, base, d+"/"+policy.LanesFile)
-		switch {
-		case err == nil:
-			found[d] = b
-		case !errors.Is(err, forge.ErrNotFound):
+	own := files[policy.LanesFile]
+	doc := own
+	if fp != nil && len(fp.Lanes) > 0 {
+		if doc, err = policy.MergeLanes(fp.Lanes, own); err != nil {
 			return nil, fmt.Errorf("%s: %w", repo, err)
 		}
 	}
-	dir, shadowed := policy.Resolve(func(d string) bool { _, ok := found[d]; return ok })
-	if dir == "" {
-		return nil, fmt.Errorf("%s has no %s in any of %v on %s", repo, policy.LanesFile, policy.FactoryDirs, base)
+	if len(doc) == 0 {
+		return nil, fmt.Errorf("%s has no %s in any of %v, and no configuration repository gives it lanes", repo, policy.LanesFile, policy.FactoryDirs)
 	}
-	f, err := policy.Load(found[dir])
+	f, err := policy.Load(doc)
 	if err != nil {
 		return nil, fmt.Errorf("%s/%s: %w", repo, dir, err)
 	}
 	for _, s := range shadowed {
 		e.log().Warn("shadowed factory folder", "repo", repo, "used", dir, "shadowed", s)
 	}
-	rp := &RepoPolicy{Repo: repo, Base: base, Dir: dir, Shadowed: shadowed, File: f}
+	base, _ := e.Forge.DefaultBranch(ctx, repo)
+	rp := &RepoPolicy{Repo: repo, Base: base, SHA: sha, Dir: dir, Shadowed: shadowed, File: f, Config: fp, Own: own}
 	e.mu.Lock()
 	if e.policies == nil {
 		e.policies = map[string]*RepoPolicy{}
@@ -175,7 +280,13 @@ func (e *Engine) wantLane(name string) bool {
 }
 
 // Sweep runs every enrolled repository's lane searches and starts a step for each new ticket.
-func (e *Engine) Sweep(ctx context.Context) error { return e.SweepRepos(ctx, e.Repos) }
+func (e *Engine) Sweep(ctx context.Context) error {
+	repos, err := e.Enrolled(ctx)
+	if err != nil {
+		return err
+	}
+	return e.SweepRepos(ctx, repos)
+}
 
 // SweepRepos is Sweep for some of the enrolled repositories.
 func (e *Engine) SweepRepos(ctx context.Context, repos []string) error {

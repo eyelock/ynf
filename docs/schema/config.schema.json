@@ -6,8 +6,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "version",
-    "repos"
+    "version"
   ],
   "properties": {
     "$schema": {
@@ -24,7 +23,22 @@
         "type": "string",
         "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$"
       },
-      "description": "Enrolled repositories (owner/name). ynf reads each one's lanes from its default branch."
+      "description": "Enrolled repositories (owner/name), when there is no configuration repository. ynf reads each one's lanes from its default branch."
+    },
+    "factory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repo"
+      ],
+      "description": "The factory's configuration repository (ADR-006): its .agents/factory/factory.yaml enrols repositories, and its lanes.yaml is the default every enrolled repository's lanes are laid over. Instead of repos.",
+      "properties": {
+        "repo": {
+          "type": "string",
+          "pattern": "^([A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+/)?[A-Za-z0-9-]+/[A-Za-z0-9._-]+$",
+          "description": "owner/name, or host/owner/name naming the forge."
+        }
+      }
     },
     "store": {
       "type": "string",
@@ -127,5 +141,27 @@
       "type": "string",
       "pattern": "^[0-9]+(ms|s|m|h)$"
     }
-  }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "repos"
+      ],
+      "not": {
+        "required": [
+          "factory"
+        ]
+      }
+    },
+    {
+      "required": [
+        "factory"
+      ],
+      "not": {
+        "required": [
+          "repos"
+        ]
+      }
+    }
+  ]
 }

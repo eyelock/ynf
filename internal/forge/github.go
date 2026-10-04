@@ -223,6 +223,20 @@ func (g *GitHub) Comment(ctx context.Context, repo string, number int, marker, b
 	return err
 }
 
+// Head implements Forge.
+func (g *GitHub) Head(ctx context.Context, repo, branch string) (string, error) {
+	o, r := split(repo)
+	b, resp, err := g.c.Repositories.GetBranch(ctx, o, r, branch, 0)
+	if err != nil {
+		// GetBranch reports a status it does not expect as a plain error, with the response.
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			return "", ErrNotFound
+		}
+		return "", notFound(err)
+	}
+	return b.GetCommit().GetSHA(), nil
+}
+
 // DefaultBranch implements Forge.
 func (g *GitHub) DefaultBranch(ctx context.Context, repo string) (string, error) {
 	o, r := split(repo)

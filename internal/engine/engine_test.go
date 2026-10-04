@@ -139,6 +139,7 @@ type fakeForge struct {
 	comments []string
 	lanes    string
 	nextPR   int
+	files    map[string][]byte // repo:path, overriding lanes
 }
 
 func newForge() *fakeForge {
@@ -227,11 +228,31 @@ func (f *fakeForge) SetLabels(_ context.Context, _ string, n int, add, remove []
 
 func (f *fakeForge) DefaultBranch(context.Context, string) (string, error) { return "main", nil }
 
-func (f *fakeForge) File(_ context.Context, _, _, path string) ([]byte, error) {
+func (f *fakeForge) Head(context.Context, string, string) (string, error) { return "c0ffee", nil }
+
+func (f *fakeForge) File(_ context.Context, repo, _, path string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if b, ok := f.files[repo+":"+path]; ok {
+		if b == nil {
+			return nil, forge.ErrNotFound
+		}
+		return b, nil
+	}
 	if path == ".agents/factory/lanes.yaml" {
 		return []byte(f.lanes), nil
 	}
 	return nil, forge.ErrNotFound
+}
+
+// setFile gives one repository its own file; nil makes it absent.
+func (f *fakeForge) setFile(repo, path string, b []byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.files == nil {
+		f.files = map[string][]byte{}
+	}
+	f.files[repo+":"+path] = b
 }
 
 func (f *fakeForge) setChecks(pr int, conclusion string) {
@@ -1429,4 +1450,87 @@ type failingLabels struct{ tracker.Tracker }
 
 func (failingLabels) Label(context.Context, string, []string, []string) error {
 	return errors.New("labels are read-only here")
+}
+
+// TestAConfigurationRepositoryEnrolsAndGivesDefaults: enrolment comes from the configuration
+// repository, its lanes lie under every enrolled repository's key by key with the repository
+// winning, a repository may have no lanes of its own, and every decision records both commits.
+func TestAConfigurationRepositoryEnrolsAndGivesDefaults(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.e.Repos = nil
+	h.e.ConfigRepo = "acme/factory"
+	h.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r, github.com/o/plain]\n"))
+	h.f.setFile("acme/factory", ".agents/factory/lanes.yaml", []byte(`version: 1
+lanes:
+  agent:
+    kind: originate
+    intake: [{github.search: "label:ynf:agent", every: 5m}]
+    run: {runner: command, command: {argv: ["true"]}}
+    when: {converged: open_pr}
+  org-only:
+    kind: originate
+    intake: [{github.search: "label:ynf:org", every: 5m}]
+    run: {runner: command, command: {argv: ["true"]}}
+    when: {converged: escalate}
+`))
+	h.f.setFile("o/plain", ".agents/factory/lanes.yaml", nil)
+	enrolled, err := h.e.Enrolled(ctx)
+	if err != nil || strings.Join(enrolled, ",") != "o/r,o/plain" {
+		t.Fatalf("%v %v", enrolled, err)
+	}
+	rp, err := h.e.Policy(ctx, "o/r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// o/r's own agent lane wins key by key: its run, its labels; org-only comes from the config.
+	if rp.File.Lanes["agent"].Run.Command.Argv[0] != "sh" || rp.File.Lanes["agent"].Labels == nil {
+		t.Fatalf("the repository's agent lane should win: %+v", rp.File.Lanes["agent"].Run.Command)
+	}
+	if _, ok := rp.File.Lanes["org-only"]; !ok || rp.SHA != "c0ffee" || rp.Config == nil || rp.Config.SHA != "c0ffee" {
+		t.Fatalf("lanes %v sha %q config %+v", rp.File.Names(), rp.SHA, rp.Config)
+	}
+	plain, err := h.e.Policy(ctx, "o/plain")
+	if err != nil || plain.Dir != "" || strings.Join(plain.File.Names(), ",") != "agent,org-only" {
+		t.Fatalf("a repository with no lanes of its own: %+v %v", plain, err)
+	}
+	h.f.labels[1] = []string{"ynf:agent"}
+	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "github.com", Key: "o/r#1"}, Lane: "agent"}); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := h.e.Store.Log(ctx, "item/github.com/o/r/issues/1")
+	if !strings.Contains(string(entries[0].Body), `"sha":"c0ffee","config":"acme/factory","config_sha":"c0ffee"`) {
+		t.Fatalf("the decision should record both commits: %s", entries[0].Body)
+	}
+	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "github.com", Key: "x/y#1"}, Lane: "agent"}); err == nil || !strings.Contains(err.Error(), "not an enrolled repository") {
+		t.Fatalf("enrolment comes from the configuration repository: %v", err)
+	}
+
+	bad := newHarness(t)
+	bad.e.ConfigRepo = "acme/factory"
+	bad.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [ghe.acme.internal/o/r]\n"))
+	if _, err := bad.e.Enrolled(ctx); err == nil || !strings.Contains(err.Error(), "this ynf works with the forge at github.com") {
+		t.Fatalf("another forge: %v", err)
+	}
+	missing := newHarness(t)
+	missing.e.ConfigRepo = "acme/factory"
+	missing.f.setFile("acme/factory", ".agents/factory/factory.yaml", nil)
+	missing.f.setFile("acme/factory", ".agents/factory/lanes.yaml", nil)
+	if err := missing.e.Sweep(ctx); err == nil || !strings.Contains(err.Error(), "has no factory.yaml") {
+		t.Fatalf("no factory.yaml: %v", err)
+	}
+	invalid := newHarness(t)
+	invalid.e.ConfigRepo = "acme/factory"
+	invalid.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\n"))
+	if _, err := invalid.e.Enrolled(ctx); err == nil || !strings.Contains(err.Error(), "repos") {
+		t.Fatalf("a factory.yaml without repos: %v", err)
+	}
+	none := newHarness(t)
+	none.e.ConfigRepo = "acme/factory"
+	none.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\n"))
+	none.f.setFile("acme/factory", ".agents/factory/lanes.yaml", nil)
+	none.f.setFile("o/r", ".agents/factory/lanes.yaml", nil)
+	if _, err := none.e.Policy(ctx, "o/r"); err == nil || !strings.Contains(err.Error(), "no configuration repository gives it lanes") {
+		t.Fatalf("no lanes anywhere: %v", err)
+	}
 }

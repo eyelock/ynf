@@ -314,6 +314,7 @@ func (a *app) engine() (*engine.Engine, error) {
 		ImageCapabilities: imageCapabilities,
 		HostCapabilities:  hostCapabilities,
 		Repos:             c.Repos,
+		ConfigRepo:        configRepo(c),
 		Lanes:             a.lanes,
 		WorkDir:           c.WorkPath(),
 		Owner:             c.Owner,
@@ -338,4 +339,15 @@ func envOr(k, d string) string {
 		return v
 	}
 	return d
+}
+
+// configRepo is the configuration repository the config names, as owner/name on the forge.
+func configRepo(c *config.Config) string {
+	if c.Factory == nil {
+		return ""
+	}
+	if parts := strings.Split(c.Factory.Repo, "/"); len(parts) == 3 {
+		return parts[1] + "/" + parts[2]
+	}
+	return c.Factory.Repo
 }

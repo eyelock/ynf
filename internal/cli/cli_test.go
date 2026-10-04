@@ -46,6 +46,10 @@ func fakeAPI(t *testing.T) string {
 		switch r.URL.Path {
 		case "/repos/o/r":
 			reply(map[string]any{"default_branch": "main"})
+		case "/repos/o/r/branches/main":
+			reply(map[string]any{"name": "main", "commit": map[string]any{"sha": "c0ffee"}})
+		case "/repos/o/r/contents/.agents/factory/factory.yaml":
+			reply(map[string]any{"type": "file", "encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte("version: 1\nrepos: [o/r]\n"))})
 		case "/repos/o/r/contents/.agents/factory/lanes.yaml":
 			reply(map[string]any{"type": "file", "encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte(lanes))})
 		case "/search/issues":
@@ -188,7 +192,7 @@ func TestSweepUntilSettledAndDoctor(t *testing.T) {
 		t.Fatalf("until settled: %d %s %s", code, out, stderr)
 	}
 	code, out, _ := e.run("--format", "json", "doctor")
-	if !strings.Contains(out, `"lanes o/r"`) || !strings.Contains(out, ".agents/factory on main: fmt, off") {
+	if !strings.Contains(out, `"lanes o/r"`) || !strings.Contains(out, ".agents/factory on main at c0ffee: fmt, off") {
 		t.Fatalf("doctor: %d %s", code, out)
 	}
 }
@@ -380,5 +384,28 @@ func TestStart(t *testing.T) {
 		if code != c.code || !strings.Contains(stderr, c.want) {
 			t.Errorf("%v: %d %s", c.args, code, stderr)
 		}
+	}
+}
+
+// TestAConfigurationRepository: the config names a configuration repository instead of repos,
+// and lanes show says which layer set each value. (The fake forge has one repository, so it is
+// its own configuration repository here; the engine's tests cover two.)
+func TestAConfigurationRepository(t *testing.T) {
+	e := setup(t)
+	if err := os.WriteFile(e.cfg, []byte("version: 1\nfactory: {repo: o/r}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, stderr := e.run("--format", "json", "lanes", "show", "fmt")
+	if code != 0 || !strings.Contains(out, `"config": {`) || !strings.Contains(out, `"run.command.argv": "repo@c0ffee"`) {
+		t.Fatalf("%d %s %s", code, out, stderr)
+	}
+	if code, out, _ := e.run("--format", "json", "doctor"); !strings.Contains(out, `"factory"`) || !strings.Contains(out, "o/r at c0ffee") {
+		t.Fatalf("doctor: %d %s", code, out)
+	}
+	if err := os.WriteFile(e.cfg, []byte("version: 1\nrepos: [o/r]\nfactory: {repo: o/r}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, stderr := e.run("items", "ls"); code != cli.ExitPolicy {
+		t.Fatalf("repos and factory together: %d %s", code, stderr)
 	}
 }

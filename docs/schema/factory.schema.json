@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eyelock.github.io/ynf/schema/factory.schema.json",
+  "title": "ynf factory",
+  "description": "A factory's configuration repository: .agents/factory/factory.yaml, read from its default branch at a resolved commit (ADR-006). Which repositories ynf works on, and the trackers and forges it works with. Default lanes for every enrolled repository go beside it in lanes.yaml.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "repos"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "const": 1
+    },
+    "repos": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "The enrolled repositories: host/owner/name, or owner/name on the default forge. ynf reads a target repository's lanes only when it is enrolled here.",
+      "items": {
+        "type": "string",
+        "pattern": "^([A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+/)?[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+      }
+    },
+    "trackers": {
+      "type": "object",
+      "description": "Tracker instances by name (ADR-003), declared only here: they carry credentials and name servers ynf starts.",
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
+    "forges": {
+      "type": "object",
+      "description": "Forge instances by name (ADR-003), declared only here.",
+      "additionalProperties": {
+        "type": "object"
+      }
+    }
+  }
+}
