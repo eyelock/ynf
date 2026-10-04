@@ -4,6 +4,10 @@
 sandbox/terraform/.terraform/
 sandbox/terraform/*.tfstate
 sandbox/terraform/*.tfstate.*
+sandbox/terraform/backend_override.tf
+
+# The sandbox's own settings (sandbox.env.example is the template)
+sandbox/sandbox.env
 
 # Built binaries
 bin/

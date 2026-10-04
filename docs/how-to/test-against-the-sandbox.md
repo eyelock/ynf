@@ -1,12 +1,28 @@
 # Test the factory against the sandbox
 
-The sandbox, `eyelock/ynf-sandbox`, is a private repository built from
+The sandbox is a pair of repositories of your own, `<owner>/ynf-sandbox` and
+`<owner>/ynf-sandbox-factory`, built from
 [`sandbox/`](https://github.com/eyelock/ynf/tree/main/sandbox) with planted problems and an expected
 outcome for every issue and pull request. Three commands use it, and they test different things.
 
+## Set it up once
+
+```bash
+cd sandbox
+cp sandbox.env.example sandbox.env    # set SANDBOX_OWNER: your GitHub user or organisation
+gh auth refresh -s delete_repo        # resetting deletes the repositories
+make up
+```
+
+Terraform keeps its state in a local file unless `sandbox.env` sets `SANDBOX_STATE=s3` with a
+bucket, region and `AWS_PROFILE`, so that other machines can reset the same sandbox. Only then is
+AWS needed. See [`sandbox/README.md`](https://github.com/eyelock/ynf/tree/main/sandbox#your-settings).
+
+## What each command tests
+
 | Command | Tests | Needs |
 |---|---|---|
-| `make reset` | nothing: deletes and rebuilds the sandbox | the `ynf-terraform` AWS profile, a token with `delete_repo` |
+| `make reset` | nothing: deletes and rebuilds the sandbox | `sandbox.env`, Terraform, a token with `delete_repo`; AWS only for S3 state |
 | `make calibrate` | the **fixtures**: each fails before its known fix and passes after | ynh from `develop` (`.agents/harness/`) |
 | `make e2e` | the **factory**: ynf runs the fixtures and ends where each expects | Docker |
 

@@ -7,15 +7,8 @@ terraform {
     }
   }
 
-  # State bucket from infra/terraform-state, locked with a .tflock object beside the state. Runs need
-  # AWS credentials that can use it (the ynf-terraform profile).
-  backend "s3" {
-    bucket       = "ynf-terraform-state.eyelock.net"
-    key          = "sandbox/terraform.tfstate"
-    region       = "us-east-1"
-    use_lockfile = true
-    encrypt      = true
-  }
+  # State is local (terraform.tfstate here) unless sandbox.env sets SANDBOX_STATE=s3: then `make
+  # init` writes backend_override.tf with the S3 backend it names.
 }
 
 # The token comes from GITHUB_TOKEN; the Makefile sets it from `gh auth token`.
