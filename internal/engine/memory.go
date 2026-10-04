@@ -67,9 +67,9 @@ func (s *step) remember(in decide.Input, d decide.Decision) {
 		r := it.LastRun
 		write(memory.Record{
 			Subject: it.Key,
-			Summary: fmt.Sprintf("%s run on %s#%d ended %s", it.Lane, it.Repo, it.Number, r.Outcome),
-			Content: fmt.Sprintf("Lane `%s` ran on %s#%d. Outcome: **%s**. %s\n\nChanged %d file(s). Decision: %s.",
-				it.Lane, it.Repo, it.Number, r.Outcome, r.Detail, len(r.Changed), d.Reason),
+			Summary: fmt.Sprintf("%s run on %s ended %s", it.Lane, it.Ref(), r.Outcome),
+			Content: fmt.Sprintf("Lane `%s` ran on %s. Outcome: **%s**. %s\n\nChanged %d file(s). Decision: %s.",
+				it.Lane, it.Ref(), r.Outcome, r.Detail, len(r.Changed), d.Reason),
 			Tags:       []string{"outcome:" + r.Outcome},
 			DataSchema: "ynf.step.v1",
 			Data: map[string]any{
@@ -84,8 +84,8 @@ func (s *step) remember(in decide.Input, d decide.Decision) {
 		}
 		write(memory.Record{
 			Subject:    name,
-			Summary:    fmt.Sprintf("%s on %s#%d (%s)", name, it.Repo, it.Number, it.Lane),
-			Content:    fmt.Sprintf("Failure `%s` occurred on %s#%d in lane `%s`, %d time(s) on this item. %s", name, it.Repo, it.Number, it.Lane, it.Counters[name], d.Reason),
+			Summary:    fmt.Sprintf("%s on %s (%s)", name, it.Ref(), it.Lane),
+			Content:    fmt.Sprintf("Failure `%s` occurred on %s in lane `%s`, %d time(s) on this item. %s", name, it.Ref(), it.Lane, it.Counters[name], d.Reason),
 			Tags:       []string{"failure"},
 			DataSchema: "ynf.failure.v1",
 			Data:       map[string]any{"signature": name, "item": it.Key, "lane": it.Lane, "count": it.Counters[name]},

@@ -15,7 +15,10 @@ ynf [global flags] <command> [flags]
 | `--log-format text\|json` | `text` | `text` is logfmt for people; `json` is one object per line for tools. `YNF_LOG_FORMAT` is the fallback. |
 | `-v` | off | Debug logging to stderr. |
 
-An item is named `owner/name#number`, or by its key, `item/github/<owner>/<name>/issues/<number>`.
+An item is named by its reference: `host/owner/name#number` for a GitHub issue
+(`github.com/eyelock/ynh#77`), or `owner/name#number` for one on the configured forge. It can also
+be named by its key, `item/<host>/<owner>/<name>/issues/<number>`. The host is the forge's own, so
+an issue on GitHub Enterprise Server is `item/github.acme.internal/…`.
 
 ## Commands
 

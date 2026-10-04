@@ -5,21 +5,32 @@ import (
 	"time"
 
 	"github.com/eyelock/ynf/internal/item"
+	"github.com/eyelock/ynf/internal/tracker"
 )
 
-func TestSubjectRoundTrip(t *testing.T) {
-	s := item.IssueSubject("eyelock/ynf-sandbox", 10)
-	repo, n, err := item.ParseIssueSubject(s)
-	if err != nil || repo != "eyelock/ynf-sandbox" || n != 10 {
-		t.Fatalf("%s -> %s %d %v", s, repo, n, err)
+// TestKeysAreTheSystemsOwn: keys and references carry the system's host and the tracker's own
+// key, never a configured name (ADR-002).
+func TestKeysAreTheSystemsOwn(t *testing.T) {
+	gh := item.Item{Ticket: tracker.Ref{Host: "github.com", Key: "eyelock/ynf-sandbox#10"}}
+	if k := item.Key(gh.Ticket); k != "item/github.com/eyelock/ynf-sandbox/issues/10" {
+		t.Fatal(k)
 	}
-	for _, bad := range []string{"github:pr:o/r#1", "github:issue:o/r", "github:issue:o/r#x"} {
-		if _, _, err := item.ParseIssueSubject(bad); err == nil {
-			t.Errorf("%q parsed", bad)
-		}
+	if gh.Subject() != "github.com/eyelock/ynf-sandbox#10" || gh.Ref() != gh.Subject() || gh.BranchName() != "ynf/issue-10" {
+		t.Fatalf("%s %s %s", gh.Subject(), gh.Ref(), gh.BranchName())
 	}
-	if item.IssueKey("o/r", 3) != "item/github/o/r/issues/3" || item.BranchFor(3) != "ynf/issue-3" {
-		t.Fatal("key or branch format changed")
+	if item.IssueKey("github.acme.internal", "acme/x", 3) != "item/github.acme.internal/acme/x/issues/3" {
+		t.Fatal("an Enterprise Server key")
+	}
+	if item.PRKey("github.com", "o/r", 412) != "item/github.com/o/r/pulls/412" {
+		t.Fatal("a pull request key")
+	}
+	jira := item.Item{Ticket: tracker.Ref{Host: "acme.atlassian.net", Key: "PLAT-881"}}
+	if item.Key(jira.Ticket) != "item/acme.atlassian.net/PLAT-881" || jira.Ref() != "acme.atlassian.net/PLAT-881" || jira.BranchName() != "ynf/plat-881" {
+		t.Fatalf("%s %s %s", item.Key(jira.Ticket), jira.Ref(), jira.BranchName())
+	}
+	odd := item.Item{Ticket: tracker.Ref{Host: "x.example", Key: "A B/C#d"}}
+	if odd.BranchName() != "ynf/a-b-c-d" {
+		t.Fatal(odd.BranchName())
 	}
 }
 

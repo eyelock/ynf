@@ -26,6 +26,7 @@ import (
 	"github.com/eyelock/ynf/internal/memory"
 	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/store/sqlite"
+	"github.com/eyelock/ynf/internal/tracker"
 	"github.com/eyelock/ynf/internal/workspace"
 )
 
@@ -206,6 +207,19 @@ func (f *fakeForge) Comment(_ context.Context, _ string, n int, marker, body str
 	return nil
 }
 
+func (f *fakeForge) SetLabels(_ context.Context, _ string, n int, add, remove []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ls := slices.DeleteFunc(slices.Clone(f.labels[n]), func(l string) bool { return slices.Contains(remove, l) })
+	for _, l := range add {
+		if !slices.Contains(ls, l) {
+			ls = append(ls, l)
+		}
+	}
+	f.labels[n] = ls
+	return nil
+}
+
 func (f *fakeForge) DefaultBranch(context.Context, string) (string, error) { return "main", nil }
 
 func (f *fakeForge) File(_ context.Context, _, _, path string) ([]byte, error) {
@@ -265,7 +279,7 @@ func newHarness(t *testing.T) *harness {
 	h.now.Store(time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC).UnixNano())
 	var ids atomic.Int64
 	h.e = &engine.Engine{
-		Store: st, Forge: h.f,
+		Store: st, Forge: h.f, Trackers: map[string]tracker.Tracker{"github.com": forge.IssueTracker(h.f)},
 		Git:      workspace.Workspace{Root: filepath.Join(dir, "work"), RemoteURL: func(string) string { return remote }},
 		Executor: executor.For,
 		Repos:    []string{"o/r"},
@@ -293,7 +307,7 @@ func git(t *testing.T, dir string, args ...string) string {
 
 func (h *harness) item(t *testing.T, n int) item.Item {
 	t.Helper()
-	it, _, err := lease.Load(context.Background(), h.e.Store, item.IssueKey("o/r", n))
+	it, _, err := lease.Load(context.Background(), h.e.Store, item.IssueKey("github.com", "o/r", n))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +329,7 @@ func TestOriginateEndToEnd(t *testing.T) {
 
 	// The pushed commit carries the formatted file and ynf's trailers.
 	msg := git(t, h.remote, "log", "-1", "--format=%B", "ynf/issue-1")
-	for _, want := range []string{"ynf(fmt): Issue 1", "YNF-Item: item/github/o/r/issues/1", "YNF-Step: ", "YNF-Run: "} {
+	for _, want := range []string{"ynf(fmt): Issue 1", "YNF-Item: github.com/o/r#1", "YNF-Step: ", "YNF-Run: "} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("commit lacks %q:\n%s", want, msg)
 		}
@@ -370,7 +384,7 @@ func TestOriginateEndToEnd(t *testing.T) {
 	}
 
 	// Every decision replays to the same result.
-	log, err := h.e.Store.Log(ctx, item.IssueKey("o/r", 1))
+	log, err := h.e.Store.Log(ctx, item.IssueKey("github.com", "o/r", 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +420,7 @@ func TestReplayUnderAnotherPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	log, _ := h.e.Store.Log(ctx, item.IssueKey("o/r", 1))
+	log, _ := h.e.Store.Log(ctx, item.IssueKey("github.com", "o/r", 1))
 	rs, err := engine.Replay(log, stricter)
 	if err != nil {
 		t.Fatal(err)
@@ -471,15 +485,15 @@ func TestUncontainedExecutorRefusedUnattended(t *testing.T) {
 func TestHeldLeaseIsSkipped(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	key := item.IssueKey("o/r", 1)
+	key := item.IssueKey("github.com", "o/r", 1)
 	h.f.labels[1] = []string{"ynf:fmt", "pkg:internal/format"}
-	if err := lease.Create(ctx, h.e.Store, item.Item{Key: key, Lane: "fmt", Repo: "o/r", Number: 1, State: item.Intake}); err != nil {
+	if err := lease.Create(ctx, h.e.Store, item.Item{Key: key, Lane: "fmt", Ticket: tracker.Ref{Host: "github.com", Key: "o/r#1"}, Forge: "github.com", Repo: "o/r", Number: 1, State: item.Intake}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := lease.Claim(ctx, h.e.Store, key, "someone-else", "s", time.Hour, h.e.Now); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.e.Handle(ctx, key, event.New("x", "t", event.TimerDue, item.IssueSubject("o/r", 1), h.e.Now(), nil)); err != nil {
+	if err := h.e.Handle(ctx, key, event.New("x", "t", event.TimerDue, "github.com/o/r#1", h.e.Now(), nil)); err != nil {
 		t.Fatal(err)
 	}
 	if it := h.item(t, 1); it.State != item.Intake || it.Lease.Owner != "someone-else" {
@@ -524,9 +538,9 @@ func TestUnsupportedIntakesAndRemovedLanes(t *testing.T) {
 	ctx := context.Background()
 
 	// An item whose lane was deleted from the policy is treated as switched off.
-	key := item.IssueKey("o/r", 9)
+	key := item.IssueKey("github.com", "o/r", 9)
 	h.f.labels[9] = []string{"x"}
-	if err := lease.Create(ctx, h.e.Store, item.Item{Key: key, Lane: "deleted", Repo: "o/r", Number: 9, State: item.Ready}); err != nil {
+	if err := lease.Create(ctx, h.e.Store, item.Item{Key: key, Lane: "deleted", Ticket: tracker.Ref{Host: "github.com", Key: "o/r#9"}, Forge: "github.com", Repo: "o/r", Number: 9, State: item.Ready}); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.e.Store.Schedule(ctx, key, h.e.Now()); err != nil {
@@ -746,7 +760,7 @@ func TestAdoptPushesACommitOnTheAuthorsBranch(t *testing.T) {
 	if err := h.e.Sweep(ctx); err != nil {
 		t.Fatal(err)
 	}
-	it, _, err := lease.Load(ctx, h.e.Store, item.PRKey("o/r", 8))
+	it, _, err := lease.Load(ctx, h.e.Store, item.PRKey("github.com", "o/r", 8))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -782,7 +796,7 @@ func TestAdoptStartsAgainWhenTheAuthorPushesMeanwhile(t *testing.T) {
 	if err := h.e.Sweep(ctx); err != nil {
 		t.Fatal(err)
 	}
-	it, _, _ := lease.Load(ctx, h.e.Store, item.PRKey("o/r", 8))
+	it, _, _ := lease.Load(ctx, h.e.Store, item.PRKey("github.com", "o/r", 8))
 	if it.State != item.Proposed || it.Counter("head_moved") != 1 {
 		t.Fatalf("%s %s counters=%v", it.State, it.Reason, it.Counters)
 	}
@@ -790,7 +804,7 @@ func TestAdoptStartsAgainWhenTheAuthorPushesMeanwhile(t *testing.T) {
 	if !strings.Contains(log, "author|the author pushes meanwhile") || !strings.HasPrefix(log, "ynf|") {
 		t.Fatalf("the author's racing commit must survive, with ynf's on top:\n%s", log)
 	}
-	entries, _ := h.e.Store.Log(ctx, item.PRKey("o/r", 8))
+	entries, _ := h.e.Store.Log(ctx, item.PRKey("github.com", "o/r", 8))
 	moved := false
 	for _, e := range entries {
 		moved = moved || (e.Kind == "action" && strings.Contains(string(e.Body), "moved from"))
@@ -809,7 +823,7 @@ func TestAdoptWaitsWhileCIIsGreen(t *testing.T) {
 	if err := h.e.Sweep(ctx); err != nil {
 		t.Fatal(err)
 	}
-	it, _, _ := lease.Load(ctx, h.e.Store, item.PRKey("o/r", 8))
+	it, _, _ := lease.Load(ctx, h.e.Store, item.PRKey("github.com", "o/r", 8))
 	if it.State != item.Intake || it.NextDue == nil {
 		t.Fatalf("a green pull request should be watched, not adopted or ignored: %s %s", it.State, it.Reason)
 	}
@@ -831,7 +845,7 @@ func TestPausedLaneHoldsWorkUntilResumed(t *testing.T) {
 	if it := h.item(t, 1); it.State != item.Ready || len(h.f.opened) != 0 {
 		t.Fatalf("a paused lane ran: %s %s", it.State, it.Reason)
 	}
-	log, _ := h.e.Store.Log(ctx, item.IssueKey("o/r", 1))
+	log, _ := h.e.Store.Log(ctx, item.IssueKey("github.com", "o/r", 1))
 	if !strings.Contains(string(log[len(log)-1].Body), "by david: release freeze") {
 		t.Fatal("the decision should say who paused the lane and why")
 	}
@@ -865,7 +879,7 @@ func TestQueueDivergenceHoldsNewWork(t *testing.T) {
 	if it := h.item(t, 2); it.State != item.Ready || !strings.Contains(it.Reason, "eligible") {
 		t.Fatalf("the second item should wait while one proposal is open: %s %s", it.State, it.Reason)
 	}
-	log, _ := h.e.Store.Log(ctx, item.IssueKey("o/r", 2))
+	log, _ := h.e.Store.Log(ctx, item.IssueKey("github.com", "o/r", 2))
 	if !strings.Contains(string(log[len(log)-1].Body), "1 proposals awaiting review (max 1)") {
 		t.Fatalf("%s", log[len(log)-1].Body)
 	}
@@ -875,7 +889,7 @@ func TestYieldFloorPausesTheLane(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	for n, st := range map[int]item.State{11: item.Closed, 12: item.Closed, 13: item.Done} {
-		it := item.Item{Key: item.IssueKey("o/r", n), Lane: "fmt", Repo: "o/r", Number: n, PR: 100 + n, State: st,
+		it := item.Item{Key: item.IssueKey("github.com", "o/r", n), Lane: "fmt", Ticket: tracker.Ref{Host: "github.com", Key: fmt.Sprintf("o/r#%d", n)}, Forge: "github.com", Repo: "o/r", Number: n, PR: 100 + n, State: st,
 			Counters: map[string]int{"sig/ci/lint": 1, "retry/ci_failed": 2}}
 		if err := lease.Create(ctx, h.e.Store, it); err != nil {
 			t.Fatal(err)
@@ -963,16 +977,16 @@ func TestMemoryIsWrittenAndRecalled(t *testing.T) {
 			failure = &mem.records[i]
 		}
 	}
-	if outcome == nil || outcome.Subject != item.IssueKey("o/r", 1) || outcome.Namespace != "factory/o/r" || outcome.Data["outcome"] != "converged" {
+	if outcome == nil || outcome.Subject != item.IssueKey("github.com", "o/r", 1) || outcome.Namespace != "factory/o/r" || outcome.Data["outcome"] != "converged" {
 		t.Fatalf("outcome memory: %+v", outcome)
 	}
 	if failure == nil || failure.Subject != "sig/ci/lint" || failure.Type != "episodic" || !slices.Contains(failure.Tags, "failure") {
 		t.Fatalf("failure memory: %+v", failure)
 	}
-	if len(mem.asked) == 0 || !strings.HasPrefix(mem.asked[0], "factory/o/r | item/github/o/r/issues/1") {
+	if len(mem.asked) == 0 || !strings.HasPrefix(mem.asked[0], "factory/o/r | item/github.com/o/r/issues/1") {
 		t.Fatalf("recall: %v", mem.asked)
 	}
-	entries, _ := h.e.Store.Log(ctx, item.IssueKey("o/r", 1))
+	entries, _ := h.e.Store.Log(ctx, item.IssueKey("github.com", "o/r", 1))
 	for _, en := range entries {
 		if en.Kind != "run" {
 			continue
@@ -1059,7 +1073,7 @@ echo '{"exit_code":0}'
 		t.Fatal(err)
 	}
 	out := buf.String()
-	for _, want := range []string{`msg="run started"`, `runner=ynh`, `msg="run in progress"`, `turns=2 last=sensor_run`, `msg="run finished"`, `outcome=converged exit=0`, `msg=action item=item/github/o/r/issues/1 action=open_pr ok=true`} {
+	for _, want := range []string{`msg="run started"`, `runner=ynh`, `msg="run in progress"`, `turns=2 last=sensor_run`, `msg="run finished"`, `outcome=converged exit=0`, `msg=action item=item/github.com/o/r/issues/1 action=open_pr ok=true`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("log lacks %q:\n%s", want, out)
 		}
@@ -1093,7 +1107,7 @@ func startSlow(t *testing.T, h *harness) (gate string, done chan error) {
 	done = make(chan error, 1)
 	go func() { done <- h.e.Sweep(context.Background()) }()
 	for i := 0; ; i++ {
-		if doc, _, err := h.e.Store.Get(context.Background(), "item/github/o/r/issues/1"); err == nil && strings.Contains(string(doc), `"state":"running"`) {
+		if doc, _, err := h.e.Store.Get(context.Background(), "item/github.com/o/r/issues/1"); err == nil && strings.Contains(string(doc), `"state":"running"`) {
 			return gate, done
 		}
 		if i > 500 {
@@ -1110,7 +1124,7 @@ func another(t *testing.T, h *harness) *engine.Engine {
 	return &engine.Engine{
 		Store: h.e.Store, Forge: h.e.Forge,
 		Git:      workspace.Workspace{Root: dir, RemoteURL: func(string) string { return h.remote }},
-		Executor: h.e.Executor, Repos: h.e.Repos, WorkDir: dir, Owner: "other",
+		Trackers: h.e.Trackers, Executor: h.e.Executor, Repos: h.e.Repos, WorkDir: dir, Owner: "other",
 		LeaseTTL: h.e.LeaseTTL, Heartbeat: h.e.Heartbeat, Poll: h.e.Poll,
 		RunTimeout: h.e.RunTimeout, Interactive: true, Now: h.e.Now, NewID: h.e.NewID,
 	}

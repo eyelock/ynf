@@ -24,6 +24,7 @@ import (
 	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/runner"
 	"github.com/eyelock/ynf/internal/store"
+	"github.com/eyelock/ynf/internal/tracker"
 )
 
 // maxDecisions bounds how many decisions one step makes before it lets the timer take over.
@@ -215,10 +216,14 @@ func (s *step) event(typ string, it item.Item, data map[string]any) event.Event 
 
 func (s *step) probe(it item.Item) (facts.Facts, error) {
 	var f facts.Facts
-	t, text, err := s.e.Forge.Ticket(s.ctx, it.Repo, it.Number)
+	tr, err := s.e.tracker(it.Ticket)
+	if err != nil {
+		return f, err
+	}
+	t, text, err := tr.Get(s.ctx, it.Ticket.Key)
 	switch {
-	case errors.Is(err, forge.ErrNotFound):
-		t = facts.Ticket{Number: it.Number, State: "closed"}
+	case errors.Is(err, tracker.ErrNotFound):
+		t = facts.Ticket{Key: it.Ticket.Key, Number: it.Number, State: "closed"}
 	case err != nil:
 		return f, err
 	}
@@ -250,7 +255,7 @@ func (s *step) act(a decide.Action, it item.Item, rp *RepoPolicy, lane policy.La
 	case decide.Escalate, decide.Quarantine, decide.Comment, decide.Close:
 		verb := map[string]string{decide.Escalate: "escalated this", decide.Quarantine: "quarantined this", decide.Comment: "notes", decide.Close: "closed this"}[a.Kind]
 		body := fmt.Sprintf("**ynf** %s: %s\n\nLane `%s`, step `%s`.", verb, a.Reason, lane.Name, s.id)
-		err := s.e.Forge.Comment(s.ctx, it.Repo, it.Number, marker(s.id, a.Kind), body)
+		err := s.comment(it, marker(s.id, a.Kind), body)
 		s.e.log().Info("action", "item", it.Key, "action", a.Kind, "ok", err == nil, "reason", oneLine(a.Reason, 200))
 		s.recordAction(it.Key, ActionRecord{Action: a.Kind, OK: err == nil, Detail: errString(err)})
 		if err != nil {
@@ -345,8 +350,10 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	}
 	_, cr := ex.Paths(job)
 	labels := []string(nil)
-	if t, _, err := e.Forge.Ticket(s.ctx, it.Repo, it.Number); err == nil {
-		labels = t.Labels
+	if tr, err := e.tracker(it.Ticket); err == nil {
+		if t, _, err := tr.Get(s.ctx, it.Ticket.Key); err == nil {
+			labels = t.Labels
+		}
 	}
 	argv, err := r.Command(runner.Spec{Lane: lane, Labels: labels, TaskFile: cr + "/task.md", RunDir: cr, Feedback: feedback, InImage: inImage, Focus: focus})
 	if err != nil {
@@ -514,12 +521,12 @@ func (s *step) openPR(it item.Item, rp *RepoPolicy, lane policy.Lane) event.Even
 	if len(subject) > 72 {
 		subject = subject[:71] + "…"
 	}
-	msg := subject + "\n\n" + fmt.Sprintf("Proposed by ynf for #%d, lane %s.\n\n", it.Number, lane.Name) + trailers(it, s.id, s.run.RunID, s.result)
+	msg := subject + "\n\n" + fmt.Sprintf("Proposed by ynf for %s, lane %s.\n\n", it.Ref(), lane.Name) + trailers(it, s.id, s.run.RunID, s.result)
 	sha, err := e.Git.Commit(s.ctx, s.wt, msg)
 	if err != nil {
 		return done(false, err.Error(), nil)
 	}
-	branch := item.BranchFor(it.Number)
+	branch := it.BranchName()
 	if err := e.Git.Push(s.ctx, s.wt, it.Repo, branch); err != nil {
 		return done(false, err.Error(), nil)
 	}
@@ -536,7 +543,7 @@ func (s *step) openPR(it item.Item, rp *RepoPolicy, lane policy.Lane) event.Even
 			return done(false, err.Error(), nil)
 		}
 	}
-	_ = e.Forge.Comment(s.ctx, it.Repo, it.Number, marker(s.id, decide.OpenPR), fmt.Sprintf("**ynf** proposed #%d.", n))
+	_ = s.comment(it, marker(s.id, decide.OpenPR), "**ynf** proposed "+prLink(it, n)+".")
 	return done(true, "", map[string]any{"pr": n, "branch": branch, "head": sha})
 }
 
@@ -571,7 +578,7 @@ func (s *step) pushCommit(it item.Item, lane policy.Lane) event.Event {
 	if len(subject) > 72 {
 		subject = subject[:71] + "…"
 	}
-	msg := subject + "\n\n" + fmt.Sprintf("Added by ynf to #%d, lane %s.\n\n", it.Number, lane.Name) + trailers(it, s.id, s.run.RunID, s.result)
+	msg := subject + "\n\n" + fmt.Sprintf("Added by ynf to %s, lane %s.\n\n", it.Ref(), lane.Name) + trailers(it, s.id, s.run.RunID, s.result)
 	sha, err := e.Git.Commit(s.ctx, s.wt, msg)
 	if err != nil {
 		return done(false, err.Error(), nil)
@@ -580,7 +587,7 @@ func (s *step) pushCommit(it item.Item, lane policy.Lane) event.Event {
 		// Someone pushed between the check and the push: never overwrite, start again.
 		return done(false, err.Error(), map[string]any{"head_moved": true})
 	}
-	_ = e.Forge.Comment(s.ctx, it.Repo, it.Number, marker(s.id, decide.PushCommit),
+	_ = s.comment(it, marker(s.id, decide.PushCommit),
 		fmt.Sprintf("**ynf** added %.7s to this pull request (lane `%s`). The pull request stays yours: review the commit, and merge or revert it as you would any other.", sha, lane.Name))
 	return done(true, "", map[string]any{"head": sha})
 }
@@ -611,16 +618,31 @@ func trailers(it item.Item, stepID, runID string, r runner.Result) string {
 	if r.Model != "" {
 		fmt.Fprintf(&b, "Co-Authored-By: %s <noreply@anthropic.com>\n", r.Model)
 	}
-	fmt.Fprintf(&b, "YNF-Item: %s\nYNF-Step: %s\nYNF-Run: %s\n", it.Key, stepID, runID)
+	fmt.Fprintf(&b, "YNF-Item: %s\nYNF-Step: %s\nYNF-Run: %s\n", it.Ref(), stepID, runID)
 	if r.Session != "" {
 		fmt.Fprintf(&b, "YNH-Session: %s\n", r.Session)
 	}
 	return b.String()
 }
 
+// prLink names a pull request on its ticket: #12 beside a GitHub issue in the same repository,
+// which GitHub links; its URL anywhere else, such as on a JIRA ticket.
+func prLink(it item.Item, n int) string {
+	if repo, _, err := forge.ParseIssueKey(it.Ticket.Key); err == nil && it.Ticket.Host == it.Forge && repo == it.Repo {
+		return fmt.Sprintf("#%d", n)
+	}
+	return fmt.Sprintf("https://%s/%s/pull/%d", it.Forge, it.Repo, n)
+}
+
 func prBody(it item.Item, lane policy.Lane, run *RunRecord) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Closes #%d.\n\nProposed by **ynf**: lane `%s`, runner `%s`, executor `%s`.\n\n", it.Number, lane.Name, run.Runner, run.Executor)
+	// Closes links a GitHub issue in the same repository; any other ticket is named.
+	if repo, n, err := forge.ParseIssueKey(it.Ticket.Key); err == nil && it.Ticket.Host == it.Forge && repo == it.Repo {
+		fmt.Fprintf(&b, "Closes #%d.\n\n", n)
+	} else {
+		fmt.Fprintf(&b, "For %s.\n\n", it.Ref())
+	}
+	fmt.Fprintf(&b, "Proposed by **ynf**: lane `%s`, runner `%s`, executor `%s`.\n\n", lane.Name, run.Runner, run.Executor)
 	b.WriteString("| | |\n|---|---|\n")
 	fmt.Fprintf(&b, "| Item | `%s` |\n| Run | `%s` (%s, %s) |\n| Changed | %d file(s) |\n", it.Key, run.RunID, run.Outcome, run.Duration, len(run.Changed))
 	b.WriteString("\nA human reviews and merges this; ynf never merges.")
@@ -631,7 +653,7 @@ func prBody(it item.Item, lane policy.Lane, run *RunRecord) string {
 // (NFR-5).
 func task(it item.Item, t forge.Text, feedback, remembered string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Task: %s#%d\n\n%s\n\nThe ticket, quoted as the reporter wrote it:\n\n", it.Repo, it.Number, t.URL)
+	fmt.Fprintf(&b, "# Task: %s\n\n%s\n\nThe ticket, quoted as the reporter wrote it:\n\n", it.Ref(), t.URL)
 	for l := range strings.SplitSeq(strings.TrimSpace(t.Title+"\n\n"+t.Body), "\n") {
 		b.WriteString("> " + l + "\n")
 	}
@@ -702,6 +724,15 @@ func oneLine(s string, max int) string {
 		s = s[:max] + "…"
 	}
 	return s
+}
+
+// comment posts on the item's ticket through its tracker.
+func (s *step) comment(it item.Item, marker, body string) error {
+	tr, err := s.e.tracker(it.Ticket)
+	if err != nil {
+		return err
+	}
+	return tr.Comment(s.ctx, it.Ticket.Key, marker, body)
 }
 
 func marker(id, what string) string { return fmt.Sprintf("<!-- ynf:%s=%s -->", what, id) }

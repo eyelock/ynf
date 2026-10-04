@@ -71,6 +71,8 @@ type env struct {
 	dir string
 }
 
+// setup runs ynf against a fake GitHub. It is a local server, so its host, 127.0.0.1, is the
+// forge host in item keys.
 func setup(t *testing.T) env {
 	t.Helper()
 	dir := t.TempDir()
@@ -158,7 +160,7 @@ func TestLanesShowSweepItemsReplay(t *testing.T) {
 	}
 	pol := filepath.Join(e.dir, "on.yaml")
 	_ = os.WriteFile(pol, []byte(strings.Replace(lanes, "    enabled: false\n", "", 1)), 0o644)
-	if code, out, _ := e.run("replay", "item/github/o/r/issues/5", "--policy", pol); code != cli.ExitDifferences || !strings.Contains(out, "DIFF") {
+	if code, out, _ := e.run("replay", "item/127.0.0.1/o/r/issues/5", "--policy", pol); code != cli.ExitDifferences || !strings.Contains(out, "DIFF") {
 		t.Fatalf("replay under another policy: %d %s", code, out)
 	}
 	if code, out, _ := e.run("items", "retry", "o/r#5"); code != 0 || !strings.Contains(out, "back to ready") {
@@ -213,7 +215,7 @@ func TestItemsLogSummarisesRunsAndActions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	k := item.IssueKey("o/r", 5)
+	k := item.IssueKey("127.0.0.1", "o/r", 5)
 	for i, body := range []string{
 		`{"run_id":"R1","runner":"command","executor":"docker","outcome":"converged","changed":["a.go"],"duration":"2s"}`,
 		`{"action":"open_pr","ok":false,"detail":"diff gate refused"}`,
@@ -239,7 +241,7 @@ func TestRetryRefusesALiveLease(t *testing.T) {
 		t.Fatal("sweep")
 	}
 	st, _ := sqlite.Open(filepath.Join(e.dir, "state.db"))
-	if _, err := lease.Claim(context.Background(), st, item.IssueKey("o/r", 5), "other", "s", time.Hour, time.Now); err != nil {
+	if _, err := lease.Claim(context.Background(), st, item.IssueKey("127.0.0.1", "o/r", 5), "other", "s", time.Hour, time.Now); err != nil {
 		t.Fatal(err)
 	}
 	_ = st.Close()
@@ -336,7 +338,7 @@ func TestLogFileAndFormat(t *testing.T) {
 		t.Fatalf("json to stderr: %d %s", code, stderr)
 	}
 	b, err := os.ReadFile(logPath)
-	if err != nil || !strings.Contains(string(b), `"msg":"decided"`) || !strings.Contains(string(b), `"item":"item/github/o/r/issues/5"`) {
+	if err != nil || !strings.Contains(string(b), `"msg":"decided"`) || !strings.Contains(string(b), `"item":"item/127.0.0.1/o/r/issues/5"`) {
 		t.Fatalf("the log file should hold the same structured lines: %s %v", b, err)
 	}
 	if code, _, _ := e.run("--log-format", "yaml", "items", "ls"); code != cli.ExitUsage {

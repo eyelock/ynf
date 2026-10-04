@@ -21,7 +21,7 @@ func setup(t *testing.T) (*sqlite.Store, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	key := item.IssueKey("o/r", 1)
+	key := item.IssueKey("github.com", "o/r", 1)
 	if err := lease.Create(context.Background(), s, item.Item{Key: key, State: item.Ready}); err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestClaimMissingItem(t *testing.T) {
 	if _, err := lease.Claim(context.Background(), s, "item/none", "a", "s", time.Minute, newClock().now); err == nil {
 		t.Fatal("claimed a missing item")
 	}
-	if err := lease.Create(context.Background(), s, item.Item{Key: item.IssueKey("o/r", 1)}); err == nil {
+	if err := lease.Create(context.Background(), s, item.Item{Key: item.IssueKey("github.com", "o/r", 1)}); err == nil {
 		t.Fatal("created a duplicate item")
 	}
 }

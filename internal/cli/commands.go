@@ -9,16 +9,19 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/eyelock/ynf/internal/engine"
+	"github.com/eyelock/ynf/internal/forge"
 	"github.com/eyelock/ynf/internal/item"
 	"github.com/eyelock/ynf/internal/lease"
 	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/store"
+	"github.com/eyelock/ynf/internal/tracker"
 )
 
 type cryptoReader struct{}
@@ -233,23 +236,41 @@ func table(items []item.Item) string {
 		if it.PR > 0 {
 			pr = "#" + strconv.Itoa(it.PR)
 		}
-		_, _ = fmt.Fprintf(w, "%s#%d\t%s\t%s\t%s\t%s\n", it.Repo, it.Number, it.Lane, it.State, pr, it.Reason)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", it.Ref(), it.Lane, it.State, pr, it.Reason)
 	}
 	_ = w.Flush()
 	return b.String()
 }
 
-// key accepts owner/name#number or a full item key.
-func key(s string) (string, error) {
+// key accepts an item key, or a reference (ADR-002): host/owner/name#number, owner/name#number
+// on the configured forge (defaultHost), or host/KEY for a ticket on another tracker.
+func key(s, defaultHost string) (string, error) {
 	if strings.HasPrefix(s, "item/") {
 		return s, nil
 	}
-	repo, n, ok := strings.Cut(s, "#")
-	num, err := strconv.Atoi(n)
-	if !ok || err != nil || !strings.Contains(repo, "/") {
-		return "", withCode(ExitUsage, fmt.Errorf("%q is not owner/name#number or an item key", s))
+	ref, err := parseRef(s, defaultHost)
+	if err != nil {
+		return "", withCode(ExitUsage, err)
 	}
-	return item.IssueKey(repo, num), nil
+	return item.Key(ref), nil
+}
+
+// parseRef resolves a reference to a tracker host and the tracker's own key.
+func parseRef(s, defaultHost string) (tracker.Ref, error) {
+	if repoPart, num, ok := strings.Cut(s, "#"); ok {
+		n, err := strconv.Atoi(num)
+		parts := strings.Split(repoPart, "/")
+		if err == nil && n > 0 && (len(parts) == 2 || len(parts) == 3) && !slices.Contains(parts, "") {
+			host := defaultHost
+			if len(parts) == 3 {
+				host, parts = parts[0], parts[1:]
+			}
+			return tracker.Ref{Host: host, Key: forge.IssueKey(parts[0]+"/"+parts[1], n)}, nil
+		}
+	} else if host, k, ok := strings.Cut(s, "/"); ok && strings.Contains(host, ".") && k != "" && !strings.Contains(k, "/") {
+		return tracker.Ref{Host: host, Key: k}, nil
+	}
+	return tracker.Ref{}, fmt.Errorf("%q is not a reference (owner/name#number, host/owner/name#number, host/KEY) or an item key", s)
 }
 
 func (a *app) items(ctx context.Context, args []string) error {
@@ -266,7 +287,7 @@ func (a *app) items(ctx context.Context, args []string) error {
 	if len(args) < 2 {
 		return withCode(ExitUsage, fmt.Errorf("items %s needs an item", args[0]))
 	}
-	k, err := key(args[1])
+	k, err := key(args[1], e.ForgeHost)
 	if err != nil {
 		return err
 	}
@@ -364,7 +385,11 @@ func (a *app) replay(ctx context.Context, args []string) error {
 	if err := fs.Parse(args[1:]); err != nil {
 		return withCode(ExitUsage, err)
 	}
-	k, err := key(args[0])
+	e, err := a.engine()
+	if err != nil {
+		return err
+	}
+	k, err := key(args[0], e.ForgeHost)
 	if err != nil {
 		return err
 	}
@@ -377,10 +402,6 @@ func (a *app) replay(ctx context.Context, args []string) error {
 		if override, err = policy.Load(doc); err != nil {
 			return withCode(ExitPolicy, err)
 		}
-	}
-	e, err := a.engine()
-	if err != nil {
-		return err
 	}
 	log, err := e.Store.Log(ctx, k)
 	if err != nil {

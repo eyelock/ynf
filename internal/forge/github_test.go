@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/eyelock/ynf/internal/forge"
+	"github.com/eyelock/ynf/internal/tracker"
 )
 
 // fakeGitHub serves the handful of API routes ynf uses.
@@ -22,6 +23,7 @@ type fakeGitHub struct {
 	mu       sync.Mutex
 	comments []string
 	opened   map[string]any
+	labelled []string
 }
 
 func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +81,23 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(b, &f.opened)
 		w.WriteHeader(http.StatusCreated)
 		reply(map[string]any{"number": 8})
+	case p == "/repos/o/r/issues/1/labels" && r.Method == http.MethodPost:
+		var add []string
+		_ = json.NewDecoder(r.Body).Decode(&add)
+		f.labelled = append(f.labelled, "+"+strings.Join(add, ","))
+		reply([]map[string]string{})
+	case strings.HasPrefix(p, "/repos/o/r/issues/1/labels/") && r.Method == http.MethodDelete:
+		name := strings.TrimPrefix(p, "/repos/o/r/issues/1/labels/")
+		if name == "absent" {
+			w.WriteHeader(http.StatusNotFound)
+			reply(map[string]string{"message": "Label does not exist"})
+			return
+		}
+		f.labelled = append(f.labelled, "-"+name)
+		reply([]map[string]string{})
+	case strings.HasPrefix(p, "/repos/o/r/issues/2/labels"):
+		w.WriteHeader(http.StatusForbidden)
+		reply(map[string]string{"message": "no"})
 	case p == "/repos/o/r/issues/1/comments" && r.Method == http.MethodGet:
 		out := []any{}
 		for _, c := range f.comments {
@@ -210,5 +229,57 @@ func TestRepoFiles(t *testing.T) {
 	}
 	if _, err := g.DefaultBranch(ctx, "o/missing"); !errors.Is(err, forge.ErrNotFound) {
 		t.Fatalf("missing repo: %v", err)
+	}
+}
+
+// TestIssueTracker: GitHub serves its issues through the tracker port, keyed owner/name#number,
+// and labels go on and off idempotently.
+func TestIssueTracker(t *testing.T) {
+	f := &fakeGitHub{t: t}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	g, err := forge.NewGitHub("tok", srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Host() != "127.0.0.1" {
+		t.Fatalf("host %q", g.Host())
+	}
+	if pub, _ := forge.NewGitHub("tok", ""); pub.Host() != "github.com" {
+		t.Fatalf("the public service is github.com, not %q", pub.Host())
+	}
+	tr := forge.IssueTracker(g)
+	ft, text, err := tr.Get(context.Background(), "o/r#1")
+	if err != nil || ft.Key != "o/r#1" || ft.Number != 1 || text.Title == "" {
+		t.Fatalf("%+v %+v %v", ft, text, err)
+	}
+	if _, _, err := tr.Get(context.Background(), "o/r#404"); !errors.Is(err, tracker.ErrNotFound) {
+		t.Fatalf("a missing issue: %v", err)
+	}
+	if err := tr.Label(context.Background(), "o/r#1", []string{"ynf:working"}, []string{"ynf:lint", "absent"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(f.labelled, " ") != "+ynf:working -ynf:lint" {
+		t.Fatalf("labels: %v", f.labelled)
+	}
+	if err := tr.Label(context.Background(), "o/r#2", []string{"x"}, nil); err == nil {
+		t.Fatal("a refused label write was not reported")
+	}
+	if err := tr.Label(context.Background(), "o/r#2", nil, []string{"x"}); err == nil {
+		t.Fatal("a refused label removal was not reported")
+	}
+	if err := tr.Comment(context.Background(), "o/r#1", "<!-- m -->", "hello"); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"o/r", "o#1", "o/r/x#1", "o/r#0", "o/r#x"} {
+		if _, _, err := tr.Get(context.Background(), bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+		if tr.Comment(context.Background(), bad, "m", "b") == nil || tr.Label(context.Background(), bad, nil, nil) == nil {
+			t.Errorf("%q accepted for writes", bad)
+		}
+	}
+	if repo, n, err := forge.ParseIssueKey(forge.IssueKey("a/b", 7)); err != nil || repo != "a/b" || n != 7 {
+		t.Fatal("issue keys do not round-trip")
 	}
 }
