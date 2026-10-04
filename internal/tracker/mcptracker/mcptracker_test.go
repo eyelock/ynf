@@ -203,3 +203,18 @@ func TestMappingsThatDoNotFit(t *testing.T) {
 		t.Fatalf("a missing field: %v", err)
 	}
 }
+
+// TestCheck: a tracker checks its server has every tool it is configured to call, before any
+// ticket depends on it.
+func TestCheck(t *testing.T) {
+	ctx := context.Background()
+	f := &fakeJira{status: "To Do"}
+	if err := connect(t, f, config(t, map[string]any{"issueKey": "{key}", "labels": "{labels}"})).Check(ctx); err != nil {
+		t.Fatal(err)
+	}
+	c := config(t, map[string]any{"issueKey": "{key}", "labels": "{labels}"})
+	c.Comment.Tool = "jira_add_coment"
+	if err := connect(t, f, c).Check(ctx); err == nil || !strings.Contains(err.Error(), "no tool jira_add_coment") {
+		t.Fatalf("a mistyped tool: %v", err)
+	}
+}

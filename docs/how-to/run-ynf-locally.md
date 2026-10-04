@@ -44,7 +44,8 @@ State goes to `state.db` and work to `work/`, both beside the config file. Every
 [Configuration](../reference/configuration.md).
 
 ```bash
-ynf doctor            # config, store, lanes per repository, and git, docker, ynh, ynm
+ynf doctor            # config, store, lanes, forges, trackers, and git, docker, ynh, ynm
+ynf harness           # how each lane runs, and the harness it is held to
 ```
 
 ## Run

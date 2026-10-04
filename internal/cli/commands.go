@@ -81,6 +81,16 @@ func (a *app) doctor(ctx context.Context) error {
 				}
 				add("lanes "+r, true, detail)
 			}
+			if conns, err := a.eng.Connections(ctx); err != nil {
+				add("connections", false, err.Error())
+			} else {
+				for _, c := range conns {
+					if c.Kind == "tracker" && c.Detail == "its forge's issues" {
+						continue // the forge's own line says it
+					}
+					add(c.Kind+" "+c.Name, c.OK, c.Host+": "+c.Detail)
+				}
+			}
 		}
 	}
 	for _, tool := range []struct{ name, args string }{{"git", "--version"}, {"docker", "version --format {{.Server.Version}}"}, {"ynh", "version"}, {"ynm", "--version"}} {

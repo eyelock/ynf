@@ -1858,3 +1858,77 @@ func TestStatsByModel(t *testing.T) {
 		t.Fatal("the run record lacks its model")
 	}
 }
+
+// TestLaneRuns: each lane says how it runs. A harness in a published image is read and held to its
+// lane, a lane asking for more than the harness allows is a problem, and a harness carried in the
+// repository waits for a run to check it out.
+func TestLaneRuns(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.e.ImageHarness = imageCarries(t, testManifest)
+	h.f.lanes = strings.Replace(lanesYAML, `      ynh: {harness: ".", focus: tidy}`, `      image: ghcr.io/o/h@sha256:abc
+      ynh: {harness: ".", focus: tidy}`, 1)
+	h.f.lanes += `  greedy:
+    kind: originate
+    intake: [{github.search: "label:ynf:greedy", every: 5m}]
+    run:
+      runner: ynh
+      image: ghcr.io/o/h@sha256:abc
+      ynh: {harness: ".", budgets: {max_turns: 99}}
+    when: {converged: open_pr}
+  carried:
+    kind: originate
+    intake: [{github.search: "label:ynf:carried", every: 5m}]
+    run:
+      runner: ynh
+      ynh: {harness: ".agents/harness"}
+    when: {converged: open_pr}
+`
+	runs, err := h.e.LaneRuns(ctx, "o/r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]engine.LaneRun{}
+	for _, r := range runs {
+		by[r.Lane] = r
+	}
+	if r := by["agentic"]; r.Read == nil || r.Problem != "" || r.Read.Agent.MaxTurns != 12 || r.Executor != "process" {
+		t.Fatalf("an image's harness: %+v", r)
+	}
+	if r := by["greedy"]; r.Read == nil || !strings.Contains(r.Problem, "max_turns") {
+		t.Fatalf("a lane asking for more than its harness: %+v", r)
+	}
+	if r := by["carried"]; r.Read != nil || r.Problem != "" || !strings.Contains(r.Where, "carried in the repository") {
+		t.Fatalf("a carried harness: %+v", r)
+	}
+	if r := by["fmt"]; r.Runner != "command" || r.Where != "a command, not a harness" {
+		t.Fatalf("a command lane: %+v", r)
+	}
+	h.e.ImageHarness = nil
+	if runs, _ := h.e.LaneRuns(ctx, "o/r"); !slices.ContainsFunc(runs, func(r engine.LaneRun) bool {
+		return r.Lane == "agentic" && strings.Contains(r.Problem, "ynh is not available")
+	}) {
+		t.Fatal("no ynh to read an image with")
+	}
+}
+
+// TestConnectionsAndTickets: the forge is checked by reaching an enrolled repository, its issues
+// are a tracker, and a ticket reads as start would read it.
+func TestConnectionsAndTickets(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	conns, err := h.e.Connections(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conns) != 2 || conns[0].Kind != "forge" || !conns[0].OK || conns[0].Detail != "reached o/r" || conns[1].Kind != "tracker" {
+		t.Fatalf("%+v", conns)
+	}
+	h.f.labels[1] = []string{"bug"}
+	if _, text, err := h.e.Ticket(ctx, tracker.Ref{Host: "github.com", Key: "o/r#1"}); err != nil || text.Title != "Issue 1" {
+		t.Fatalf("%+v %v", text, err)
+	}
+	if _, _, err := h.e.Ticket(ctx, tracker.Ref{Host: "jira.example", Key: "X-1"}); err == nil {
+		t.Fatal("a tracker that is not configured")
+	}
+}

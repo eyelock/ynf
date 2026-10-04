@@ -409,3 +409,30 @@ func TestAConfigurationRepository(t *testing.T) {
 		t.Fatalf("repos and factory together: %d %s", code, stderr)
 	}
 }
+
+// TestInspect: forges and trackers are listed and checked, a ticket reads without starting
+// anything, and harness says how each lane runs.
+func TestInspect(t *testing.T) {
+	e := setup(t)
+	if code, out, stderr := e.run("forges"); code != 0 || !strings.Contains(out, "reached o/r") {
+		t.Fatalf("forges: %d %s %s", code, out, stderr)
+	}
+	if code, out, _ := e.run("--format", "json", "trackers"); code != 0 || !strings.Contains(out, `"its forge's issues"`) {
+		t.Fatalf("trackers: %d %s", code, out)
+	}
+	if code, out, stderr := e.run("ticket", "o/r#5"); code != 0 || !strings.Contains(out, "state   open") || !strings.Contains(out, "labels  ynf:off") {
+		t.Fatalf("ticket: %d %s %s", code, out, stderr)
+	}
+	if code, _, _ := e.run("ticket", "o/r#9"); code == 0 {
+		t.Fatal("a ticket that does not exist")
+	}
+	if code, _, _ := e.run("ticket"); code != cli.ExitUsage {
+		t.Fatal("ticket needs a reference")
+	}
+	if code, out, stderr := e.run("harness"); code != 0 || !strings.Contains(out, "o/r\n") || !strings.Contains(out, "fmt: originate lane, command on") {
+		t.Fatalf("harness: %d %s %s", code, out, stderr)
+	}
+	if code, out, _ := e.run("--format", "json", "doctor"); !strings.Contains(out, `"forge default"`) {
+		t.Fatalf("doctor: %d %s", code, out)
+	}
+}
