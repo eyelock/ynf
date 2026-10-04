@@ -35,9 +35,33 @@
     },
     "forges": {
       "type": "object",
-      "description": "Forge instances by name (ADR-003), declared only here.",
+      "description": "Forge instances besides the default one, by name (ADR-003), declared only here: a GitHub Enterprise Server beside github.com, say. A repository on one is enrolled as host/owner/name.",
       "additionalProperties": {
-        "type": "object"
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "url",
+          "token_env"
+        ],
+        "properties": {
+          "provider": {
+            "enum": [
+              "github"
+            ],
+            "description": "github: github.com or GitHub Enterprise Server."
+          },
+          "url": {
+            "type": "string",
+            "pattern": "^https://[^/]+/?$",
+            "description": "The forge's web address, such as https://github.acme.internal. Its host names the forge in item keys; its API is found from it."
+          },
+          "token_env": {
+            "type": "string",
+            "pattern": "^[A-Z_][A-Z0-9_]*$",
+            "description": "The variable holding ynf's token for this forge, used for its API and its git remotes."
+          }
+        }
       }
     }
   }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -45,6 +46,11 @@ type Engine struct {
 	Forge forge.Forge
 	// ForgeHost is Forge's host as item keys name it; default github.com.
 	ForgeHost string
+	// Forges are the forge instances besides Forge, by host, such as a GitHub Enterprise Server
+	// (ADR-003). A repository on one is named host/owner/name; one on Forge, owner/name.
+	Forges map[string]ForgeInstance
+	// NewForge builds a forge instance the configuration repository declares; nil allows none.
+	NewForge func(name string, cfg map[string]any) (ForgeInstance, error)
 	// ConfigRepo is the factory's configuration repository (owner/name on the forge), whose
 	// factory.yaml enrols repositories and whose lanes.yaml every enrolled repository's lanes
 	// are laid over (ADR-006). Empty: Repos is the enrolment and each repository's lanes stand
@@ -159,6 +165,9 @@ func (e *Engine) Factory(ctx context.Context) (*FactoryPolicy, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s/%s: %w", e.ConfigRepo, dir, err)
 	}
+	if err := e.addForges(f); err != nil {
+		return nil, fmt.Errorf("%s: %w", e.ConfigRepo, err)
+	}
 	fp := &FactoryPolicy{Repo: e.ConfigRepo, SHA: sha, Dir: dir, File: f, Lanes: files[policy.LanesFile]}
 	e.mu.Lock()
 	e.factory = fp
@@ -174,12 +183,10 @@ func (e *Engine) Enrolled(ctx context.Context) ([]string, error) {
 	}
 	out := make([]string, 0, len(fp.File.Repos))
 	for _, r := range fp.File.Repos {
-		parts := strings.Split(r, "/")
-		if len(parts) == 3 {
-			if parts[0] != e.forgeHost() {
-				return nil, fmt.Errorf("%s enrols %s, on %s; this ynf works with the forge at %s", e.ConfigRepo, r, parts[0], e.forgeHost())
-			}
-			r = parts[1] + "/" + parts[2]
+		host, name := e.splitRepo(r)
+		r = e.qualify(host, name)
+		if _, _, err := e.forgeFor(r); err != nil {
+			return nil, fmt.Errorf("%s enrols %s: %w", e.ConfigRepo, r, err)
 		}
 		out = append(out, r)
 	}
@@ -189,17 +196,21 @@ func (e *Engine) Enrolled(ctx context.Context) ([]string, error) {
 // readFactoryFolder reads names from the first factory folder holding any of them, on repo's
 // default branch at its head commit.
 func (e *Engine) readFactoryFolder(ctx context.Context, repo string, names ...string) (sha string, files map[string][]byte, dir string, shadowed []string, err error) {
-	base, err := e.Forge.DefaultBranch(ctx, repo)
+	fg, name, err := e.forgeFor(repo)
 	if err != nil {
 		return "", nil, "", nil, err
 	}
-	if sha, err = e.Forge.Head(ctx, repo, base); err != nil {
+	base, err := fg.DefaultBranch(ctx, name)
+	if err != nil {
+		return "", nil, "", nil, err
+	}
+	if sha, err = fg.Head(ctx, name, base); err != nil {
 		return "", nil, "", nil, fmt.Errorf("%s's head: %w", base, err)
 	}
 	found := map[string]map[string][]byte{}
 	for _, d := range policy.FactoryDirs {
 		for _, n := range names {
-			b, err := e.Forge.File(ctx, repo, sha, d+"/"+n)
+			b, err := fg.File(ctx, name, sha, d+"/"+n)
 			switch {
 			case err == nil:
 				if found[d] == nil {
@@ -251,7 +262,8 @@ func (e *Engine) Policy(ctx context.Context, repo string) (*RepoPolicy, error) {
 	for _, s := range shadowed {
 		e.log().Warn("shadowed factory folder", "repo", repo, "used", dir, "shadowed", s)
 	}
-	base, _ := e.Forge.DefaultBranch(ctx, repo)
+	fg, name, _ := e.forgeFor(repo)
+	base, _ := fg.DefaultBranch(ctx, name)
 	rp := &RepoPolicy{Repo: repo, Base: base, SHA: sha, Dir: dir, Shadowed: shadowed, File: f, Config: fp, Own: own}
 	e.mu.Lock()
 	if e.policies == nil {
@@ -263,7 +275,7 @@ func (e *Engine) Policy(ctx context.Context, repo string) (*RepoPolicy, error) {
 }
 
 func (e *Engine) laneFor(ctx context.Context, it item.Item) (*RepoPolicy, policy.Lane, error) {
-	rp, err := e.Policy(ctx, it.Repo)
+	rp, err := e.Policy(ctx, e.repoOf(it))
 	if err != nil {
 		return nil, policy.Lane{}, err
 	}
@@ -322,15 +334,21 @@ func (e *Engine) sweepLane(ctx context.Context, repo string, lane policy.Lane) e
 			e.log().Warn("intake not supported yet", "lane", lane.Name, "intake", in)
 			continue
 		}
-		hits, err := e.Forge.Search(ctx, in.GitHubSearch)
+		// The search runs on the repository's own forge.
+		fg, name, err := e.forgeFor(repo)
+		if err != nil {
+			return err
+		}
+		host, _ := e.splitRepo(repo)
+		hits, err := fg.Search(ctx, in.GitHubSearch)
 		if err != nil {
 			return err
 		}
 		for _, h := range hits {
-			if h.Repo != repo || h.IsPR != (lane.Kind == "adopt") {
+			if h.Repo != name || h.IsPR != (lane.Kind == "adopt") {
 				continue
 			}
-			if err := e.track(ctx, lane, h); err != nil {
+			if err := e.track(ctx, lane, host, h); err != nil {
 				return err
 			}
 		}
@@ -339,16 +357,16 @@ func (e *Engine) sweepLane(ctx context.Context, repo string, lane policy.Lane) e
 }
 
 // track creates the item for a new ticket and steps it; a ticket already tracked is left alone.
-func (e *Engine) track(ctx context.Context, lane policy.Lane, h forge.Hit) error {
+func (e *Engine) track(ctx context.Context, lane policy.Lane, host string, h forge.Hit) error {
 	now := e.Now()
 	// A GitHub issue's code goes to its own repository; an adopted pull request is its own ticket.
-	ref := tracker.Ref{Host: e.forgeHost(), Key: forge.IssueKey(h.Repo, h.Number)}
+	ref := tracker.Ref{Host: host, Key: forge.IssueKey(h.Repo, h.Number)}
 	it := item.Item{
 		Key: item.Key(ref), Kind: lane.Kind, Lane: lane.Name, Ticket: ref,
-		Forge: e.forgeHost(), Repo: h.Repo, Number: h.Number, State: item.Intake, Created: now, Updated: now,
+		Forge: host, Repo: h.Repo, Number: h.Number, State: item.Intake, Created: now, Updated: now,
 	}
 	if lane.Kind == "adopt" {
-		it.Key, it.PR = item.PRKey(e.forgeHost(), h.Repo, h.Number), h.Number
+		it.Key, it.PR = item.PRKey(host, h.Repo, h.Number), h.Number
 	}
 	switch err := lease.Create(ctx, e.Store, it); {
 	case errors.Is(err, store.ErrConflict):
@@ -430,11 +448,109 @@ func (e *Engine) forgeHost() string {
 
 // tracker is the tracker instance an item's ticket lives on. Ad hoc work's is ynf's own store.
 func (e *Engine) tracker(t tracker.Ref) (tracker.Tracker, error) {
-	if tr, ok := e.Trackers[t.Host]; ok {
+	e.mu.Lock()
+	tr, ok := e.Trackers[t.Host]
+	e.mu.Unlock()
+	if ok {
 		return tr, nil
 	}
 	if t.Host == AdhocHost {
 		return AdhocTracker(e.Store), nil
 	}
 	return nil, fmt.Errorf("no tracker is configured for %s (%s)", t.Host, t)
+}
+
+// ForgeInstance is a forge besides the default: its client, the git workspace that clones from
+// and pushes to it with its own token, and the tracker for its issues.
+type ForgeInstance struct {
+	Host    string
+	Forge   forge.Forge
+	Git     Git
+	Tracker tracker.Tracker
+}
+
+// splitRepo reads a repository name: host/owner/name on another forge, owner/name on the default.
+func (e *Engine) splitRepo(repo string) (host, name string) {
+	if parts := strings.Split(repo, "/"); len(parts) == 3 {
+		return parts[0], parts[1] + "/" + parts[2]
+	}
+	return e.forgeHost(), repo
+}
+
+// qualify names a repository on host: owner/name on the default forge, host/owner/name elsewhere.
+func (e *Engine) qualify(host, name string) string {
+	if host == "" || host == e.forgeHost() {
+		return name
+	}
+	return host + "/" + name
+}
+
+// repoOf is the item's code repository, qualified.
+func (e *Engine) repoOf(it item.Item) string { return e.qualify(it.Forge, it.Repo) }
+
+// forgeFor is the forge a repository is on, and its owner/name there.
+func (e *Engine) forgeFor(repo string) (forge.Forge, string, error) {
+	host, name := e.splitRepo(repo)
+	if host == e.forgeHost() {
+		return e.Forge, name, nil
+	}
+	e.mu.Lock()
+	inst, ok := e.Forges[host]
+	e.mu.Unlock()
+	if !ok {
+		return nil, "", fmt.Errorf("%s is on %s, which is not a configured forge", repo, host)
+	}
+	return inst.Forge, name, nil
+}
+
+// gitFor is the git workspace for a repository's forge. It takes the qualified name, so mirrors
+// of same-named repositories on two forges never share a folder.
+func (e *Engine) gitFor(repo string) Git {
+	host, _ := e.splitRepo(repo)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if inst, ok := e.Forges[host]; ok && host != e.forgeHost() {
+		return inst.Git
+	}
+	return e.Git
+}
+
+// addForges registers the forge instances a configuration repository declares.
+func (e *Engine) addForges(f *policy.Factory) error {
+	for _, name := range slices.Sorted(maps.Keys(f.Forges)) {
+		if e.NewForge == nil {
+			return fmt.Errorf("forge %s: this ynf cannot add forges", name)
+		}
+		inst, err := e.NewForge(name, f.Forges[name])
+		if err != nil {
+			return fmt.Errorf("forge %s: %w", name, err)
+		}
+		if inst.Host == e.forgeHost() {
+			continue // the default forge, declared for completeness
+		}
+		e.mu.Lock()
+		if e.Forges == nil {
+			e.Forges = map[string]ForgeInstance{}
+		}
+		e.Forges[inst.Host] = inst
+		if e.Trackers == nil {
+			e.Trackers = map[string]tracker.Tracker{}
+		}
+		if _, ok := e.Trackers[inst.Host]; !ok && inst.Tracker != nil {
+			e.Trackers[inst.Host] = inst.Tracker
+		}
+		e.mu.Unlock()
+	}
+	return nil
+}
+
+// isForge reports whether host is a forge ynf works with.
+func (e *Engine) isForge(host string) bool {
+	if host == e.forgeHost() {
+		return true
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	_, ok := e.Forges[host]
+	return ok
 }

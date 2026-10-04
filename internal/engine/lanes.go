@@ -79,7 +79,7 @@ func (e *Engine) laneFacts(ctx context.Context, repo, lane string) (*facts.Lane,
 	}
 	open := 0
 	for _, it := range items {
-		if it.Repo == repo && it.Lane == lane && (it.State == item.Proposed || it.State == item.InReview) {
+		if e.repoOf(it) == repo && it.Lane == lane && (it.State == item.Proposed || it.State == item.InReview) {
 			open++
 		}
 	}
@@ -155,10 +155,10 @@ func (e *Engine) Stats(ctx context.Context) ([]Stats, error) {
 		if !e.wantLane(it.Lane) {
 			continue
 		}
-		k := it.Repo + "\x00" + it.Lane
+		k := e.repoOf(it) + "\x00" + it.Lane
 		s, ok := by[k]
 		if !ok {
-			s = &Stats{Repo: it.Repo, Lane: it.Lane, States: map[string]int{}, Signatures: map[string]int{}}
+			s = &Stats{Repo: e.repoOf(it), Lane: it.Lane, States: map[string]int{}, Signatures: map[string]int{}}
 			by[k] = s
 		}
 		s.States[string(it.State)]++

@@ -111,7 +111,7 @@ func (e *Engine) Handle(ctx context.Context, key string, ev event.Event) error {
 		e.log().Error("lease lost; stopping", "item", key, "err", err)
 		cancel()
 	})
-	s := &step{e: e, h: h, id: stepID, ctx: runCtx}
+	s := &step{e: e, h: h, id: stepID, ctx: runCtx, g: e.gitFor(e.repoOf(h.Item()))}
 	defer func() {
 		s.cleanup()
 		cancel()
@@ -139,6 +139,7 @@ func (e *Engine) Handle(ctx context.Context, key string, ev event.Event) error {
 
 type step struct {
 	e   *Engine
+	g   Git // the git workspace for the item's forge
 	h   *lease.Holder
 	id  string
 	ctx context.Context
@@ -175,7 +176,7 @@ const reclaimGrace = time.Second
 
 func (s *step) cleanup() {
 	if s.wt != "" {
-		_ = s.e.Git.RemoveWorktree(context.WithoutCancel(s.ctx), s.mirror, s.wt)
+		_ = s.g.RemoveWorktree(context.WithoutCancel(s.ctx), s.mirror, s.wt)
 	}
 }
 
@@ -248,11 +249,15 @@ func (s *step) probe(it item.Item) (facts.Facts, error) {
 		return f, err
 	}
 	f.Ticket, s.text = &t, text
-	if f.Lane, err = s.e.laneFacts(s.ctx, it.Repo, it.Lane); err != nil {
+	if f.Lane, err = s.e.laneFacts(s.ctx, s.e.repoOf(it), it.Lane); err != nil {
 		return f, err
 	}
 	if it.PR > 0 {
-		p, err := s.e.Forge.PullRequest(s.ctx, it.Repo, it.PR)
+		fg, name, err := s.e.forgeFor(s.e.repoOf(it))
+		if err != nil {
+			return f, err
+		}
+		p, err := fg.PullRequest(s.ctx, name, it.PR)
 		if err != nil && !errors.Is(err, forge.ErrNotFound) {
 			return f, err
 		}
@@ -314,7 +319,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		return fail(runner.OperatorError, fmt.Errorf("lane %s uses the %s executor, which is not contained; unattended lanes need a contained one (ADR-007)", lane.Name, ex.Name()))
 	}
 
-	mirror, err := e.Git.Mirror(s.ctx, it.Repo)
+	mirror, err := s.g.Mirror(s.ctx, e.repoOf(it))
 	if err != nil {
 		return fail(runner.Error, err)
 	}
@@ -322,14 +327,14 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	switch {
 	case it.Kind == "adopt":
 		base = it.Branch // the author's branch, as it is now
-		if !e.Git.RemoteHas(s.ctx, mirror, base) {
+		if !s.g.RemoteHas(s.ctx, mirror, base) {
 			return fail(runner.Error, fmt.Errorf("the pull request's branch %s is gone", base))
 		}
-	case feedback != "" && it.Branch != "" && e.Git.RemoteHas(s.ctx, mirror, it.Branch):
+	case feedback != "" && it.Branch != "" && s.g.RemoteHas(s.ctx, mirror, it.Branch):
 		base = it.Branch // resume from what was proposed, with the feedback
 	}
 	if s.wt != "" {
-		_ = e.Git.RemoveWorktree(s.ctx, s.mirror, s.wt)
+		_ = s.g.RemoveWorktree(s.ctx, s.mirror, s.wt)
 		s.wt = ""
 	}
 	stepDir := filepath.Join(e.WorkDir, "steps", strings.NewReplacer("/", "_", "#", "_").Replace(it.Key), runID)
@@ -340,12 +345,12 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	if runDir, err = filepath.EvalSymlinks(runDir); err != nil {
 		return fail(runner.Error, err)
 	}
-	wt, err := e.Git.Worktree(s.ctx, mirror, base, filepath.Join(stepDir, "wt"))
+	wt, err := s.g.Worktree(s.ctx, mirror, base, filepath.Join(stepDir, "wt"))
 	if err != nil {
 		return fail(runner.Error, err)
 	}
 	s.mirror, s.wt = mirror, wt
-	if s.base, err = e.Git.Head(s.ctx, wt); err != nil {
+	if s.base, err = s.g.Head(s.ctx, wt); err != nil {
 		return fail(runner.Error, err)
 	}
 
@@ -403,7 +408,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		}
 	}
 	rec.Duration = e.Now().Sub(start).Round(time.Millisecond).String()
-	if rec.Changed, err = e.Git.Changed(s.ctx, wt); err != nil {
+	if rec.Changed, err = s.g.Changed(s.ctx, wt); err != nil {
 		rec.Outcome, rec.Detail = runner.Error, err.Error()
 	}
 	log.Info("run finished", "outcome", rec.Outcome, "exit", rec.Exit, "duration", rec.Duration,
@@ -551,20 +556,24 @@ func (s *step) openPR(it item.Item, rp *RepoPolicy, lane policy.Lane) event.Even
 		subject = subject[:71] + "…"
 	}
 	msg := subject + "\n\n" + fmt.Sprintf("Proposed by ynf for %s, lane %s.\n\n", it.Ref(), lane.Name) + trailers(it, s.id, s.run.RunID, s.result)
-	sha, err := e.Git.Commit(s.ctx, s.wt, msg)
+	sha, err := s.g.Commit(s.ctx, s.wt, msg)
 	if err != nil {
 		return done(false, err.Error(), nil)
 	}
 	branch := it.BranchName()
-	if err := e.Git.Push(s.ctx, s.wt, it.Repo, branch); err != nil {
+	if err := s.g.Push(s.ctx, s.wt, e.repoOf(it), branch); err != nil {
 		return done(false, err.Error(), nil)
 	}
-	n, err := e.Forge.FindPR(s.ctx, it.Repo, branch)
+	fg, name, err := e.forgeFor(e.repoOf(it))
+	if err != nil {
+		return done(false, err.Error(), nil)
+	}
+	n, err := fg.FindPR(s.ctx, name, branch)
 	if err != nil {
 		return done(false, err.Error(), nil)
 	}
 	if n == 0 {
-		n, err = e.Forge.OpenPR(s.ctx, it.Repo, forge.NewPR{
+		n, err = fg.OpenPR(s.ctx, name, forge.NewPR{
 			Head: branch, Base: rp.Base, Title: subject, Draft: lane.PR.IsDraft(),
 			Body: prBody(it, lane, s.run) + "\n\n" + marker(it.Key, "item"),
 		})
@@ -597,10 +606,10 @@ func (s *step) pushCommit(it item.Item, lane policy.Lane) event.Event {
 	if err := gate.Check(s.run.Changed, lane.PR.AllowedPaths, lane.PR.ProtectedPaths); err != nil {
 		return done(false, err.Error(), nil)
 	}
-	if _, err := e.Git.Mirror(s.ctx, it.Repo); err != nil {
+	if _, err := s.g.Mirror(s.ctx, e.repoOf(it)); err != nil {
 		return done(false, err.Error(), nil)
 	}
-	if tip, err := e.Git.RemoteSHA(s.ctx, s.mirror, it.Branch); err != nil || tip != s.base {
+	if tip, err := s.g.RemoteSHA(s.ctx, s.mirror, it.Branch); err != nil || tip != s.base {
 		return done(false, fmt.Sprintf("%s moved from %.7s to %.7s while ynf worked", it.Branch, s.base, tip), map[string]any{"head_moved": true})
 	}
 	subject := fmt.Sprintf("ynf(%s): %s", lane.Name, s.text.Title)
@@ -608,11 +617,11 @@ func (s *step) pushCommit(it item.Item, lane policy.Lane) event.Event {
 		subject = subject[:71] + "…"
 	}
 	msg := subject + "\n\n" + fmt.Sprintf("Added by ynf to %s, lane %s.\n\n", it.Ref(), lane.Name) + trailers(it, s.id, s.run.RunID, s.result)
-	sha, err := e.Git.Commit(s.ctx, s.wt, msg)
+	sha, err := s.g.Commit(s.ctx, s.wt, msg)
 	if err != nil {
 		return done(false, err.Error(), nil)
 	}
-	if err := e.Git.PushFastForward(s.ctx, s.wt, it.Repo, it.Branch); err != nil {
+	if err := s.g.PushFastForward(s.ctx, s.wt, e.repoOf(it), it.Branch); err != nil {
 		// Someone pushed between the check and the push: never overwrite, start again.
 		return done(false, err.Error(), map[string]any{"head_moved": true})
 	}

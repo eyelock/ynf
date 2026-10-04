@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -309,6 +310,7 @@ func (a *app) engine() (*engine.Engine, error) {
 		Store:           st, Forge: fg, ForgeHost: fg.Host(),
 		Trackers:          map[string]tracker.Tracker{fg.Host(): forge.IssueTracker(fg)},
 		Git:               workspace.Workspace{Root: c.WorkPath(), Token: token, Author: workspace.Author{Name: name, Email: email}},
+		NewForge:          newForge(c.WorkPath(), workspace.Author{Name: name, Email: email}, githubAPI),
 		Executor:          a.executor,
 		BuildImage:        imageBuilder(),
 		ImageCapabilities: imageCapabilities,
@@ -350,4 +352,40 @@ func configRepo(c *config.Config) string {
 		return parts[1] + "/" + parts[2]
 	}
 	return c.Factory.Repo
+}
+
+// githubAPI is a GitHub instance's API: api.github.com for the public service, /api/v3 on an
+// Enterprise Server.
+func githubAPI(host string) string {
+	if host == "github.com" {
+		return ""
+	}
+	return "https://" + host + "/api/v3/"
+}
+
+// newForge builds the forge instances a configuration repository declares (ADR-003): a client,
+// a git workspace that clones and pushes with the forge's own token, and the tracker for its
+// issues.
+func newForge(root string, author workspace.Author, api func(host string) string) func(string, map[string]any) (engine.ForgeInstance, error) {
+	return func(name string, cfg map[string]any) (engine.ForgeInstance, error) {
+		raw, _ := cfg["url"].(string)
+		u, err := url.Parse(raw)
+		if err != nil || u.Hostname() == "" {
+			return engine.ForgeInstance{}, fmt.Errorf("url %q is not a web address", raw)
+		}
+		host := u.Hostname()
+		env, _ := cfg["token_env"].(string)
+		token := os.Getenv(env)
+		if token == "" {
+			return engine.ForgeInstance{}, fmt.Errorf("its token is not set: %s is empty", env)
+		}
+		fg, err := forge.NewGitHub(token, api(host))
+		if err != nil {
+			return engine.ForgeInstance{}, err
+		}
+		ws := workspace.Workspace{Root: root, Token: token, Author: author, RemoteURL: func(repo string) string {
+			return "https://" + host + "/" + strings.TrimPrefix(repo, host+"/") + ".git"
+		}}
+		return engine.ForgeInstance{Host: host, Forge: fg, Git: ws, Tracker: forge.IssueTracker(fg)}, nil
+	}
 }
