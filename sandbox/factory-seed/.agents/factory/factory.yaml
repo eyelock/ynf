@@ -1,0 +1,7 @@
+# yaml-language-server: $schema=https://eyelock.github.io/ynf/schema/factory.schema.json
+#
+# The sandbox factory's configuration repository (ADR-006): which repositories ynf works on.
+# Recreated from eyelock/ynf sandbox/factory-seed on every reset.
+version: 1
+repos:
+  - github.com/eyelock/ynf-sandbox

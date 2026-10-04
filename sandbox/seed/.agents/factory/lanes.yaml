@@ -1,6 +1,8 @@
 # yaml-language-server: $schema=https://eyelock.github.io/ynf/schema/lanes.schema.json
 #
 # The sandbox's factory: six lanes, one per kind of work, so every ynf path has a lane to run in.
+# One, deps, is declared in the configuration repository (sandbox/factory-seed) and only
+# switched off here.
 # Every fixture carries a `pkg:<path>` label; lanes use it to scope the harness's sensors to the
 # part of the repository the work is about, so a run is judged on its own debt, not everyone's.
 # The ynh lanes run in an agent image ynf builds from this repository's own harness on
@@ -148,15 +150,6 @@ lanes:
       allowed_paths: ['internal/**']
 
   deps:
-    # Dependency bumps fail ynh's factory-pattern test on blast radius. The lane exists to show a
-    # lane switched off: issues labelled ynf:deps are recorded and ignored.
-    kind: originate
+    # The deps lane comes from the configuration repository, eyelock/ynf-sandbox-factory, where
+    # it is on. This repository turns it off with one key: its lanes win, key by key (ADR-006).
     enabled: false
-    intake:
-      - github.search: 'repo:eyelock/ynf-sandbox is:issue is:open label:"ynf:deps"'
-        every: 1h
-    run:
-      runner: ynh
-      ynh: { harness: ., focus: tidy }
-    when:
-      converged: open_pr

@@ -11,3 +11,8 @@ output "pull_requests" {
   description = "Fixture id to pull request number."
   value       = { for id, d in data.github_repository_pull_requests.fixture : id => try(d.results[0].number, null) }
 }
+
+output "factory" {
+  description = "The configuration repository."
+  value       = github_repository.factory.full_name
+}

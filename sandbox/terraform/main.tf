@@ -10,6 +10,8 @@ locals {
   # Re-seed when anything under seed/ changes. A change after the first apply needs `make reset`,
   # because main is protected and the seed is a force push.
   seed_hash = sha256(join("", [for p in sort(fileset("${local.root}/seed", "**")) : filesha256("${local.root}/seed/${p}")]))
+
+  factory_seed_hash = sha256(join("", [for p in sort(fileset("${local.root}/factory-seed", "**")) : filesha256("${local.root}/factory-seed/${p}")]))
 }
 
 resource "github_repository" "sandbox" {
@@ -109,4 +111,30 @@ resource "github_branch_protection" "main" {
   }
 
   depends_on = [terraform_data.seed, terraform_data.pr]
+}
+
+# The factory's configuration repository (ADR-006): enrols the sandbox and gives it default lanes.
+resource "github_repository" "factory" {
+  name        = var.factory_name
+  description = "The ynf sandbox factory's configuration repository. Recreated from eyelock/ynf sandbox/factory-seed on every reset."
+  visibility  = var.visibility
+
+  auto_init          = false
+  has_issues         = false
+  has_projects       = false
+  has_wiki           = false
+  archive_on_destroy = false
+}
+
+resource "terraform_data" "factory_seed" {
+  triggers_replace = [github_repository.factory.node_id, local.factory_seed_hash]
+
+  provisioner "local-exec" {
+    command = "${local.root}/scripts/seed.sh"
+    environment = {
+      REPO     = github_repository.factory.full_name
+      SEED_DIR = "${local.root}/factory-seed"
+      MESSAGE  = "seed: ynf sandbox factory configuration"
+    }
+  }
 }

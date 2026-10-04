@@ -15,3 +15,9 @@ variable "visibility" {
   type        = string
   default     = "private"
 }
+
+variable "factory_name" {
+  description = "The configuration repository's name."
+  type        = string
+  default     = "ynf-sandbox-factory"
+}
