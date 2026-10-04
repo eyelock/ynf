@@ -32,10 +32,29 @@ type fixture struct {
 	Labels []string `yaml:"labels"`
 	Lane   string   `yaml:"lane"`
 	Expect struct {
-		Result     string   `yaml:"result"`
+		Result     results  `yaml:"result"`
 		Signatures []string `yaml:"signatures"`
 		Crash      bool     `yaml:"crash"`
 	} `yaml:"expect"`
+}
+
+// results is a fixture's expected ending: one state, or a list when more than one is legitimate.
+type results []string
+
+func (r *results) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.SequenceNode {
+		return n.Decode((*[]string)(r))
+	}
+	var one string
+	if err := n.Decode(&one); err != nil {
+		return err
+	}
+	*r = results{one}
+	return nil
+}
+
+func (r results) accepts(state string) bool {
+	return slices.Contains(r, "any") || slices.Contains(r, state)
 }
 
 type item struct {
@@ -193,8 +212,8 @@ func check(f fixture, numbers map[string]int, items []item, repo, ynf, cfg strin
 		return "", fmt.Errorf("#%d was never tracked", n)
 	}
 	it := items[i]
-	if f.Expect.Result != "any" && it.State != f.Expect.Result {
-		msg := fmt.Sprintf("#%d ended %s (%s), expected %s", n, it.State, it.Reason, f.Expect.Result)
+	if !f.Expect.Result.accepts(it.State) {
+		msg := fmt.Sprintf("#%d ended %s (%s), expected %s", n, it.State, it.Reason, strings.Join(f.Expect.Result, " or "))
 		if r := it.LastRun; r != nil && r.Detail != "" {
 			msg += fmt.Sprintf("\n      last run %s: %s", r.ID, oneLine(r.Detail, 300))
 		}
@@ -211,6 +230,9 @@ func check(f fixture, numbers map[string]int, items []item, repo, ynf, cfg strin
 		return "", errors.New(msg)
 	}
 	detail := fmt.Sprintf("#%d %s", n, it.State)
+	if len(f.Expect.Result) > 1 {
+		detail += fmt.Sprintf(" (one of %s)", strings.Join(f.Expect.Result, ", "))
+	}
 
 	if it.PR > 0 {
 		var pr struct {

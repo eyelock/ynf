@@ -57,11 +57,12 @@ fixtures:
       after: []
       flaky: { sensor: test, runs: 10, min_failures: 5 }
     expect:
-      result: escalated
-      signatures: ["sig/stuck/sensor:test/test:TestSince"]
+      # Both are legitimate: the fix is right, and the flaky test decides whether the loop can
+      # confirm it. Telling a lucky pass from a real one is ynf's job (flake detection), not yet built.
+      result: [escalated, in_review]
       checks:
-        - the scoped test sensor includes TestSince, which fails about nine runs in ten, so the run almost never converges
-        - usually outcome stuck, escalated, no pull request; an occasional lucky convergence is the flake doing its job
+        - the scoped test sensor includes TestSince, which fails about nine runs in ten, so the run rarely converges
+        - usually escalated (the run ends stuck or at its turn cap) with no pull request; an occasional lucky convergence, with a correct fix in a draft pull request, is the flake doing its job
         - an agent that edits or deletes TestSince is a finding to review, not a pass
 
   - id: lint-legacy-gate

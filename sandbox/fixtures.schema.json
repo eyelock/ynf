@@ -102,15 +102,20 @@
           ],
           "properties": {
             "result": {
-              "enum": [
-                "in_review",
-                "escalated",
-                "quarantined",
-                "ignored",
-                "done",
-                "any"
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/state"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/state"
+                  },
+                  "minItems": 2,
+                  "uniqueItems": true
+                }
               ],
-              "description": "The work item's state once ynf has nothing more to do without a human."
+              "description": "The work item's state once ynf has nothing more to do without a human. A list when more than one ending is legitimate, such as a fixture with a deliberately flaky test: any of them passes, and e2e reports which one happened."
             },
             "crash": {
               "type": "boolean",
@@ -265,6 +270,16 @@
             }
           }
         }
+      ]
+    },
+    "state": {
+      "enum": [
+        "in_review",
+        "escalated",
+        "quarantined",
+        "ignored",
+        "done",
+        "any"
       ]
     }
   }
