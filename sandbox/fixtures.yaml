@@ -9,7 +9,8 @@
 #              fix and pass after it, so the fixture can tell a fixed state from an unfixed one.
 #              This tests the fixture, not the factory.
 #   expect     what ynf should do with the fixture end to end: the acceptance test for the
-#              factory, once ynf can run (`make e2e`).
+#              factory (`make e2e`). With crash: true, e2e kills ynf as the fixture's run starts
+#              and checks a fresh ynf restarts it.
 version: 1
 
 fixtures:
@@ -139,6 +140,21 @@ fixtures:
       checks:
         - the command runner, no model; detected providers recorded on the step
         - the same input always produces the same diff
+
+  - id: reclaim-crash
+    kind: issue
+    title: internal/format is not gofmt-clean, slowly
+    body: fixtures/reclaim-crash.md
+    labels: ["ynf:reclaim", "pkg:internal/format"]
+    lane: reclaim
+    calibrate:
+      command: { deterministic: true }
+    expect:
+      result: in_review
+      crash: true
+      checks:
+        - e2e kills ynf (SIGKILL) as this item's run starts, then starts a fresh ynf
+        - "the item's timer fires about one lease TTL later, not two hours: the run is restarted (\"did not finish\"), not resumed, and a draft pull request follows"
 
   - id: deps-bump
     kind: issue

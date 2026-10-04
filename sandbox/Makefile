@@ -6,7 +6,7 @@
 #                   the fixtures, not the factory; needs ynh with .agents/harness support,
 #                   YNH=/path/to/ynh to choose one)
 #   make e2e        rebuild the sandbox, run ynf against it until everything settles, and check
-#                   each fixture's expect block (tests the factory; LANES=gofmt,deps by default)
+#                   each fixture's expect block (tests the factory; LANES=gofmt,deps,reclaim by default)
 #   make e2e-only   the same, without the rebuild
 #   make agent-image  build ynf-sandbox-agent:latest, the base the ynh lanes' harness images use
 #                   (YNH_SRC=path to a ynh checkout; its origin/develop is built into the image)
@@ -43,7 +43,7 @@ reset: down up
 calibrate:
 	cd calibrate && go run . -root ..
 
-LANES ?= gofmt,deps
+LANES ?= gofmt,deps,reclaim
 
 e2e: reset e2e-only
 

@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://eyelock.github.io/ynf/schema/lanes.schema.json
 #
-# The sandbox's factory: five lanes, one per kind of work, so every ynf path has a lane to run in.
+# The sandbox's factory: six lanes, one per kind of work, so every ynf path has a lane to run in.
 # Every fixture carries a `pkg:<path>` label; lanes use it to scope the harness's sensors to the
 # part of the repository the work is about, so a run is judged on its own debt, not everyone's.
 # The ynh lanes run in an agent image ynf builds from this repository's own harness on
@@ -81,6 +81,26 @@ lanes:
       image: golang:1.26-alpine
       command:
         argv: ['gofmt', '-w', './{label.pkg}']
+      egress:
+        allow: []
+    when:
+      converged: open_pr
+      ci_failed: escalate
+    pr:
+      allowed_paths: ['**/*.go']
+
+  # gofmt, slowly: the run waits 20 seconds first, so `make e2e` can kill ynf while it is in
+  # progress and check that another ynf restarts it (ADR-005: restart, not resume).
+  reclaim:
+    kind: originate
+    intake:
+      - github.search: 'repo:eyelock/ynf-sandbox is:issue is:open label:"ynf:reclaim"'
+        every: 5m
+    run:
+      runner: command
+      image: golang:1.26-alpine
+      command:
+        argv: ['sh', '-c', 'sleep 20 && gofmt -w ./{label.pkg}']
       egress:
         allow: []
     when:

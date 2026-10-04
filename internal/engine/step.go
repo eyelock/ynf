@@ -83,7 +83,11 @@ func (e *Engine) Handle(ctx context.Context, key string, ev event.Event) error {
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	var lost atomic.Bool
-	go h.Heartbeat(runCtx, e.Heartbeat, func(err error) {
+	go h.Heartbeat(runCtx, e.Heartbeat, func(it item.Item) {
+		if err := e.schedule(runCtx, it); err != nil && runCtx.Err() == nil {
+			e.log().Warn("reschedule on heartbeat", "item", key, "err", err)
+		}
+	}, func(err error) {
 		lost.Store(true)
 		e.log().Error("lease lost; stopping", "item", key, "err", err)
 		cancel()
@@ -93,8 +97,14 @@ func (e *Engine) Handle(ctx context.Context, key string, ev event.Event) error {
 		s.cleanup()
 		cancel()
 		if !lost.Load() {
-			if err := h.Release(context.WithoutCancel(ctx)); err != nil && !errors.Is(err, lease.ErrLost) {
+			bg := context.WithoutCancel(ctx)
+			if err := h.Release(bg); err != nil && !errors.Is(err, lease.ErrLost) {
 				e.log().Error("release", "item", key, "err", err)
+			} else if err == nil {
+				// The lease is gone, so the item's timer goes back to what its decision asked for.
+				if err := e.schedule(bg, h.Item()); err != nil {
+					e.log().Error("schedule", "item", key, "err", err)
+				}
 			}
 		}
 	}()
@@ -122,6 +132,27 @@ type step struct {
 	result runner.Result
 	text   forge.Text
 }
+
+// schedule sets the item's timer: what its decision asked for, or, while a lease is held, no later
+// than just after the lease expires. A live holder's heartbeat keeps pushing that forward, so it
+// never fires; a dead holder's item wakes about one lease TTL after the death, and is restarted
+// (ADR-005) instead of waiting out the decision's much longer timer.
+func (e *Engine) schedule(ctx context.Context, it item.Item) error {
+	var due time.Time
+	if it.NextDue != nil {
+		due = *it.NextDue
+	}
+	if it.Lease != nil {
+		if reclaim := it.Lease.ExpiresAt.Add(reclaimGrace); due.IsZero() || reclaim.Before(due) {
+			due = reclaim
+		}
+	}
+	return e.Store.Schedule(ctx, it.Key, due)
+}
+
+// reclaimGrace keeps a reclaim timer just past the lease's expiry, so it never finds the lease
+// still held.
+const reclaimGrace = time.Second
 
 func (s *step) cleanup() {
 	if s.wt != "" {
@@ -155,7 +186,7 @@ func (s *step) decideAndAct(ev event.Event) (*event.Event, error) {
 	if d.Item.NextDue != nil {
 		due = *d.Item.NextDue
 	}
-	if err := e.Store.Schedule(ctx, it.Key, due); err != nil {
+	if err := e.schedule(ctx, s.h.Item()); err != nil {
 		return nil, err
 	}
 	s.remember(in, d)

@@ -136,7 +136,7 @@ func TestHeartbeatReportsLoss(t *testing.T) {
 		t.Fatal(err)
 	}
 	lost := make(chan error, 1)
-	go a.Heartbeat(ctx, time.Millisecond, func(err error) { lost <- err })
+	go a.Heartbeat(ctx, time.Millisecond, nil, func(err error) { lost <- err })
 	select {
 	case err := <-lost:
 		if !errors.Is(err, lease.ErrLost) {

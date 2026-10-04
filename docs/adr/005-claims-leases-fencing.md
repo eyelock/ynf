@@ -46,8 +46,11 @@ that was not cancelled in time). So:
 
 A duplicate or stale step therefore does nothing visible.
 
-**Recovery.** A dead holder's lease expires. The item's `next_due` is still set, so any instance's
-`Due()` sweep finds it and claims it with `epoch + 1`. Each claim of the same step increments
+**Recovery.** While a lease is held, the item's timer is due just after the lease expires, or at
+its `next_due` if that is sooner, and every heartbeat moves it forward with the lease. A live
+holder's timer therefore never fires; a dead holder's fires about one TTL after the death, and any
+instance's `Due()` sweep claims the item with `epoch + 1`. Releasing the lease puts the timer back
+to `next_due`. Each claim of the same step increments
 `attempts`; at the lane's cap (3 by default, 2026-10-03) the item moves to `quarantined` and is
 escalated to a human instead of retried.
 

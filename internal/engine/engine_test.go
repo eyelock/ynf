@@ -42,6 +42,14 @@ lanes:
     when: {converged: open_pr}
     pr: {allowed_paths: ["**/*.go"]}
     stop: {max_open_proposals: 1, yield_floor: 0.5, min_sample: 2}
+  slow:
+    kind: originate
+    intake: [{github.search: "label:ynf:slow", every: 5m}]
+    run:
+      runner: command
+      command:
+        argv: [sh, -c, 'while [ ! -f "$SLOW_GATE" ]; do sleep 0.02; done; gofmt -w ./internal/format']
+    when: {converged: open_pr}
   noop:
     kind: originate
     intake: [{github.search: "label:ynf:noop", every: 5m}]
@@ -866,7 +874,7 @@ func TestYieldFloorPausesTheLane(t *testing.T) {
 		}
 	}
 	stats, err := h.e.Stats(ctx)
-	if err != nil || len(stats) != 7 {
+	if err != nil || len(stats) != 8 {
 		t.Fatalf("every lane should be listed, with or without items: %+v %v", stats, err)
 	}
 	fmtStats := func(ss []engine.Stats) engine.Stats {
@@ -1065,4 +1073,101 @@ func (s *syncBuffer) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.b.String()
+}
+
+// startSlow starts a step on issue 1 in the slow lane, whose run waits for the returned gate file,
+// and returns once the item is running, with a channel that receives the step's error.
+func startSlow(t *testing.T, h *harness) (gate string, done chan error) {
+	t.Helper()
+	gate = filepath.Join(t.TempDir(), "gate")
+	t.Setenv("SLOW_GATE", gate)
+	h.f.labels[1] = []string{"ynf:slow"}
+	done = make(chan error, 1)
+	go func() { done <- h.e.Sweep(context.Background()) }()
+	for i := 0; ; i++ {
+		if doc, _, err := h.e.Store.Get(context.Background(), "item/github/o/r/issues/1"); err == nil && strings.Contains(string(doc), `"state":"running"`) {
+			return gate, done
+		}
+		if i > 500 {
+			t.Fatal("the slow run never started")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// another is a second ynf instance sharing h's store, forge, remote and clock, with its own work
+// folder: what a crash hands work to.
+func another(t *testing.T, h *harness) *engine.Engine {
+	dir := t.TempDir()
+	return &engine.Engine{
+		Store: h.e.Store, Forge: h.e.Forge,
+		Git:      workspace.Workspace{Root: dir, RemoteURL: func(string) string { return h.remote }},
+		Executor: h.e.Executor, Repos: h.e.Repos, WorkDir: dir, Owner: "other",
+		LeaseTTL: h.e.LeaseTTL, Heartbeat: h.e.Heartbeat, Poll: h.e.Poll,
+		RunTimeout: h.e.RunTimeout, Interactive: true, Now: h.e.Now, NewID: h.e.NewID,
+	}
+}
+
+// TestALiveHoldersHeartbeatKeepsItsItem: while the holder heartbeats, its item's timer moves with
+// the lease, so another instance never takes it however long the run goes on.
+func TestALiveHoldersHeartbeatKeepsItsItem(t *testing.T) {
+	h := newHarness(t)
+	h.e.Heartbeat = 20 * time.Millisecond
+	gate, done := startSlow(t, h)
+	b := another(t, h)
+	for range 5 {
+		h.advance(30 * time.Second) // 2.5 lease TTLs in all
+		time.Sleep(100 * time.Millisecond)
+		if n, err := b.RunDue(context.Background()); err != nil || n != 0 {
+			if n != 0 {
+				_ = os.WriteFile(gate, nil, 0o644)
+				<-done
+			}
+			t.Fatalf("another instance stepped a live holder's item: %d %v", n, err)
+		}
+	}
+	_ = os.WriteFile(gate, nil, 0o644)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Proposed || it.Attempts != 0 {
+		t.Fatalf("%s attempts=%d %s", it.State, it.Attempts, it.Reason)
+	}
+}
+
+// TestADeadHoldersItemIsRestartedWithinATTL: a holder that stops heartbeating (here, frozen; in
+// life, killed) leaves its item due just after its lease expires. Another instance restarts the
+// run then, not when the decision's two-hour timer would have fired, and the old holder, should
+// it wake, can write nothing (ADR-005).
+func TestADeadHoldersItemIsRestartedWithinATTL(t *testing.T) {
+	h := newHarness(t) // its heartbeat is an hour: the holder is as good as dead
+	gate, done := startSlow(t, h)
+	b := another(t, h)
+	if n, _ := b.RunDue(context.Background()); n != 0 {
+		t.Fatal("stepped before the lease expired")
+	}
+	h.advance(h.e.LeaseTTL + 2*time.Second)
+	_ = os.WriteFile(gate, nil, 0o644) // both runs may now finish
+	n, err := b.RunDue(context.Background())
+	if err != nil || n != 1 {
+		t.Fatalf("the dead holder's item was not due one TTL later: %d %v", n, err)
+	}
+	stale := <-done
+	it := h.item(t, 1)
+	if it.State != item.Proposed || it.Lease != nil {
+		t.Fatalf("after the restart: %s %s", it.State, it.Reason)
+	}
+	if !strings.Contains(fmt.Sprint(stale), "lease") {
+		t.Errorf("the stale holder should have been fenced off: %v", stale)
+	}
+	entries, _ := h.e.Store.Log(context.Background(), it.Key)
+	var restarted bool
+	for _, en := range entries {
+		if en.Kind == "decision" && strings.Contains(string(en.Body), "did not finish") {
+			restarted = true
+		}
+	}
+	if !restarted {
+		t.Error("the log has no restart decision")
+	}
 }
