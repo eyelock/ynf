@@ -43,6 +43,9 @@ func (a *app) doctor(ctx context.Context) error {
 	}
 	var checks []check
 	add := func(name string, ok bool, detail string) { checks = append(checks, check{name, ok, detail}) }
+	// Docker is needed only when a lane runs in it; inside the factory image every run is inline.
+	// Until the lanes are read, assume it is.
+	needDocker, lanesRead := false, false
 
 	if err := a.loadConfig(); err != nil {
 		add("config", false, err.Error())
@@ -71,6 +74,12 @@ func (a *app) doctor(ctx context.Context) error {
 					add("lanes "+r, false, err.Error())
 					continue
 				}
+				lanesRead = true
+				for _, l := range rp.File.Lanes {
+					if ex, err := a.eng.Executor(l.Run.Executor); l.On() && (err != nil || ex.Name() == "docker") {
+						needDocker = true
+					}
+				}
 				dir := rp.Dir
 				if dir == "" {
 					dir = "the configuration repository's lanes only"
@@ -93,11 +102,16 @@ func (a *app) doctor(ctx context.Context) error {
 			}
 		}
 	}
+	optional := map[string]bool{"ynh": true, "ynm": true} // ADR-012
 	for _, tool := range []struct{ name, args string }{{"git", "--version"}, {"docker", "version --format {{.Server.Version}}"}, {"ynh", "version"}, {"ynm", "--version"}} {
 		out, err := exec.CommandContext(ctx, tool.name, strings.Fields(tool.args)...).Output()
 		detail := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
 		if err != nil {
 			detail = "not found or not working (" + err.Error() + ")"
+			if tool.name == "docker" && lanesRead && !needDocker {
+				detail = "not needed: no lane runs in docker here"
+				optional[tool.name] = true
+			}
 		}
 		add(tool.name, err == nil, detail)
 	}
@@ -107,8 +121,8 @@ func (a *app) doctor(ctx context.Context) error {
 		mark := "ok  "
 		if !c.OK {
 			mark = "FAIL"
-			if c.Name == "ynh" || c.Name == "ynm" {
-				mark = "--  " // optional (ADR-012)
+			if optional[c.Name] {
+				mark = "--  "
 			} else {
 				ok = false
 			}
