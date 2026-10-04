@@ -18,16 +18,18 @@ resource "github_repository" "ynf" {
   has_wiki        = false
   is_template     = false
 
-  # While ynf is being bootstrapped everything lands on main by squash-merged pull request.
-  # Gitflow (develop and release branches, as in ynh and ynm) comes with the first release.
+  # Gitflow (branches.tf): feature PRs are squash-merged into develop, titled and described by the
+  # PR, so its "Closes #n" lines close issues; release and hotfix PRs into main are true merges.
   allow_squash_merge          = true
-  allow_merge_commit          = false
+  allow_merge_commit          = true
   allow_rebase_merge          = false
   allow_auto_merge            = false
   allow_update_branch         = true
   delete_branch_on_merge      = true
   squash_merge_commit_title   = "PR_TITLE"
   squash_merge_commit_message = "PR_BODY"
+  merge_commit_title          = "MERGE_MESSAGE"
+  merge_commit_message        = "PR_TITLE"
   web_commit_signoff_required = false
 
   # A destroy archives the repository instead of deleting it.

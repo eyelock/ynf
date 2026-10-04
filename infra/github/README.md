@@ -7,7 +7,7 @@ lives in [`sandbox/`](../../sandbox/README.md).
 | File | What it manages |
 |---|---|
 | `repository.tf` | The repository: description, topics, visibility, features, merge options; and the docs site, GitHub Pages from `/docs` on `main` |
-| `branches.tf` | Protection on `main`: pull request required with the `check` job green, admins included, linear history, no force-push or delete |
+| `branches.tf` | Gitflow: `develop` as the default branch, and protection on `main` and `develop`: a pull request required with `check` green (plus "Verify PR source branch" into `main`, so it takes only `develop`, `release/*` and `hotfix/*`), admins included, no force-push or delete |
 | `labels.tf` | Issue and PR labels, authoritatively: a label not listed is removed |
 | `actions.tf` | Actions permissions, the read-only default `GITHUB_TOKEN`, and that the `RELEASE_TOKEN` secret exists |
 | `security.tf` | Dependabot alerts and security updates |
@@ -58,5 +58,5 @@ For a new owner or name, set `owner` and `repository`, then:
 
 1. Delete `imports.tf`: there is nothing to import.
 2. Create only the repository: `terraform apply -target=github_repository.ynf`.
-3. Push `main` from a clone. The protection needs the branch to exist.
+3. Push `main` and `develop` from a clone. The protection and the default branch need them to exist.
 4. Apply the rest: `terraform apply`.
