@@ -225,15 +225,16 @@ func TestItemsLogSummarisesRunsAndActions(t *testing.T) {
 		`{"run_id":"R1","runner":"command","executor":"docker","outcome":"converged","changed":["a.go"],"duration":"2s"}`,
 		`{"action":"open_pr","ok":false,"detail":"diff gate refused"}`,
 		`{"by":"human","action":"retry"}`,
+		`{"run_id":"R2","runner":"ynh","outcome":"operator_error","detail":"no such executor"}`,
 	} {
-		kind := []string{"run", "action", "note"}[i]
+		kind := []string{"run", "action", "note", "run"}[i]
 		if err := st.Append(context.Background(), k, store.LogEntry{ID: fmt.Sprintf("Z%d", i), Time: time.Now(), Kind: kind, Body: json.RawMessage(body)}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	_ = st.Close()
 	code, out, _ := e.run("items", "log", "o/r#5")
-	for _, want := range []string{"R1 command via docker: converged", "1 changed (2s)", "open_pr ok=false diff gate refused", `"by":"human"`} {
+	for _, want := range []string{"R1 command via docker: converged", "1 changed (2s)", "R2 ynh: operator_error no such executor", "open_pr ok=false diff gate refused", `"by":"human"`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("log lacks %q (%d):\n%s", want, code, out)
 		}

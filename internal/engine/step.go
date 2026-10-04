@@ -307,8 +307,11 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 			"run_id": runID, "outcome": rec.Outcome, "detail": rec.Detail, "changed": anyList(rec.Changed), "denied": anyList(rec.Denied),
 		})
 	}
+	// A run refused or broken before it starts still says what it would have used: the lane's
+	// runner and executor, until the executor is built and names itself.
+	runnerName, executorName := lane.Run.Runner, lane.Run.Executor
 	fail := func(outcome string, err error) event.Event {
-		return finished(RunRecord{Outcome: outcome, Detail: err.Error()})
+		return finished(RunRecord{Runner: runnerName, Executor: executorName, Outcome: outcome, Detail: err.Error()})
 	}
 
 	r, err := runner.For(lane)
@@ -319,6 +322,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	if err != nil {
 		return fail(runner.OperatorError, err)
 	}
+	executorName = ex.Name()
 	if !ex.Contained() && !e.Interactive {
 		return fail(runner.OperatorError, fmt.Errorf("lane %s uses the %s executor, which is not contained; unattended lanes need a contained one (ADR-007)", lane.Name, ex.Name()))
 	}
