@@ -211,8 +211,8 @@ func TestALaneOnlyTightensItsHarness(t *testing.T) {
 // and effort (ADR-011).
 func TestYnhUsage(t *testing.T) {
 	out := []byte(`{"exit_code":10,"reason":"turn cap reached (12/12)","backend":"claude","model":"opus","effort":"high","ynh_version":"0.9.0",
-		"auto_approve":"edits","bound_by":"turns","cost_usd":0.42,"harness":{"name":"lint","version":"1.4.0","sha":"abc"},
-		"consumed":{"turns":12,"tokens":13261,"wall_ms":300000}}`)
+		"auto_approve":"edits","bound_by":"turns","harness":{"name":"lint","version":"1.4.0","sha":"abc"},
+		"consumed":{"turns":12,"tokens":13261,"wall_ms":300000,"cost_usd":0.42}}`)
 	r := runner.YnhRunner{}.Interpret(10, out, "")
 	u := r.Usage
 	if r.Outcome != runner.Budget || r.Model != "claude/opus" || u.Effort != "high" || u.Turns != 12 || u.Tokens != 13261 ||
