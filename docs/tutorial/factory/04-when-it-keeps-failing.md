@@ -147,8 +147,9 @@ OpenAI-compatible endpoint; with neither, the pass is skipped. ynm's
 [how-to](https://github.com/eyelock/ynm/blob/main/docs/how-to/configure-judge-and-writer.md)
 cover choosing one.
 
-Run only the reflect pass, over the sandbox's namespace. A ynm that knows the `occurrence` tag would
-leave these records alone in a full dream too; the lesson needs only the reflection:
+Run only the reflect pass, over the sandbox's namespace. ynf tags every failure record `occurrence`,
+so a full dream (ynm 0.3.0 or later) would leave them alone too, never merging one occurrence into
+another; the lesson needs only the reflection:
 
 ```bash
 ynm dream --namespace $NS --passes reflect
