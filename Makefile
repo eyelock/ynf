@@ -2,7 +2,8 @@
 #   make deps     check the prerequisites (Go, golangci-lint) and download the modules
 #   make check    format, vet, lint, tests with the race detector, and the coverage gate
 #   make build    bin/ynf
-#   make install  bin/ynf into $(INSTALL_DIR)
+#   make install  bin/ynf and its linux builds into $(INSTALL_DIR) (~/.ynf/bin, as ynh and ynm
+#                 use ~/.ynh/bin and ~/.ynm/bin); put it on your PATH
 #   make e2e      the factory acceptance test against the live sandbox (sandbox/Makefile)
 #   make factory-image  ynf's factory image (ADR-009): ynh's image with ynf and ynm, at the
 #                 versions in images/factory/versions.env, and this checkout's ynf. To try dev
@@ -11,7 +12,7 @@
 
 VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS     := -s -w -X github.com/eyelock/ynf.Version=$(VERSION)
-INSTALL_DIR ?= $(HOME)/.local/bin
+INSTALL_DIR ?= $(HOME)/.ynf/bin
 COVERAGE    ?= 80
 
 include images/factory/versions.env
