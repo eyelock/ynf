@@ -1,0 +1,178 @@
+groups:
+  # Spans. One per unit of ynf's own work, and a child per call out to another system (ynr ADR-006).
+  - id: span.ynf.step
+    type: span
+    span_kind: internal
+    stability: development
+    brief: "One step on one item (ADR-001), the root of the step's trace."
+    attributes:
+      - {ref: ynf.item.key, requirement_level: required}
+      - {ref: ynf.step.id, requirement_level: required}
+      - {ref: ynf.lane, requirement_level: required}
+      - {ref: ynf.policy.hash, requirement_level: required}
+      - {ref: ynf.lease.epoch, requirement_level: required}
+      - {ref: ynf.repo, requirement_level: required}
+      - {ref: vcs.repository.url.full, requirement_level: recommended}
+      - {ref: cloudevents.event_type, requirement_level: recommended}
+      - {ref: ynf.outcome, requirement_level: required}
+  - id: span.ynf.claim
+    type: span
+    span_kind: internal
+    stability: development
+    brief: Taking the item's lease.
+    attributes:
+      - {ref: ynf.item.key, requirement_level: required}
+      - {ref: ynf.outcome, requirement_level: required}
+  - id: span.ynf.probe
+    type: span
+    span_kind: internal
+    stability: development
+    brief: Reading the facts a decision needs from the ticket and the forge.
+    attributes:
+      - {ref: ynf.item.key, requirement_level: required}
+      - {ref: ynf.outcome, requirement_level: required}
+  - id: span.ynf.decide
+    type: span
+    span_kind: internal
+    stability: development
+    brief: The decider reading the item, the facts and the lane, and what it chose.
+    attributes:
+      - {ref: ynf.item.key, requirement_level: required}
+      - {ref: ynf.item.state, requirement_level: recommended}
+      - {ref: ynf.outcome, requirement_level: required}
+  - id: span.ynf.act
+    type: span
+    span_kind: internal
+    stability: development
+    brief: One action a decision asked for.
+    attributes:
+      - {ref: ynf.item.key, requirement_level: required}
+      - {ref: ynf.action, requirement_level: required}
+      - {ref: ynf.outcome, requirement_level: required}
+  - id: span.ynf.run
+    type: span
+    span_kind: internal
+    stability: development
+    brief: One run of a lane's runner on a worktree.
+    attributes:
+      - {ref: ynf.item.key, requirement_level: required}
+      - {ref: ynf.step.id, requirement_level: required}
+      - {ref: ynf.run.id, requirement_level: required}
+      - {ref: ynf.lane, requirement_level: required}
+      - {ref: ynf.lane.harness, requirement_level: recommended}
+      - {ref: ynf.lane.focus, requirement_level: recommended}
+      - {ref: gen_ai.response.model, requirement_level: recommended}
+      - {ref: ynf.outcome, requirement_level: required}
+  - id: span.ynf.intake
+    type: span
+    span_kind: internal
+    stability: development
+    brief: A CloudEvent ynf received, recorded so a step can link to it (ynr ADR-003).
+    attributes:
+      - {ref: ynf.item.key, requirement_level: recommended}
+      - {ref: ynf.outcome, requirement_level: required}
+  - id: span.ynf.call
+    type: span
+    span_kind: client
+    stability: development
+    brief: "A call out to another system: a forge, a tracker, git, ynm, docker or an executor."
+    attributes:
+      - {ref: ynf.call.system, requirement_level: required}
+      - {ref: ynf.call.operation, requirement_level: required}
+      - {ref: ynf.outcome, requirement_level: required}
+  - id: span.ynf.lane.control
+    type: span
+    span_kind: internal
+    stability: development
+    brief: A person pausing or resuming a lane.
+    attributes:
+      - {ref: ynf.lane, requirement_level: required}
+      - {ref: ynf.paused, requirement_level: required}
+      - {ref: ynf.actor.kind, requirement_level: recommended}
+      - {ref: ynf.outcome, requirement_level: required}
+
+  # Events. Log records with an event name, written inside the span of the unit they belong to.
+  - id: event.ynf.step.started
+    type: event
+    name: ynf.step.started
+    stability: development
+    brief: A step began. A start with no matching span is how a crash shows.
+    attributes:
+      - {ref: ynf.item.key, requirement_level: required}
+      - {ref: ynf.step.id, requirement_level: required}
+      - {ref: cloudevents.event_type, requirement_level: recommended}
+  - id: event.ynf.run.started
+    type: event
+    name: ynf.run.started
+    stability: development
+    brief: A run began.
+    attributes:
+      - {ref: ynf.item.key, requirement_level: required}
+      - {ref: ynf.step.id, requirement_level: required}
+      - {ref: ynf.run.id, requirement_level: required}
+      - {ref: ynf.lane, requirement_level: required}
+  - id: event.ynf.decision.made
+    type: event
+    name: ynf.decision.made
+    stability: development
+    brief: The decider chose. Its reasoning is in ynf's store, never in telemetry.
+    attributes:
+      - {ref: ynf.item.key, requirement_level: required}
+      - {ref: ynf.step.id, requirement_level: required}
+      - {ref: ynf.item.state, requirement_level: required}
+      - {ref: cloudevents.event_type, requirement_level: recommended}
+  - id: event.ynf.intake.received
+    type: event
+    name: ynf.intake.received
+    stability: development
+    brief: >
+      A CloudEvent ynf received, written once inside its ynf.intake span: the one-way mirror of the
+      control plane into telemetry. Nothing in ynf reads telemetry.
+    attributes:
+      - {ref: cloudevents.event_id, requirement_level: required}
+      - {ref: cloudevents.event_source, requirement_level: required}
+      - {ref: cloudevents.event_type, requirement_level: required}
+      - {ref: cloudevents.event_subject, requirement_level: recommended}
+      - {ref: ynf.intake.result, requirement_level: required}
+
+  # Metrics. Low-cardinality attributes only: never an item key, a run id or a trace id. The limit on
+  # each attribute is its ynr.cardinality annotation.
+  - id: metric.ynf.run.count
+    type: metric
+    metric_name: ynf.run.count
+    instrument: counter
+    unit: "{run}"
+    stability: development
+    brief: Runs, by outcome, lane and model.
+    attributes:
+      - {ref: ynf.outcome, requirement_level: required}
+      - {ref: ynf.lane, requirement_level: required}
+      - {ref: gen_ai.response.model, requirement_level: required, annotations: {ynr.cardinality: 50}}
+  - id: metric.ynf.run.tokens
+    type: metric
+    metric_name: ynf.run.tokens
+    instrument: counter
+    unit: "{token}"
+    stability: development
+    brief: Tokens runs used, by model and kind, as the runner reports them.
+    attributes:
+      - {ref: gen_ai.response.model, requirement_level: required, annotations: {ynr.cardinality: 50}}
+      - {ref: ynf.token.type, requirement_level: required}
+  - id: metric.ynf.run.cost
+    type: metric
+    metric_name: ynf.run.cost
+    instrument: counter
+    unit: "USD"
+    stability: development
+    brief: What runs cost, by model, as the runner reports it. ynf never prices tokens itself.
+    attributes:
+      - {ref: gen_ai.response.model, requirement_level: required, annotations: {ynr.cardinality: 50}}
+  - id: metric.ynf.lease.expired
+    type: metric
+    metric_name: ynf.lease.expired
+    instrument: counter
+    unit: "{lease}"
+    stability: development
+    brief: Leases found expired when a step claimed the item, so a holder died or stalled.
+    attributes:
+      - {ref: ynf.lane, requirement_level: required}

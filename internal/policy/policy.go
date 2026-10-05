@@ -60,7 +60,10 @@ type LabelChange struct {
 
 // Lane is one lane, with defaults applied after Load.
 type Lane struct {
-	Name      string              `yaml:"-" json:"name"`
+	Name string `yaml:"-" json:"name"`
+	// ID is the lane's own id for telemetry, when it declares one; otherwise the id is where the
+	// lane is defined plus its name (ADR-006).
+	ID        string              `yaml:"id" json:"id,omitempty"`
 	Kind      string              `yaml:"kind" json:"kind"`
 	Enabled   *bool               `yaml:"enabled" json:"enabled,omitempty"`
 	Intake    []Intake            `yaml:"intake" json:"intake"`

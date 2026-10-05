@@ -30,7 +30,7 @@ func (e *Engine) memoryQueue() *memory.Queue {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.memq == nil {
-		e.memq = &memory.Queue{Memory: e.Memory, Store: e.Store, Owner: "memq-" + e.NewID(), Now: e.Now, NewID: e.NewID, Log: e.log()}
+		e.memq = &memory.Queue{Memory: e.traceMemory(e.Memory), Store: e.Store, Owner: "memq-" + e.NewID(), Now: e.Now, NewID: e.NewID, Log: e.log()}
 	}
 	return e.memq
 }

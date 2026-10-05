@@ -29,6 +29,7 @@ carried out today.
 | `stop` | Stop conditions (ADR-010) | `max_open_proposals` holds new work while that many proposals await review; `yield_floor` pauses the lane once `min_sample` (default 20) proposals are decided below it; `review_time_ceiling` and `escaped_defects` not yet |
 | `labels` | What ynf writes on the ticket as the item moves (ADR-003) | `on_claim` (taken on), `on_propose` (pull request open), `on_review` (CI green), `on_escalate` (escalated or quarantined) and `on_done` (merged or closed), each `{add: [...], remove: [...]}`, written through the ticket's tracker as the item enters the state. Remove the triggering label in `on_claim` so nothing finds the ticket twice. A failed write is logged and recorded, never fatal. Each reaction falls back to `defaults.labels` on its own |
 | `attempts` | Runs that never finish before the item is quarantined | yes (default 3) |
+| `id` | The lane's own id in telemetry, which stays fixed if the repository that defines it moves. Without one, a lane's id is where it is defined, host first, then its name: `github.com/acme/factory-config#lint-paydown` for a lane in the configuration repository (wherever a repository overrides it), `github.com/eyelock/ynh#docs-refresh` for one the repository defines itself (ADR-006). Letters, digits and `. _ ~ : @ / # -` | yes |
 
 ## The built-in protected paths
 

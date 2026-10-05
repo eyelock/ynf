@@ -21,6 +21,7 @@ import (
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/types"
 	"github.com/eyelock/ynf/internal/facts"
+	"github.com/eyelock/ynf/internal/telemetry"
 	"github.com/eyelock/ynf/internal/tracker"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -182,6 +183,7 @@ func (t *Tracker) dial(ctx context.Context) (*mcp.ClientSession, error) {
 			cmd.Env = append(cmd.Env, name+"="+v)
 		}
 	}
+	telemetry.Command(ctx, cmd)
 	return client().Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
 }
 

@@ -49,6 +49,7 @@ an issue on GitHub Enterprise Server is `item/github.acme.internal/…`.
 | `ynf shadow ls` | Every shadow run: id, lane, when, candidates, attempted and graded. |
 | `ynf shadow grade [<shadow run id>] [--attempt <id> --a <grade> --b <grade>] [--regrade]` | Blind grading by a person at a terminal, for the run named or the latest. For each attempt it shows the ticket, then two patches labelled A and B in a random order that is recorded but not shown (the agent's and the human's), and asks for a grade for each: `equivalent`, `different-valid`, `superficial`, `wrong` or `does-not-build`. Only then does it say which was which and how the run ended. Grading both is deliberate: the human patch checks the grader, and each grade is a labelled example. An attempt with an empty agent patch is graded `wrong` automatically, with a note, and is never shown. For scripts and tests, `--attempt <id> --a <grade> --b <grade>` gives both grades for patches A and B in the attempt's recorded order. A grade is kept; `--regrade` replaces it. |
 | `ynf shadow report [<shadow run id> \| --lane <lane>]` | The yield `y` (equivalent plus different-valid, over graded agent attempts) with its Wilson 95% interval, per repository and pooled; until attempts are graded, the automatic upper bound (converged and the diff gate would have accepted it, over attempted), labelled as an upper bound that is not graded. Also the outcomes, the superficial count, total and per-attempt cost, the pins (lane, policy hash, harness and its commit, image, ynh version, model, effort, and anything that differed between attempts), and the grades of the human patches as a check on the grader. Lanes do not yet declare the human time `h`, so `y` is not compared with `y* = r / h`. `--format json` gives all of it. |
+| `ynf telemetry registry [--format json]` | Prints the OpenTelemetry names ynf emits under the `ynf.` prefix, and the standard ones it uses, as the registry embedded in the binary (an OpenTelemetry Weaver registry, in `telemetry/registry`). `json` gives the whole registry: its tool name and version, the pinned semantic-conventions release, every attribute, span, event and metric, and the cardinality limit of each metric attribute. `--format` may come before or after `telemetry`. |
 | `ynf replay <item> [--policy <file>]` | Recomputes every recorded decision, under the recorded lane or the same-named lane in `<file>`, and says which differ. A `<file>` that is invalid alone is taken as the item's repository's own layer and merged over the configuration repository's lanes, as `lanes validate --repo` does. |
 
 ## What the log shows
@@ -70,6 +71,8 @@ Every decision (`decided`: item, event, state, reason), every run (`run started`
 With `--format json`, an error is `{"error": {"code": <exit code>, "message": "..."}}` on stdout.
 
 ## Environment
+
+ynf writes OpenTelemetry where [See ynf in OpenTelemetry](../how-to/see-ynf-in-opentelemetry.md) says; the variables it reads for that are `OTEL_EXPORTER_OTLP_*`, `YNR_SPOOL`, `XDG_STATE_HOME`, `OTEL_RESOURCE_ATTRIBUTES`, `TRACEPARENT` and `TRACESTATE`, listed there.
 
 | Variable | Used for |
 |---|---|

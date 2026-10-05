@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/eyelock/ynf/internal/egress"
+	"github.com/eyelock/ynf/internal/telemetry"
 )
 
 // Container paths: what a contained command sees.
@@ -238,6 +239,7 @@ func (d Docker) waitReady(ctx context.Context, proxy string) error {
 
 func (d Docker) docker(ctx context.Context, args ...string) (string, error) {
 	c := exec.CommandContext(ctx, d.Bin, args...)
+	telemetry.Command(ctx, c)
 	var stdout, stderr bytes.Buffer
 	c.Stdout, c.Stderr = &stdout, &stderr
 	if err := c.Run(); err != nil {
@@ -298,6 +300,7 @@ func runAs(ctx context.Context, timeout time.Duration, dir, name string, args, e
 	}
 	c := exec.CommandContext(ctx, name, args...)
 	c.Dir, c.Env = dir, env
+	telemetry.Command(ctx, c) // the run's process joins the run's trace
 	if prepare != nil {
 		prepare(c)
 	}

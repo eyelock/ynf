@@ -40,6 +40,7 @@ ynf harness      show <image> | --lane <name> --repo …                    what
 Operations
 ynf version
 ynf doctor
+ynf telemetry    registry [--format json]                                 the names ynf emits in OpenTelemetry
 ynf egress-proxy --allow <hosts> [--listen :3128] [--log <file>]          inside a container
 ```
 
@@ -99,11 +100,53 @@ ynh's, or a command's result file. ynf records what the runner reports and never
 itself. These records live in ynf's own store, the run history; memory holds only failure
 patterns (ADR-008).
 
-**Observability:** structured logs as they happen, to stderr and with `--log-file` to a file, as
-text or one JSON object per line: every decision, every run's start, progress and finish, and every
-action on a tracker or forge. An OpenTelemetry trace per step has spans for claim, probe, decide,
-act, and the run. Every span carries the item key, `step_id`, lane, policy
-hash and lease epoch.
+**Observability** is ynf's side of ynr's contract for OpenTelemetry (ynr ADR-006), and works the
+same with ynr or without it.
+
+*Logs.* Structured logs as they happen, to stderr and with `--log-file` to a file, as text or one
+JSON object per line: every decision, every run's start, progress and finish, and every action on
+a tracker or forge. They are bridged into OpenTelemetry logs with the official `log/slog` bridge;
+what people read is unchanged byte for byte, and what the bridge sends leaves out content and
+people and scrubs secrets and email addresses.
+
+*Where it goes.* The SDK is set up once at process start (`internal/telemetry`), and writes, in
+order: to the operator's `OTEL_EXPORTER_OTLP_*` endpoint if set; else to the spool, if `YNR_SPOOL`
+names a folder or the laptop default `$XDG_STATE_HOME/ynr/spool/local` exists, through ynr's spool
+exporter, into the folder named; else nowhere, with the no-op providers. `ynf serve` looks for a
+spool again once a minute when it found none. The resource is `service.name=ynf`, ynf's version
+and a ULID for each process, and `OTEL_RESOURCE_ATTRIBUTES` is honoured. ynf joins the trace in
+`TRACEPARENT` and `TRACESTATE`, else starts one; every process it starts gets them, and every HTTP
+call to ynm carries W3C trace-context headers. The flush at exit is bounded (ForceFlush, the
+spool's Sync, Shutdown, Close), and errors are swallowed: telemetry never changes output or an
+exit code.
+
+*A trace per step.* The step's span is the root and carries the item key, `step_id`, lane id
+(ADR-006), policy hash, lease epoch and the repository, host first. Beneath it are spans for claim,
+probe, decide and act (one for each action), the run under its action, and a `ynf.call` span for
+each call out to another system: the forge, a tracker, git, ynm, the executor, and ynh building an
+image. `ynf.step.started` and `ynf.run.started` are written as each begins, so a crash shows as a
+start with no finish. Each unit of work ends with ynf's own outcome as `ynf.outcome` and a span
+status set from it.
+
+*An item's history is linked, not nested.* Each CloudEvent received is an `ynf.intake` span with
+its `ynf.intake.received` event (ADR-002). Each step span links to the item's previous step and to
+the intake that started it, and ynf keeps the last step's span ids, and an intake no step has
+linked to yet, on the item in its store, so this works across processes on every provider.
+Nothing in ynf reads telemetry.
+
+*Metrics.* Runs by outcome, lane and model; tokens and cost by model, as the runner reports them;
+lease expiries by lane. Attributes are low-cardinality, with each limit declared in the registry,
+and never an item key, run id or trace id.
+
+*Names.* ynf's names are an OpenTelemetry Weaver registry in `telemetry/registry`, under the
+`ynf.` prefix and pinned to a semantic-conventions release, including the factory attributes ynr
+stamps on ynf's behalf (`ynf.lane`, `ynf.lane.harness`, `ynf.lane.focus`). It is embedded in the
+binary, `ynf telemetry registry --format json` prints it, and the Go constants ynf uses are
+generated from it. CI checks it with Weaver.
+
+*People and content.* An actor appears only as a host-qualified handle, such as
+`github.com/octocat`, never a name or email. No prompt, ticket text, code, diff or memory body is
+exported, and secrets are redacted at the source.
 
 **Exit codes**, for every command: `0` success, `2` usage, `20` an adapter failed (the forge, git,
 docker, the store), `30` config or lanes invalid, `31` `sweep --until-settled` timed out before

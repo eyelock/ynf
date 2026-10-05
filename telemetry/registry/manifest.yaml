@@ -1,0 +1,12 @@
+# ynf's telemetry registry: the names ynf emits under the ynf. prefix, as an OpenTelemetry Weaver
+# registry (ynr ADR-007). It is embedded in the binary and printed by `ynf telemetry registry
+# --format json`; internal/telemetry/names.go is generated from it (`go generate ./...`).
+file_format: definition_manifest/2.0
+name: ynf
+description: The names ynf emits, under the ynf. prefix, and the OpenTelemetry names it uses beside them.
+schema_url: https://github.com/eyelock/ynf/telemetry/schemas/0.1.0
+dependencies:
+  # The upstream semantic conventions ynf follows. Moving this is a deliberate change.
+  - name: otel
+    schema_url: https://opentelemetry.io/schemas/1.40.0
+    registry_path: https://github.com/open-telemetry/semantic-conventions/archive/refs/tags/v1.40.0.zip[model]

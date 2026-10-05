@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/eyelock/ynf/internal/policy"
+	"github.com/eyelock/ynf/internal/telemetry"
 )
 
 // MinYnhCapabilities is the first ynh capabilities version ynf supports as a detected runner:
@@ -51,6 +52,7 @@ func DetectYnh(ctx context.Context) Detection {
 	defer cancel()
 	var out, errb bytes.Buffer
 	c := exec.CommandContext(ctx, bin, "version", "--format", "json")
+	telemetry.Command(ctx, c)
 	c.Stdout, c.Stderr = &out, &errb
 	if err := c.Run(); err != nil {
 		return Detection{Detail: fmt.Sprintf("%s: %v", bin, err)}

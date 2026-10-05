@@ -67,8 +67,27 @@ type Item struct {
 	Feedback string         `json:"feedback,omitempty"` // what the next run is told, e.g. CI output
 	NextDue  *time.Time     `json:"next_due,omitempty"`
 	Lease    *Lease         `json:"lease,omitempty"`
-	Created  time.Time      `json:"created"`
-	Updated  time.Time      `json:"updated"`
+	// Trace is where the item's history can be followed in telemetry (ynr ADR-002).
+	Trace   *Trace    `json:"trace,omitempty"`
+	Created time.Time `json:"created"`
+	Updated time.Time `json:"updated"`
+}
+
+// Trace holds the span ids that link an item's history across steps and processes, kept in the
+// store beside the item so it works on every provider. Nothing in ynf reads telemetry back: these
+// are ids ynf wrote, used only to make span links.
+type Trace struct {
+	// Step is the last step's span, which the next step links to.
+	Step *SpanRef `json:"step,omitempty"`
+	// Intake is the ynf.intake span of an event recorded for the item that no step has linked to
+	// yet, such as a detached start's, which a later step in another process picks up.
+	Intake *SpanRef `json:"intake,omitempty"`
+}
+
+// SpanRef names a span by its trace id and span id, as lowercase hex.
+type SpanRef struct {
+	TraceID string `json:"trace_id"`
+	SpanID  string `json:"span_id"`
 }
 
 // Run is the last run's result, as the decider needs it.

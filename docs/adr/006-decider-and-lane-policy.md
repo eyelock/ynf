@@ -162,6 +162,14 @@ asks for.
 plus both source commits, just as ynh records `harness.sha`. A step's log entry is
 `{event, facts, policy: {hash, config_sha, repo_sha}, decision}`.
 
+**A lane has an id.** Telemetry names a lane by where it is defined plus its name, host first:
+`github.com/acme/factory-config#lint-paydown` for a lane in the configuration repository, however
+a target repository overrides it (the override is a variant of the same lane, told apart by the
+harness and focus the run used), and `github.com/eyelock/ynh#docs-refresh` for a lane a target
+repository defines itself. A lane may declare an explicit `id` in `lanes.yaml`, which then is its
+id and stays fixed if the repository that defines it moves. The id is for telemetry and
+conformance; the lane's name stays what rules, labels and `--lane` use.
+
 **CEL sees structure, not prose** (NFR-5). The facts exposed to guards are labels, states,
 counts, identities and check conclusions. Titles, bodies and comments are not in the CEL
 environment.

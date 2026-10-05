@@ -123,6 +123,14 @@ rejects errors discarded with `_ =`, and it only checks new code. That gap is wh
 lane's are (a scope may only narrow them), so on `fix-ci-retry` they start green: the agent works
 from the failing CI check the task quotes.
 
+## Telemetry
+
+`make e2e` runs ynf with `YNR_SPOOL` set to a temporary folder (not inside a factory image, where
+the variable does not reach ynf) and, once the fixtures check out, reads the spool files back: a
+gofmt item's first step is one trace with its claim, probe, decide, act, run and call spans and its
+item, step, lane, policy hash, lease epoch and repository attributes; its later steps link to the
+step before; and every received CloudEvent has exactly one `ynf.intake.received` event (ADR-011).
+
 ## Changing it
 
 Edit `seed/`, `fixtures.yaml` or `fixtures/`, then `make reset` and `make calibrate`. `main` is protected, so a

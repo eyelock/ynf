@@ -1,7 +1,7 @@
-// Package ynf holds what the whole module shares: the published JSON schemas and the version.
+// Package ynf holds what the whole module shares: the published JSON schemas, the telemetry registry and the version.
 package ynf
 
-import _ "embed"
+import "embed"
 
 // LanesSchema is docs/schema/lanes.schema.json, the schema for .agents/factory/lanes.yaml.
 //
@@ -21,3 +21,9 @@ var FactorySchema []byte
 
 // Version is set at build time with -ldflags "-X github.com/eyelock/ynf.Version=...".
 var Version = "dev"
+
+// TelemetryRegistry is telemetry/registry, ynf's OpenTelemetry Weaver registry (ynr ADR-007): the
+// names ynf emits under the ynf. prefix. `ynf telemetry registry --format json` prints it.
+//
+//go:embed telemetry/registry/*.yaml
+var TelemetryRegistry embed.FS

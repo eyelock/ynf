@@ -25,6 +25,7 @@ import (
 	"github.com/eyelock/ynf/internal/store"
 	"github.com/eyelock/ynf/internal/store/s3store"
 	"github.com/eyelock/ynf/internal/store/sqlite"
+	"github.com/eyelock/ynf/internal/telemetry"
 	"github.com/eyelock/ynf/internal/tracker"
 	"github.com/eyelock/ynf/internal/tracker/mcptracker"
 	"github.com/eyelock/ynf/internal/workspace"
@@ -67,6 +68,7 @@ Usage:
   ynf trackers                  the trackers ynf works with, each checked
   ynf ticket <ref>              read a ticket as start would, without starting it
   ynf harness [repo]...         how each lane runs, and the harness it is held to
+  ynf telemetry registry [--format json]   the names ynf emits in OpenTelemetry (ynr ADR-007)
   ynf egress-proxy --allow host,*.domain [--listen :3128] [--log file]   (run inside a container)
 
 Global flags (before the command):
@@ -89,6 +91,7 @@ type app struct {
 	logFormat      string
 	lanes          multi
 	logClose       func()
+	tel            *telemetry.T
 
 	cfg *config.Config
 	eng *engine.Engine
@@ -127,6 +130,15 @@ func RunIn(ctx context.Context, args []string, stdin io.Reader, stdout, stderr i
 	cmd, rest := rest[0], rest[1:]
 	var err error
 	switch cmd {
+	case "version", "help", "-h", "--help", "telemetry", "egress-proxy":
+		// These do no work to trace, and egress-proxy runs in a container of a run's.
+	default:
+		// Telemetry is set up once, here, before anything that logs or spawns (ADR-011). It never
+		// changes output or exit codes: a serve looks for a spool again once a minute.
+		a.tel = telemetry.Setup(ctx, telemetry.Options{Version: ynf.Version, Watch: cmd == "serve"})
+		ctx = a.tel.Context(ctx)
+	}
+	switch cmd {
 	case "version":
 		err = a.out(map[string]string{"version": ynf.Version}, "ynf "+ynf.Version)
 	case "doctor":
@@ -159,6 +171,8 @@ func RunIn(ctx context.Context, args []string, stdin io.Reader, stdout, stderr i
 		err = a.ticket(ctx, rest)
 	case "harness":
 		err = a.harness(ctx, rest)
+	case "telemetry":
+		err = a.telemetryCmd(rest)
 	case "egress-proxy":
 		err = a.egressProxy(ctx, rest)
 	case "help", "-h", "--help":
@@ -175,6 +189,8 @@ func RunIn(ctx context.Context, args []string, stdin io.Reader, stdout, stderr i
 	if a.logClose != nil {
 		a.logClose()
 	}
+	// The flush is bounded and swallows its errors, so it never changes the exit code.
+	a.tel.Shutdown(context.Background())
 	return a.exit(err)
 }
 
@@ -270,11 +286,13 @@ func (a *app) logger() (*slog.Logger, error) {
 		w = io.MultiWriter(a.stderr, f)
 	}
 	opts := &slog.HandlerOptions{Level: level}
+	// What people read is the same with telemetry on or off: the OpenTelemetry bridge gets a copy
+	// of each record after the handler has written it.
 	switch a.logFormat {
 	case "text":
-		return slog.New(slog.NewTextHandler(w, opts)), nil
+		return slog.New(telemetry.Tee(slog.NewTextHandler(w, opts), a.tel)), nil
 	case "json":
-		return slog.New(slog.NewJSONHandler(w, opts)), nil
+		return slog.New(telemetry.Tee(slog.NewJSONHandler(w, opts), a.tel)), nil
 	}
 	return nil, fmt.Errorf("--log-format %q: want text or json", a.logFormat)
 }
@@ -365,7 +383,8 @@ func (a *app) engine() (*engine.Engine, error) {
 			defer mu.Unlock()
 			return ulid.MustNew(ulid.Now(), entropy).String()
 		},
-		Log: logger,
+		Log:       logger,
+		Telemetry: a.tel,
 	}
 	return a.eng, nil
 }
