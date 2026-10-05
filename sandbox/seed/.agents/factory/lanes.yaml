@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://eyelock.github.io/ynf/schema/lanes.schema.json
 #
-# The sandbox's factory: six lanes, one per kind of work, so every ynf path has a lane to run in.
+# The sandbox's factory: seven lanes, one per kind of work, so every ynf path has a lane to run in.
 # One, deps, is declared in the configuration repository (sandbox/factory-seed) and only
 # switched off here.
 # Every fixture carries a `pkg:<path>` label; lanes use it to scope the harness's sensors to the
@@ -98,6 +98,35 @@ lanes:
     # so nothing finds it twice, and people can see where it is.
     labels:
       on_claim:    { add: [ynf:working], remove: [ynf:fmt] }
+      on_propose:  { add: [ynf:proposed], remove: [ynf:working] }
+      on_review:   { add: [ynf:in-review], remove: [ynf:proposed] }
+      on_escalate: { add: [ynf:needs-human], remove: [ynf:working, ynf:proposed] }
+
+  # gofmt again, with no runner named (ADR-012): ynh runs it when ynh is detected on the host,
+  # else the command does. `make e2e` hides ynh from ynf (YNF_YNH_BIN names nothing), so this
+  # proves the fallback with no model; a host where ynh is detected would run the harness in the
+  # command's image, so keep ynh hidden when running it (make e2e does).
+  detect:
+    kind: originate
+    intake:
+      - github.search: 'repo:eyelock/ynf-sandbox is:issue is:open label:"ynf:detect"'
+        every: 5m
+    run:
+      image: golang:1.26-alpine
+      ynh:
+        harness: .
+        focus: tidy
+      command:
+        argv: ['gofmt', '-w', './{label.pkg}']
+      egress:
+        allow: []
+    when:
+      converged: open_pr
+      ci_failed: escalate
+    pr:
+      allowed_paths: ['**/*.go']
+    labels:
+      on_claim:    { add: [ynf:working], remove: [ynf:detect] }
       on_propose:  { add: [ynf:proposed], remove: [ynf:working] }
       on_review:   { add: [ynf:in-review], remove: [ynf:proposed] }
       on_escalate: { add: [ynf:needs-human], remove: [ynf:working, ynf:proposed] }

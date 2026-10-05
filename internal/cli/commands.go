@@ -20,6 +20,7 @@ import (
 	"github.com/eyelock/ynf/internal/item"
 	"github.com/eyelock/ynf/internal/lease"
 	"github.com/eyelock/ynf/internal/policy"
+	"github.com/eyelock/ynf/internal/runner"
 	"github.com/eyelock/ynf/internal/store"
 	"github.com/eyelock/ynf/internal/tracker"
 	"gopkg.in/yaml.v3"
@@ -105,6 +106,19 @@ func (a *app) doctor(ctx context.Context) error {
 	}
 	optional := map[string]bool{"ynh": true, "ynm": true} // ADR-012
 	for _, tool := range []struct{ name, args string }{{"git", "--version"}, {"docker", "version --format {{.Server.Version}}"}, {"ynh", "version"}, {"ynm", "--version"}} {
+		if tool.name == "ynh" {
+			// The same detection a lane with no runner uses (ADR-012), so doctor and a run agree.
+			d := runner.DetectedYnh(ctx)
+			detail := "not found or not working (" + d.Detail + ")"
+			switch {
+			case d.Found:
+				detail = fmt.Sprintf("%s, capabilities %s: detected, used by a lane with no runner and a ynh block", d.Version, d.Capabilities)
+			case d.Capabilities != "":
+				detail = "found but not supported (" + d.Detail + ")"
+			}
+			add("ynh", d.Found, detail)
+			continue
+		}
 		out, err := exec.CommandContext(ctx, tool.name, strings.Fields(tool.args)...).Output()
 		detail := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
 		if err != nil {
@@ -192,6 +206,21 @@ func (a *app) lanesCmd(ctx context.Context, args []string) error {
 			lanes = map[string]policy.Lane{name: l}
 		}
 		shown := map[string]any{"repo": rp.Repo, "dir": rp.Dir, "ref": rp.Base, "sha": rp.SHA, "lanes": lanes}
+		// What a lane that names no runner resolves to on this host (ADR-012), which no lane says.
+		resolves := map[string]string{}
+		for name, l := range lanes {
+			if l.Run.Runner != "" {
+				continue
+			}
+			if res, err := runner.Resolve(l, e.HostYnh(ctx)); err != nil {
+				resolves[name] = "none: " + err.Error()
+			} else {
+				resolves[name] = res.Note
+			}
+		}
+		if len(resolves) > 0 {
+			shown["resolves"] = resolves
+		}
 		if rp.Config != nil {
 			// Which layer set each value (ADR-006): the configuration repository or the repository.
 			shown["config"] = map[string]string{"repo": rp.Config.Repo, "sha": rp.Config.SHA}
@@ -469,8 +498,15 @@ func summarise(en store.LogEntry) string {
 		var r engine.RunRecord
 		if json.Unmarshal(en.Body, &r) == nil {
 			via := ""
+			if r.RunnerDetected {
+				via = " (detected"
+				if r.RunnerVersion != "" {
+					via += " " + r.RunnerVersion
+				}
+				via += ")"
+			}
 			if r.Executor != "" {
-				via = " via " + r.Executor
+				via += " via " + r.Executor
 			}
 			return fmt.Sprintf("%s %s%s: %s, %d changed (%s)", r.RunID, r.Runner, via, strings.TrimSpace(r.Outcome+" "+r.Detail), len(r.Changed), r.Duration)
 		}

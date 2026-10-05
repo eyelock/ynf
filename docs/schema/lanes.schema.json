@@ -303,7 +303,7 @@
             "ynh",
             "command"
           ],
-          "description": "Omit to use the detected runner (ADR-012). Naming a runner the host cannot provide fails the lane at load."
+          "description": "Omit to let ynf choose (ADR-012): ynh when the lane has a ynh block and ynh is detected on the host, else its command block. A lane that omits it needs a ynh block, a command block or both. Naming a runner the host cannot provide fails the lane; it never falls back."
         },
         "executor": {
           "$ref": "#/$defs/executor"
@@ -424,6 +424,29 @@
         }
       },
       "allOf": [
+        {
+          "if": {
+            "not": {
+              "required": [
+                "runner"
+              ]
+            }
+          },
+          "then": {
+            "anyOf": [
+              {
+                "required": [
+                  "ynh"
+                ]
+              },
+              {
+                "required": [
+                  "command"
+                ]
+              }
+            ]
+          }
+        },
         {
           "if": {
             "properties": {

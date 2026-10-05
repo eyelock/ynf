@@ -91,7 +91,7 @@ type Runner interface {
 	Interpret(exitCode int, stdout []byte, hostRunDir string) Result
 }
 
-// For returns the runner a lane names.
+// For returns the runner a lane names. A lane that names none is Resolve's.
 func For(lane policy.Lane) (Runner, error) {
 	switch lane.Run.Runner {
 	case "command":
@@ -105,7 +105,7 @@ func For(lane policy.Lane) (Runner, error) {
 		}
 		return YnhRunner{Cfg: *lane.Run.Ynh}, nil
 	case "":
-		return nil, fmt.Errorf("lane %s: no runner named and detection is not wired yet", lane.Name)
+		return nil, fmt.Errorf("lane %s: no runner named; Resolve picks one by detection", lane.Name)
 	}
 	return nil, fmt.Errorf("lane %s: unknown runner %q", lane.Name, lane.Run.Runner)
 }
