@@ -7,7 +7,7 @@
 # builds, one per architecture built), ynm/
 # (ynm's Node build, which runs on the Node ynh's image ships), and ynh/ (a ynh build to use
 # instead of the base's, for trying ynh before it is released; empty keeps the base's).
-ARG YNH_BASE=ghcr.io/eyelock/ynh:0.9.0
+ARG YNH_BASE=ghcr.io/eyelock/ynh:0.10.0
 FROM ${YNH_BASE}
 ARG TARGETARCH
 USER root
