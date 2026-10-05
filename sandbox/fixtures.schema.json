@@ -143,6 +143,25 @@
               "type": "boolean",
               "description": "make e2e starts this fixture with ynf start --lane <lane> instead of letting a search find it."
             },
+            "runner": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name"
+              ],
+              "description": "The runner the item's last run record names, and whether it was detected because the lane named none. make e2e hides ynh from ynf, so a lane with no runner falls back to its command.",
+              "properties": {
+                "name": {
+                  "enum": [
+                    "ynh",
+                    "command"
+                  ]
+                },
+                "detected": {
+                  "type": "boolean"
+                }
+              }
+            },
             "crash": {
               "type": "boolean",
               "description": "make e2e kills ynf (SIGKILL) as this fixture's run starts, starts a fresh ynf, and checks the item was restarted."

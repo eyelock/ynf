@@ -9,7 +9,8 @@
 #                   the fixtures, not the factory; needs ynh with .agents/harness support,
 #                   YNH=/path/to/ynh to choose one)
 #   make e2e        rebuild the sandbox, run ynf against it until everything settles, and check
-#                   each fixture's expect block (tests the factory; LANES=gofmt,deps,reclaim by default)
+#                   each fixture's expect block (tests the factory; LANES=gofmt,deps,reclaim,detect by default; ynh is hidden from ynf
+#                   so the detect lane proves its fallback to the command: HIDE_YNH=false to unhide it)
 #   make e2e-only   the same, without the rebuild
 #   make e2e-factory  the same with ynf inside the factory image, as a job runner would run it
 #                   (ADR-009, shape B): the sandbox's harness built on ynf's factory image
@@ -78,12 +79,13 @@ reset: down up
 calibrate: settings
 	cd calibrate && go run . -root .. -repo $(SANDBOX_REPO)
 
-LANES ?= gofmt,deps,reclaim
+LANES ?= gofmt,deps,reclaim,detect
+HIDE_YNH ?= true
 
 e2e: reset e2e-only
 
 e2e-only: settings
-	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(LANES)
+	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(LANES) -hide-ynh=$(HIDE_YNH)
 
 YNH_BASE ?= ghcr.io/eyelock/ynh:0.10.0
 YNH_SRC ?=

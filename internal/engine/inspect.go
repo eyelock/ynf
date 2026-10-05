@@ -112,7 +112,9 @@ type LaneRun struct {
 	Lane     string          `json:"lane"`
 	Kind     string          `json:"kind"`
 	On       bool            `json:"on"`
-	Runner   string          `json:"runner"`
+	Runner   string          `json:"runner"`             // the runner it runs: what it names, else what detection chose
+	Detected bool            `json:"detected,omitempty"` // the lane names no runner, so Runner is what this host resolves to
+	Resolves string          `json:"resolves,omitempty"` // what an unnamed runner resolves to here, such as "ynh (detected 0.10.0)"
 	Executor string          `json:"executor"`
 	Image    string          `json:"image,omitempty"`
 	Harness  string          `json:"harness,omitempty"` // what the lane names
@@ -139,6 +141,14 @@ func (e *Engine) LaneRuns(ctx context.Context, repo string) ([]LaneRun, error) {
 		if lr.Kind == "" {
 			lr.Kind = "originate"
 		}
+		if l.Run.Runner == "" {
+			res, err := runner.Resolve(l, e.HostYnh(ctx))
+			if err != nil {
+				lr.Problem = err.Error()
+			} else {
+				lr.Runner, lr.Detected, lr.Resolves = res.Runner.Name(), true, res.Note
+			}
+		}
 		ex, err := e.Executor(l.Run.Executor)
 		if err != nil {
 			lr.Problem = err.Error()
@@ -146,7 +156,8 @@ func (e *Engine) LaneRuns(ctx context.Context, repo string) ([]LaneRun, error) {
 			continue
 		}
 		lr.Executor = ex.Name()
-		if l.Run.Ynh == nil {
+		lr.Image = l.Run.ImageFor(lr.Runner)
+		if l.Run.Ynh == nil || lr.Runner == "command" {
 			lr.Where = "a command, not a harness"
 			out = append(out, lr)
 			continue
