@@ -52,6 +52,9 @@ type Holder struct {
 	ttl   time.Duration
 	now   func() time.Time
 
+	// expired is set when the claim took over a lease that had run out: its holder died or stalled.
+	expired bool
+
 	mu      sync.Mutex
 	version string
 	item    item.Item
@@ -70,6 +73,7 @@ func Claim(ctx context.Context, s store.Store, key, owner, stepID string, ttl ti
 		return nil, ErrHeld
 	}
 	var epoch int64 = 1
+	expired := it.Lease != nil && !it.Lease.Held(t)
 	if it.Lease != nil {
 		epoch = it.Lease.Epoch + 1
 	}
@@ -85,8 +89,12 @@ func Claim(ctx context.Context, s store.Store, key, owner, stepID string, ttl ti
 	if err != nil {
 		return nil, err
 	}
-	return &Holder{s: s, key: key, owner: owner, ttl: ttl, now: now, version: nv, item: it}, nil
+	return &Holder{s: s, key: key, owner: owner, ttl: ttl, now: now, version: nv, item: it, expired: expired}, nil
 }
+
+// Expired reports whether this claim took over a lease that had run out, which means its holder
+// died or stalled without releasing it.
+func (h *Holder) Expired() bool { return h.expired }
 
 // Item returns the item as this holder last wrote it.
 func (h *Holder) Item() item.Item {

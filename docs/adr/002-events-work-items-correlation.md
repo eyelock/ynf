@@ -38,6 +38,17 @@ GitHub Enterprise Server, JIRA Cloud or JIRA Data Center.
 `ynf.timer.*`, `ynf.lease.*`), not from the provider's own event names. `data` is minimal and
 normalised; the raw payload is stored once and referenced. `subject` is a reference, below.
 
+**CloudEvents are the control plane, and telemetry mirrors them one way.** ynf records every
+CloudEvent it receives as a short `ynf.intake` span holding one `ynf.intake.received` event, with
+the standard `cloudevents.event_id`, `cloudevents.event_source`, `cloudevents.event_type` and
+`cloudevents.event_subject` attributes and what ynf did with it: accepted, deduplicated or
+rejected. A webhook delivery already received, or refused before it becomes an event, is recorded
+the same way. The events a step makes within itself to carry a run's or an action's result are not
+received, and show as the step's decisions. The mirror is write-only: nothing in ynf reads
+telemetry, and no component turns observation into a CloudEvent, so an agent that can write
+telemetry cannot steer the factory with a forged event (ynr ADR-003). The `ynf.intake` span is
+what a step's span links to, so an item's history can be followed across steps (ADR-011).
+
 **A work item has two references.** One document per unit of work holds:
 
 | Reference | Says | Example |

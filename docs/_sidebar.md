@@ -26,6 +26,7 @@
   * [Run the factory image](/how-to/run-the-factory-image.md)
   * [Test against the sandbox](/how-to/test-against-the-sandbox.md)
   * [Measure a lane with shadow mode](/how-to/measure-a-lane-with-shadow-mode.md)
+  * [See ynf in OpenTelemetry](/how-to/see-ynf-in-opentelemetry.md)
   * [Cut a release](/how-to/cut-a-release.md)
 
 * **Reference**

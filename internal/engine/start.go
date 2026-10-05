@@ -15,6 +15,7 @@ import (
 	"github.com/eyelock/ynf/internal/lease"
 	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/store"
+	"github.com/eyelock/ynf/internal/telemetry"
 	"github.com/eyelock/ynf/internal/tracker"
 )
 
@@ -152,10 +153,12 @@ func (e *Engine) Start(ctx context.Context, req StartRequest) (item.Item, error)
 	default:
 		e.log().Info("tracking", "item", it.Key, "lane", lane.Name, "by", "start")
 	}
+	ev := event.New(e.NewID(), "ynf/start", typ, it.Subject(), now, map[string]any{"lane": lane.Name})
+	ctx = e.MirrorIntake(ctx, ev, it.Key, telemetry.OutcomeAccepted)
 	if req.Detach {
+		e.noteIntake(ctx, it.Key)
 		return it, e.Store.Schedule(ctx, it.Key, now)
 	}
-	ev := event.New(e.NewID(), "ynf/start", typ, it.Subject(), now, map[string]any{"lane": lane.Name})
 	if err := e.Handle(ctx, it.Key, ev); err != nil {
 		return it, err
 	}

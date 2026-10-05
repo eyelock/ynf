@@ -13,6 +13,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/eyelock/ynf/internal/decide"
 	"github.com/eyelock/ynf/internal/event"
 	"github.com/eyelock/ynf/internal/executor"
@@ -24,6 +27,7 @@ import (
 	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/runner"
 	"github.com/eyelock/ynf/internal/store"
+	"github.com/eyelock/ynf/internal/telemetry"
 	"github.com/eyelock/ynf/internal/tracker"
 )
 
@@ -97,18 +101,53 @@ type ActionRecord struct {
 
 // Handle runs one step for the item at key, starting from ev. A held lease means another instance
 // is working on it, which is not an error.
-func (e *Engine) Handle(ctx context.Context, key string, ev event.Event) error {
+//
+// The step is one trace (ADR-011): its span has the claim, and for each decision a probe, a decide
+// and an act, with the run and every call out to another system beneath them. It links to the
+// item's previous step and to the intake of the event that started it, and leaves its own span on
+// the item for the next step to link to.
+func (e *Engine) Handle(ctx context.Context, key string, ev event.Event) (err error) {
 	stepID := e.NewID()
-	h, err := lease.Claim(ctx, e.Store, key, e.Owner, stepID, e.LeaseTTL, e.Now)
+	itemKey := attribute.String(telemetry.AttrItemKey, key)
+	var links []trace.Link
+	if sc, ok := telemetry.Intake(ctx); ok {
+		links = append(links, trace.Link{SpanContext: sc})
+	}
+	ctx, span := e.tracer().Start(ctx, telemetry.SpanStep, trace.WithLinks(links...), trace.WithAttributes(
+		itemKey, attribute.String(telemetry.AttrStepID, stepID), attribute.String(telemetry.AttrCloudeventsEventType, ev.Type)))
+	var lost atomic.Bool
+	outcome := telemetry.OutcomeCompleted
+	defer func() {
+		switch {
+		case lost.Load():
+			outcome = telemetry.OutcomeLost
+		case err != nil && outcome == telemetry.OutcomeCompleted:
+			outcome = telemetry.OutcomeFailed
+		}
+		telemetry.Finish(span, outcome)
+	}()
+	e.Telemetry.Event(ctx, telemetry.EventStepStarted, itemKey,
+		attribute.String(telemetry.AttrStepID, stepID), attribute.String(telemetry.AttrCloudeventsEventType, ev.Type))
+
+	claimCtx, claim := e.tracer().Start(ctx, telemetry.SpanClaim, trace.WithAttributes(itemKey))
+	h, err := lease.Claim(claimCtx, e.Store, key, e.Owner, stepID, e.LeaseTTL, e.Now)
 	if errors.Is(err, lease.ErrHeld) {
+		telemetry.Finish(claim, telemetry.OutcomeHeld)
+		outcome = telemetry.OutcomeHeld
 		e.log().Debug("held elsewhere", "item", key)
 		return nil
 	}
 	if err != nil {
+		telemetry.Finish(claim, telemetry.OutcomeFailed)
 		return err
 	}
+	epoch := attribute.Int64(telemetry.AttrLeaseEpoch, h.Epoch())
+	telemetry.Finish(claim, telemetry.OutcomeClaimed, epoch)
+	span.SetAttributes(epoch)
+	for _, l := range historyLinks(h.Item()) {
+		span.AddLink(l)
+	}
 	runCtx, cancel := context.WithCancel(ctx)
-	var lost atomic.Bool
 	go h.Heartbeat(runCtx, e.Heartbeat, func(it item.Item) {
 		if err := e.schedule(runCtx, it); err != nil && runCtx.Err() == nil {
 			e.log().Warn("reschedule on heartbeat", "item", key, "err", err)
@@ -118,7 +157,7 @@ func (e *Engine) Handle(ctx context.Context, key string, ev event.Event) error {
 		e.log().Error("lease lost; stopping", "item", key, "err", err)
 		cancel()
 	})
-	s := &step{e: e, h: h, id: stepID, ctx: runCtx, g: e.gitFor(e.repoOf(h.Item()))}
+	s := &step{e: e, h: h, id: stepID, ctx: runCtx, g: e.gitFor(e.repoOf(h.Item())), span: span, expired: h.Expired()}
 	defer func() {
 		s.cleanup()
 		cancel()
@@ -151,6 +190,10 @@ type step struct {
 	id  string
 	ctx context.Context
 	n   int // runs in this step
+
+	span    trace.Span // the step's own span; nil in shadow mode, which has no step
+	laneID  string     // the lane's id in telemetry, once the policy is read
+	expired bool       // the claim took over an expired lease, counted once the lane is known
 
 	mirror string
 	wt     string
@@ -205,19 +248,30 @@ func (s *step) decideAndAct(ev event.Event) (*event.Event, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.describe(it, rp, lane)
+	itemKey := attribute.String(telemetry.AttrItemKey, it.Key)
+	_, endProbe := s.phase(telemetry.SpanProbe, itemKey)
 	f, err := s.probe(it)
+	endProbe(telemetry.Result(err))
 	if err != nil {
 		return nil, err
 	}
 	in := decide.Input{Lane: lane, Item: it, Facts: f, Event: ev, Poll: e.Poll}
 	in.Item.Lease = nil // not an input to the decision; keeps replay exact
+	in.Item.Trace = nil // nor is where the item's history is in telemetry
+	_, endDecide := s.phase(telemetry.SpanDecide, itemKey)
 	d := decide.Decide(in)
+	e.Telemetry.Event(s.ctx, telemetry.EventDecisionMade, itemKey, attribute.String(telemetry.AttrStepID, s.id),
+		attribute.String(telemetry.AttrItemState, string(d.Item.State)), attribute.String(telemetry.AttrCloudeventsEventType, ev.Type))
 
 	rec := DecisionRecord{Input: in, Decision: d, Policy: PolicyRef{Repo: rp.Repo, Dir: rp.Dir, Ref: rp.Base, SHA: rp.SHA, Config: configRepo(rp), ConfigSHA: configSHA(rp), Hash: lane.Hash()}}
 	if err := s.record(it.Key, "decision", rec); err != nil {
+		endDecide(telemetry.OutcomeFailed)
 		return nil, err
 	}
+	d.Item.Trace = itemTrace(it.Trace, s.span) // after the record, which replay compares
 	if err := s.h.Save(ctx, d.Item); err != nil {
+		endDecide(telemetry.OutcomeFailed)
 		return nil, err
 	}
 	due := time.Time{}
@@ -225,16 +279,20 @@ func (s *step) decideAndAct(ev event.Event) (*event.Event, error) {
 		due = *d.Item.NextDue
 	}
 	if err := e.schedule(ctx, s.h.Item()); err != nil {
+		endDecide(telemetry.OutcomeFailed)
 		return nil, err
 	}
 	s.remember(in, d)
+	endDecide(telemetry.OutcomeOk, attribute.String(telemetry.AttrItemState, string(d.Item.State)))
 	e.log().Info("decided", "item", it.Key, "event", ev.Type, "state", d.Item.State, "reason", d.Reason)
 	if d.Item.State != it.State {
 		s.label(d.Item, lane)
 	}
 
 	for _, a := range d.Actions {
+		_, endAct := s.phase(telemetry.SpanAct, itemKey, attribute.String(telemetry.AttrAction, a.Kind))
 		next, err := s.act(a, d.Item, rp, lane)
+		endAct(actOutcome(next, err))
 		if err != nil {
 			return nil, err
 		}
@@ -247,6 +305,29 @@ func (s *step) decideAndAct(ev event.Event) (*event.Event, error) {
 		return &ev, nil
 	}
 	return nil, nil
+}
+
+// actOutcome is how an action ended: failed when it errored, or when the action it asked of the
+// forge was refused; ok otherwise. A run's own outcome is on its run span.
+func actOutcome(next *event.Event, err error) string {
+	if err != nil || next != nil && next.Type == event.ActionDone && !next.Bool("ok") {
+		return telemetry.OutcomeFailed
+	}
+	return telemetry.OutcomeOk
+}
+
+// describe puts on the step's span what is known once its lane is: the lane's id, the policy hash
+// and the repository. It also counts an expired lease the claim took over, once.
+func (s *step) describe(it item.Item, rp *RepoPolicy, lane policy.Lane) {
+	s.laneID = s.e.LaneID(rp, lane)
+	if s.span != nil {
+		s.span.SetAttributes(append(repoAttrs(hostRepo(it)),
+			attribute.String(telemetry.AttrLane, s.laneID), attribute.String(telemetry.AttrPolicyHash, lane.Hash()))...)
+	}
+	if s.expired {
+		s.expired = false
+		s.e.Telemetry.LeaseExpired(s.ctx, s.laneID)
+	}
 }
 
 func (s *step) event(typ string, it item.Item, data map[string]any) event.Event {
@@ -313,10 +394,29 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	e := s.e
 	s.n++
 	runID := fmt.Sprintf("%s-%d", s.id, s.n)
+	laneID := e.LaneID(rp, lane)
+	runAttrs := []attribute.KeyValue{
+		attribute.String(telemetry.AttrItemKey, it.Key), attribute.String(telemetry.AttrStepID, s.id),
+		attribute.String(telemetry.AttrRunID, runID), attribute.String(telemetry.AttrLane, laneID),
+	}
+	_, endRun := s.phase(telemetry.SpanRun, runAttrs...)
+	e.Telemetry.Event(s.ctx, telemetry.EventRunStarted, runAttrs...)
+	// usedHarness and usedFocus are what the run actually used, known once the harness is read.
+	var usedHarness, usedFocus string
 	finished := func(rec RunRecord) event.Event {
 		rec.RunID = runID
 		s.run = &rec
 		s.recordRun(it.Key, rec)
+		done := []attribute.KeyValue{attribute.String(telemetry.AttrGenAiResponseModel, telemetry.Scrub(rec.Model))}
+		if usedHarness != "" {
+			done = append(done, attribute.String(telemetry.AttrLaneHarness, usedHarness))
+		}
+		if usedFocus != "" {
+			done = append(done, attribute.String(telemetry.AttrLaneFocus, usedFocus))
+		}
+		e.Telemetry.RunFinished(s.ctx, rec.Outcome, laneID, rec.Model, telemetry.Usage{
+			InputTokens: rec.InputTokens, OutputTokens: rec.OutputTokens, CacheReadTokens: rec.CacheReadTokens, CostUSD: rec.CostUSD})
+		endRun(rec.Outcome, done...)
 		return s.event(event.RunFinished, it, map[string]any{
 			"run_id": runID, "outcome": rec.Outcome, "detail": rec.Detail, "changed": anyList(rec.Changed), "denied": anyList(rec.Denied),
 			// What the runner reported, for the decider's failure signatures. Empty means the
@@ -386,6 +486,9 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	if err != nil {
 		return fail(runner.OperatorError, err)
 	}
+	// The run joins this step's trace: its process gets the run span's context (ynr ADR-006,
+	// rule 4). It has no spool folder of its own yet.
+	telemetry.Inject(s.ctx, job.Env)
 	inline := ex.Name() == "inline"
 	if inline {
 		job.Image = "" // the run is in this image, whatever the lane names for a container
@@ -408,6 +511,10 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 			r = y
 		}
 		harness, harnessKnown = h, known
+		usedHarness, usedFocus = y.Cfg.Harness, y.Cfg.Focus
+		if usedHarness == "" {
+			usedHarness = h.ID
+		}
 		if known {
 			if err := s.checkPassthrough(lane, y, h, ex.Name() == "docker" && len(job.Egress) > 0); err != nil {
 				return fail(runner.OperatorError, err)
@@ -458,7 +565,9 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	log.Info("run started", "lane", lane.Name, "runner", r.Name(), "executor", ex.Name(), "image", job.Image, "base", base, "attempt", it.Attempts)
 	start := e.Now()
 	stop := s.progress(log, filepath.Join(runDir, "trajectory.jsonl"))
-	out, err := ex.Run(s.ctx, job)
+	out, err := telemetry.Call(s.ctx, e.Telemetry, telemetry.CallSystemExecutor, ex.Name(), func(ctx context.Context) (executor.Output, error) {
+		return ex.Run(ctx, job)
+	})
 	stop()
 	rec := RunRecord{Runner: r.Name(), RunnerDetected: detected, Executor: ex.Name(), Argv: argv, Base: base, StepDir: stepDir, Denied: out.Denied}
 	_ = os.WriteFile(filepath.Join(runDir, "stdout"), out.Stdout, 0o644)
@@ -553,7 +662,9 @@ func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, ynhH
 		if e.BuildImage == nil {
 			return job, false, fmt.Errorf("lane %s names no published image (run.image), and this instance does not build one: that needs ynh on PATH and images.build not false", lane.Name)
 		}
-		img, err := e.BuildImage(s.ctx, wt, y.Cfg)
+		img, err := telemetry.Call(s.ctx, e.Telemetry, telemetry.CallSystemYnh, "image", func(ctx context.Context) (string, error) {
+			return e.BuildImage(ctx, wt, y.Cfg)
+		})
 		if err != nil {
 			return job, false, fmt.Errorf("build agent image: %w", err)
 		}
@@ -869,6 +980,7 @@ func (s *step) progress(log *slog.Logger, trajectory string) func() {
 	}
 	start := time.Now()
 	done := make(chan struct{})
+	ctx := s.ctx // phases swap s.ctx while this runs
 	go func() {
 		tick := time.NewTicker(every)
 		defer tick.Stop()
@@ -876,7 +988,7 @@ func (s *step) progress(log *slog.Logger, trajectory string) func() {
 			select {
 			case <-done:
 				return
-			case <-s.ctx.Done():
+			case <-ctx.Done():
 				return
 			case <-tick.C:
 				turns, last := trajectorySoFar(trajectory)

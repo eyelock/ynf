@@ -15,6 +15,8 @@ import (
 	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/eyelock/ynf/internal/telemetry"
 )
 
 // Record is one memory ynf writes.
@@ -86,6 +88,7 @@ func (y Ynm) run(ctx context.Context, args ...string) (string, error) {
 		args = append(args, "--cwd", y.Cwd)
 	}
 	c := exec.CommandContext(ctx, y.bin(), args...)
+	telemetry.Command(ctx, c) // ynm joins the trace through TRACEPARENT
 	var stdout, stderr bytes.Buffer
 	c.Stdout, c.Stderr = &stdout, &stderr
 	if err := c.Run(); err != nil {
@@ -166,7 +169,7 @@ func (y *YnmHTTP) connect(ctx context.Context) (*mcp.ClientSession, error) {
 	if y.Transport != nil {
 		t = y.Transport()
 	} else {
-		hc := &http.Client{Transport: bearer{y.Token, http.DefaultTransport}}
+		hc := &http.Client{Transport: telemetry.Transport(bearer{y.Token, http.DefaultTransport})}
 		t = &mcp.StreamableClientTransport{Endpoint: y.Endpoint, HTTPClient: hc}
 	}
 	s, err := mcp.NewClient(&mcp.Implementation{Name: "ynf", Version: "1"}, nil).Connect(ctx, t, nil)

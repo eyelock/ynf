@@ -201,6 +201,16 @@ func run(root, repo, factory, image string, outage bool, lanes []string, timeout
 	}
 	_ = os.Setenv("PATH", tmp+string(os.PathListSeparator)+os.Getenv("PATH"))
 	_ = os.Setenv("YNF_SANDBOX_TRACKER_DATA", trackerData)
+	// ynf writes its OpenTelemetry to a spool of this run's own, and the run reads it back (ADR-011).
+	// Inside an image the variable does not reach ynf, so that run is not checked.
+	spool := ""
+	if image == "" {
+		spool = filepath.Join(tmp, "spool")
+		if err := os.MkdirAll(spool, 0o755); err != nil {
+			return err
+		}
+		_ = os.Setenv("YNR_SPOOL", spool)
+	}
 	if hideYnh {
 		// ynf detects ynh by asking this binary (ADR-012): nothing is there, so a lane with no
 		// runner runs its command, as it would on a machine without ynh.
@@ -350,6 +360,17 @@ func run(root, repo, factory, image string, outage bool, lanes []string, timeout
 	}
 	if failed > 0 {
 		return fmt.Errorf("%d fixture(s) did not end as expected", failed)
+	}
+	if spool != "" && slices.Contains(lanes, "gofmt") {
+		var keys []string
+		for _, it := range res.Items {
+			if it.Lane == "gofmt" {
+				keys = append(keys, it.Key)
+			}
+		}
+		if err := checkTelemetry(spool, keys, "gofmt"); err != nil {
+			return err
+		}
 	}
 	if shadowOn && slices.Contains(lanes, "gofmt") {
 		if err := shadowStage(ff.Fixtures, numbers, repo, ynf, cfg); err != nil {

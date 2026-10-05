@@ -15,6 +15,7 @@ import (
 
 	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/runner"
+	"github.com/eyelock/ynf/internal/telemetry"
 )
 
 // imageBuilder returns the engine's agent image builder when building is allowed (images.build)
@@ -160,6 +161,7 @@ func hostCapabilities(ctx context.Context) (string, error) {
 // stdoutOf runs a command for its standard output only, so warnings on stderr cannot corrupt it.
 func stdoutOf(ctx context.Context, name string, args ...string) (string, error) {
 	c := exec.CommandContext(ctx, name, args...)
+	telemetry.Command(ctx, c)
 	var out, errb bytes.Buffer
 	c.Stdout, c.Stderr = &out, &errb
 	if err := c.Run(); err != nil {
@@ -201,6 +203,7 @@ func isHarness(dir string) bool {
 
 func output(ctx context.Context, dir, name string, args ...string) (string, error) {
 	c := exec.CommandContext(ctx, name, args...)
+	telemetry.Command(ctx, c)
 	c.Dir = dir
 	var b bytes.Buffer
 	c.Stdout, c.Stderr = &b, &b

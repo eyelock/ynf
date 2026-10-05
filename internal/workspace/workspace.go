@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/eyelock/ynf/internal/telemetry"
 )
 
 // Author is the git identity of ynf's commits.
@@ -209,6 +211,7 @@ func (w Workspace) gitIn(ctx context.Context, dir string, stdin *strings.Reader,
 	c := exec.CommandContext(ctx, "git", args...)
 	c.Dir = dir
 	c.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	telemetry.Command(ctx, c)
 	if w.Token != "" {
 		auth := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + w.Token))
 		c.Env = append(c.Env,

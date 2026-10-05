@@ -8,11 +8,18 @@ permissions:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+env:
+  # ynr's spool exporter is a Go module in a private repository while ynr is private.
+  GOPRIVATE: github.com/eyelock/ynr
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: read access to ynr
+        env:
+          YNR_READ_REPO: ${{ secrets.YNR_READ_REPO }}
+        run: git config --global url."https://x-access-token:${YNR_READ_REPO}@github.com/eyelock/ynr".insteadOf "https://github.com/eyelock/ynr"
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -24,3 +31,16 @@ jobs:
         run: make check
       - name: build
         run: make build && ./bin/ynf version
+
+  registry:
+    # ynf's telemetry registry is an OpenTelemetry Weaver registry (ynr ADR-007): Weaver checks it.
+    runs-on: ubuntu-latest
+    env:
+      WEAVER_VERSION: v0.27.0
+    steps:
+      - uses: actions/checkout@v4
+      - name: weaver registry check
+        run: |
+          set -eu
+          curl -fsSL "https://github.com/open-telemetry/weaver/releases/download/${WEAVER_VERSION}/weaver-x86_64-unknown-linux-gnu.tar.xz" | tar -xJ -C "$RUNNER_TEMP"
+          "$RUNNER_TEMP"/weaver-x86_64-unknown-linux-gnu/weaver registry check -r telemetry/registry

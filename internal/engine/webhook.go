@@ -14,6 +14,7 @@ import (
 
 	"github.com/eyelock/ynf/internal/event"
 	"github.com/eyelock/ynf/internal/item"
+	"github.com/eyelock/ynf/internal/telemetry"
 )
 
 // VerifyGitHubSignature checks a webhook's X-Hub-Signature-256 against the shared secret. It runs
@@ -109,6 +110,7 @@ func ParseGitHubEvent(name string, body []byte) (Touched, error) {
 func (e *Engine) HandleGitHubEvent(ctx context.Context, name string, body []byte) (Touched, error) {
 	t, err := ParseGitHubEvent(name, body)
 	if err != nil {
+		e.MirrorDelivery(ctx, name, "", "", telemetry.OutcomeRejected)
 		return t, err
 	}
 	enrolled, err := e.Enrolled(ctx)
@@ -120,10 +122,12 @@ func (e *Engine) HandleGitHubEvent(ctx context.Context, name string, body []byte
 		host = e.forgeHost()
 	}
 	if !e.isForge(host) {
+		e.MirrorDelivery(ctx, name, "", host+"/"+t.Repo, telemetry.OutcomeRejected)
 		return t, fmt.Errorf("an event from %s, which is not a configured forge", host)
 	}
 	repo := e.qualify(host, t.Repo)
 	if !slices.Contains(enrolled, repo) {
+		e.MirrorDelivery(ctx, name, "", host+"/"+t.Repo, telemetry.OutcomeRejected)
 		return t, fmt.Errorf("%s is not enrolled", repo)
 	}
 	items, err := e.allItems(ctx)
@@ -150,7 +154,7 @@ func (e *Engine) HandleGitHubEvent(ctx context.Context, name string, body []byte
 			continue
 		}
 		ev := event.New(e.NewID(), "github/"+name, event.ForgeChanged, it.Subject(), e.Now(), map[string]any{"github_event": name})
-		errs = append(errs, e.Handle(ctx, k, ev))
+		errs = append(errs, e.Handle(e.MirrorIntake(ctx, ev, k, telemetry.OutcomeAccepted), k, ev))
 	}
 	return t, errors.Join(errs...)
 }

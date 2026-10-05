@@ -22,6 +22,7 @@ import (
 	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/runner"
 	"github.com/eyelock/ynf/internal/store"
+	"github.com/eyelock/ynf/internal/telemetry"
 	"github.com/eyelock/ynf/internal/tracker"
 	"gopkg.in/yaml.v3"
 )
@@ -125,7 +126,9 @@ func (a *app) doctor(ctx context.Context) error {
 			add("ynh", d.Found, detail)
 			continue
 		}
-		out, err := exec.CommandContext(ctx, tool.name, strings.Fields(tool.args)...).Output()
+		c := exec.CommandContext(ctx, tool.name, strings.Fields(tool.args)...)
+		telemetry.Command(ctx, c)
+		out, err := c.Output()
 		detail := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
 		if err != nil {
 			detail = "not found or not working (" + err.Error() + ")"

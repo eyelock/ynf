@@ -24,6 +24,7 @@ import (
 	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/runner"
 	"github.com/eyelock/ynf/internal/store"
+	"github.com/eyelock/ynf/internal/telemetry"
 	"github.com/eyelock/ynf/internal/tracker"
 )
 
@@ -109,6 +110,9 @@ type Engine struct {
 	Now   func() time.Time
 	NewID func() string
 	Log   *slog.Logger
+	// Telemetry is ynf's OpenTelemetry (ADR-011); nil writes none and changes nothing. It is
+	// write-only: nothing in the engine reads it back.
+	Telemetry *telemetry.T
 
 	mu       sync.Mutex
 	policies map[string]*RepoPolicy
@@ -437,7 +441,7 @@ func (e *Engine) track(ctx context.Context, lane policy.Lane, host string, h for
 	}
 	e.log().Info("tracking", "item", it.Key, "lane", lane.Name)
 	ev := event.New(e.NewID(), "ynf/search", event.TicketMatched, it.Subject(), now, map[string]any{"lane": lane.Name})
-	return e.Handle(ctx, it.Key, ev)
+	return e.Handle(e.MirrorIntake(ctx, ev, it.Key, telemetry.OutcomeAccepted), it.Key, ev)
 }
 
 // RunDue steps every item whose timer has passed, and returns how many it stepped.
@@ -458,7 +462,7 @@ func (e *Engine) RunDue(ctx context.Context) (int, error) {
 			continue
 		}
 		ev := event.New(e.NewID(), "ynf/timer", event.TimerDue, it.Subject(), e.Now(), nil)
-		if err := e.Handle(ctx, k, ev); err != nil {
+		if err := e.Handle(e.MirrorIntake(ctx, ev, k, telemetry.OutcomeAccepted), k, ev); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", k, err))
 		}
 		n++
@@ -513,7 +517,7 @@ func (e *Engine) tracker(t tracker.Ref) (tracker.Tracker, error) {
 	tr, ok := e.Trackers[t.Host]
 	e.mu.Unlock()
 	if ok {
-		return tr, nil
+		return e.traceTracker(tr), nil
 	}
 	if t.Host == AdhocHost {
 		return AdhocTracker(e.Store), nil
@@ -553,7 +557,7 @@ func (e *Engine) repoOf(it item.Item) string { return e.qualify(it.Forge, it.Rep
 func (e *Engine) forgeFor(repo string) (forge.Forge, string, error) {
 	host, name := e.splitRepo(repo)
 	if host == e.forgeHost() {
-		return e.Forge, name, nil
+		return e.traceForge(e.Forge), name, nil
 	}
 	e.mu.Lock()
 	inst, ok := e.Forges[host]
@@ -561,7 +565,7 @@ func (e *Engine) forgeFor(repo string) (forge.Forge, string, error) {
 	if !ok {
 		return nil, "", fmt.Errorf("%s is on %s, which is not a configured forge", repo, host)
 	}
-	return inst.Forge, name, nil
+	return e.traceForge(inst.Forge), name, nil
 }
 
 // gitFor is the git workspace for a repository's forge. It takes the qualified name, so mirrors
@@ -571,9 +575,9 @@ func (e *Engine) gitFor(repo string) Git {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if inst, ok := e.Forges[host]; ok && host != e.forgeHost() {
-		return inst.Git
+		return e.traceGit(inst.Git)
 	}
-	return e.Git
+	return e.traceGit(e.Git)
 }
 
 // addForges registers the forge instances a configuration repository declares.
