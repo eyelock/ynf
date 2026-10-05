@@ -13,6 +13,12 @@ COPY --from=go /out/golangci-lint /usr/local/bin/golangci-lint
 # is released; an empty folder keeps the base's.
 COPY ynh/ /tmp/ynh/
 RUN if [ -f /tmp/ynh/ynh ]; then install -m 0755 /tmp/ynh/ynh /usr/local/bin/ynh; fi && rm -rf /tmp/ynh
+# golangci-lint's cache lives outside the checkout, so the diff gate never sees it, and is open to
+# whichever user the container runs as. A scope may only narrow a sensor's command (ADR-006), so
+# the lane cannot carry the location in its command; the image provides it, and every container
+# starts with this folder empty.
+RUN mkdir -p /var/cache/golangci-lint && chmod 1777 /var/cache/golangci-lint
 ENV PATH=/usr/local/go/bin:$PATH \
-    GOTOOLCHAIN=local
+    GOTOOLCHAIN=local \
+    GOLANGCI_LINT_CACHE=/var/cache/golangci-lint
 USER ynh

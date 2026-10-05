@@ -380,6 +380,8 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	// The harness the lane is held to is the one that will run: inside the image, or in the
 	// folder ynh runs on the host (ADR-012).
 	var focus *runner.Focus
+	var harness runner.Harness
+	harnessKnown := false
 	if y, ok := r.(runner.YnhRunner); ok {
 		h, known, err := s.harness(y, job.Image, inImage, lane.Run.Image == "", inline, wt)
 		if err != nil {
@@ -389,6 +391,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 			y.Cfg.Harness = h.ID // run the harness installed here, by its id
 			r = y
 		}
+		harness, harnessKnown = h, known
 		if known {
 			if err := s.checkPassthrough(lane, y, h, ex.Name() == "docker" && len(job.Egress) > 0); err != nil {
 				return fail(runner.OperatorError, err)
@@ -420,6 +423,13 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	if tr, err := e.tracker(it.Ticket); err == nil {
 		if t, _, err := tr.Get(s.ctx, it.Ticket.Key); err == nil {
 			labels = t.Labels
+		}
+	}
+	// The scopes were checked above without labels; now with this item's, so what runs is what was
+	// narrowed.
+	if y, ok := r.(runner.YnhRunner); ok && harnessKnown {
+		if err := harness.CheckScopes(y.Cfg, labels); err != nil {
+			return fail(runner.OperatorError, err)
 		}
 	}
 	argv, err := r.Command(runner.Spec{Lane: lane, Labels: labels, TaskFile: cr + "/task.md", RunDir: cr, Feedback: feedback, InImage: inImage, Contained: ex.Contained(), Focus: focus, HostAutoApprove: e.HostAutoApprove})

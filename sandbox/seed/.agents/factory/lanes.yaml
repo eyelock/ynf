@@ -1,8 +1,8 @@
 # yaml-language-server: $schema=https://eyelock.github.io/ynf/schema/lanes.schema.json
 #
-# The sandbox's factory: six lanes, one per kind of work, so every ynf path has a lane to run in.
+# The sandbox's factory: seven lanes, one per kind of work, so every ynf path has a lane to run in.
 # One, deps, is declared in the configuration repository (sandbox/factory-seed) and only
-# switched off here.
+# switched off here. Another, relaxed, is wrong on purpose and never runs: see it below.
 # Every fixture carries a `pkg:<path>` label; lanes use it to scope the harness's sensors to the
 # part of the repository the work is about, so a run is judged on its own debt, not everyone's.
 # The ynh lanes run in an agent image ynf builds from this repository's own harness on
@@ -11,8 +11,10 @@
 # allowed through the egress proxy without being listed. They run with ynh's --auto-approve edits:
 # inside the container the worker edits without asking, and still cannot run commands; ynh's
 # sensors check its work between turns. The base needs a ynh with capabilities 0.9.0.
-# Lint gets a cache inside the worktree: golangci-lint's shared cache attributes findings to
-# whichever copy of identical code it saw first, and --new-from-merge-base then drops them.
+# A scope may only narrow a sensor the harness declares (ADR-006): its command is the harness's,
+# with a path word replaced by one beneath it, so no flag, environment setting or cache location
+# can ride along. golangci-lint's cache is the agent image's to provide (GOLANGCI_LINT_CACHE in
+# sandbox/images/agent/Dockerfile), and what a lint run blocks on is ynh's baseline ratchet's.
 version: 1
 
 defaults:
@@ -37,7 +39,7 @@ lanes:
         focus: tidy
         auto_approve: edits
         sensor_scope:
-          lint: 'GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run ./{label.pkg}/...'
+          lint: 'golangci-lint run ./{label.pkg}/...'
           test: 'go test -count=1 ./{label.pkg}/...'
           docs: 'sh scripts/check-docs.sh {label.pkg}'
     when:
@@ -66,7 +68,7 @@ lanes:
         focus: docs
         auto_approve: edits
         sensor_scope:
-          lint: 'GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run ./{label.pkg}/...'
+          lint: 'golangci-lint run ./{label.pkg}/...'
           test: 'go test -count=1 ./{label.pkg}/...'
           docs: 'sh scripts/check-docs.sh {label.pkg}'
     when:
@@ -138,7 +140,7 @@ lanes:
         focus: fix-ci
         auto_approve: edits
         sensor_scope:
-          lint: 'GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run --config .golangci.ci.yml --new-from-merge-base=origin/main ./{label.pkg}/...'
+          lint: 'golangci-lint run ./{label.pkg}/...'
           test: 'go test -count=1 ./{label.pkg}/...'
           docs: 'sh scripts/check-docs.sh {label.pkg}'
     when:
@@ -146,6 +148,30 @@ lanes:
       ci_failed: { retry: 1, then: escalate }
       outcome.stuck: escalate
       outcome.tamper: escalate
+    pr:
+      allowed_paths: ['internal/**']
+
+  # A lane that does what a scope must not: it replaces the lint sensor's command with `true`, so
+  # the run could never fail lint. ynf refuses it before anything runs, as operator_error, and
+  # `make e2e` starts the relaxed-scope fixture on it to see that happen; no model is called.
+  relaxed:
+    kind: originate
+    intake:
+      - github.search: 'repo:eyelock/ynf-sandbox is:issue is:open label:"ynf:relaxed"'
+        every: 5m
+    run:
+      runner: ynh
+      env: [ANTHROPIC_API_KEY]
+      ynh:
+        harness: .
+        base: ynf-sandbox-agent:latest
+        focus: tidy
+        auto_approve: edits
+        sensor_scope:
+          lint: 'true'
+          test: 'go test -count=1 ./{label.pkg}/...'
+    when:
+      converged: open_pr
     pr:
       allowed_paths: ['internal/**']
 

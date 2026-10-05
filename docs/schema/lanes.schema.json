@@ -381,7 +381,7 @@
             },
             "sensor_scope": {
               "type": "object",
-              "description": "Narrow a sensor the harness declares to the item, through ynh's --sensor-overlay. Cannot add, remove or relax a sensor.",
+              "description": "Narrow a sensor the harness declares to the item, through ynh's --sensor-overlay, which substitutes the command. A scope may only be the declared command narrowed: the same words in the same order, except that a path word (`.`, `./...`, a directory) may be replaced by one or more relative paths beneath it (no `..`, no leading dash), or, when the declared command has no path word, relative paths may be appended. A different program, flag or environment assignment, or any shell operator or expansion, is refused before the run. Cannot add, remove or relax a sensor.",
               "additionalProperties": {
                 "$ref": "#/$defs/template"
               }

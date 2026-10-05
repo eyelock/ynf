@@ -60,7 +60,7 @@ ynh info <harness id> --format json   its manifest: focuses (prompt, profile), e
 ```
 
 ynf resolves a lane's focus to its prompt and profile, checks the harness passes the variables the
-lane gives it, and checks the lane only tightens budgets and scopes declared sensors (ADR-006), all
+lane gives it, and checks the lane only tightens budgets and narrows declared sensors (ADR-006), all
 against that answer and never against the repository's working copy, which may differ from what
 the image carries or not contain the harness at all. ynf asks the image's ynh rather than the
 host's, because the image's runs the agent.

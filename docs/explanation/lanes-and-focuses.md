@@ -37,7 +37,8 @@ So a lane may only **tighten** a budget, never loosen it. ynh records in `budget
 each cap, so a lane's tightening shows in the run record. And a lane may only **scope** a sensor
 the harness declares, for example narrowing the linter to the package a ticket is about. ynh's
 overlay substitutes a command for a declared sensor and refuses one the harness does not declare,
-so a lane cannot add, remove or relax a sensor. The real CI result is something ynf checks between
+so ynf holds the scope to the declared command: the same words, with a path replaced by one
+beneath it, or paths appended. A lane cannot add, remove or relax a sensor, `true` included. The real CI result is something ynf checks between
 runs, not a sensor inside one.
 
 If a lane needs the agent to behave differently, that is a new focus or profile in the harness,

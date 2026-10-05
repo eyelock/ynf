@@ -303,6 +303,12 @@ func Expand(tmpl string, labels []string) (string, error) {
 	return out, bad
 }
 
+// ExpandShape fills every {label.<prefix>} placeholder with a safe dummy path segment, to check
+// the shape of a template before any item's labels are known.
+func ExpandShape(tmpl string) string {
+	return placeholder.ReplaceAllString(tmpl, "x")
+}
+
 // LabelValue returns the value of the first '<prefix>:<value>' label.
 func LabelValue(labels []string, prefix string) (string, bool) {
 	for _, l := range labels {
