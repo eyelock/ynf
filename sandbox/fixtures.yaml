@@ -225,6 +225,21 @@ fixtures:
         - a ticket in a tracker that is not a forge (the sandbox's JIRA stand-in), naming its repository
         - e2e starts it with ynf start tracker/SBX-1 --repo; the pull request is linked on the ticket
 
+  - id: outage-probe
+    kind: issue
+    title: A lane whose command always fails
+    body: fixtures/outage-probe.md
+    labels: ["ynf:outage", "pkg:internal/format"]
+    lane: outage
+    calibrate:
+      disabled: true
+    expect:
+      result: escalated
+      signatures: ["sig/outcome/error"]
+      checks:
+        - the command exits 3, so the run ends error and the item escalates at once; no model runs
+        - the failure memory (sig/outcome/error) is what `make e2e-memory-outage` queues while ynm is unreachable, and finds in ynm after
+
   - id: deps-bump
     kind: issue
     title: Bump the Go toolchain

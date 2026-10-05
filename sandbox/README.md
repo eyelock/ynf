@@ -71,7 +71,7 @@ repository is disposable.
 | Path | What it is |
 |---|---|
 | `seed/` | The repository's contents, pushed as one commit on `main` |
-| `seed/.agents/factory/lanes.yaml` | The sandbox's factory: eight lanes ([schema](../docs/schema/lanes.schema.json)) |
+| `seed/.agents/factory/lanes.yaml` | The sandbox's factory: nine lanes ([schema](../docs/schema/lanes.schema.json)) |
 | `seed/.agents/harness/plugin.json` | The sandbox's own ynh harness: `tidy`, `docs` and `fix-ci` focuses; `lint`, `test` and `docs` sensors |
 | `fixtures.yaml` | Every issue and pull request, its lane, and what ynf should do with it ([schema](fixtures.schema.json)) |
 | `fixtures/` | Issue and pull request bodies, the files committed on fixture branches (in `<id>/testdata/`, so Go tooling in this repository ignores their planted problems), and each fixture's known fix (`<id>.fix.patch`) |

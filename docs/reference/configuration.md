@@ -29,6 +29,10 @@ the folder the file is in.
 | `memory.token_env` | none | The variable holding the bearer token for `transport: http`, such as a machine token from your identity provider's client-credentials grant; its subject is the writer in ynm's audit log. A shared static token names no one, so every worker's writes are recorded as `token:static`; records still land in ynf's namespace. ynf refuses to start without it. |
 | `memory.level` | `personal`; `distributed` over http | The level ynf writes at. A shared store keeps nothing at the personal level, so writes to one say `distributed`. |
 
+A write ynm cannot take is not lost and does not stop a step: it waits in ynf's own store, up to
+1000 records (then the oldest are dropped, with a warning), and is sent, oldest first, before the next
+write and on every sweep. `ynf doctor` reports what is waiting.
+
 What ynf writes to memory, and why it never decides anything with it, is in
 [Learning from failure](../explanation/learning-from-failure.md): one
 [`ynf.failure.v1`](../schema/memory/ynf.failure.v1.schema.json) record per occurrence of a failure

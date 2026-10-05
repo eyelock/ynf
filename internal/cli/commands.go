@@ -104,7 +104,13 @@ func (a *app) doctor(ctx context.Context) error {
 			}
 		}
 	}
-	optional := map[string]bool{"ynh": true, "ynm": true} // ADR-012
+	optional := map[string]bool{"ynh": true, "ynm": true, "memory queue": true} // ADR-012
+	if a.eng != nil {
+		// Writes ynm could not take wait in ynf's store: worth saying, not a failure.
+		if n, since, err := a.eng.MemoryQueued(ctx); err == nil && n > 0 {
+			add("memory queue", false, fmt.Sprintf("%d memory writes queued since %s", n, since.Local().Format(time.RFC3339)))
+		}
+	}
 	for _, tool := range []struct{ name, args string }{{"git", "--version"}, {"docker", "version --format {{.Server.Version}}"}, {"ynh", "version"}, {"ynm", "--version"}} {
 		if tool.name == "ynh" {
 			// The same detection a lane with no runner uses (ADR-012), so doctor and a run agree.

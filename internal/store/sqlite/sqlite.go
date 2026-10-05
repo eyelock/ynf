@@ -84,6 +84,28 @@ func (s *Store) Put(ctx context.Context, key string, doc []byte, ifVersion strin
 	return strconv.FormatInt(v+1, 10), nil
 }
 
+// Delete implements store.Store.
+func (s *Store) Delete(ctx context.Context, key, ifVersion string) error {
+	v, err := strconv.ParseInt(ifVersion, 10, 64)
+	if err != nil {
+		return fmt.Errorf("sqlite: bad version %q", ifVersion)
+	}
+	res, err := s.db.ExecContext(ctx, `DELETE FROM docs WHERE key = ? AND version = ?`, key, v)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return nil
+	}
+	var cur int64
+	if err := s.db.QueryRowContext(ctx, `SELECT version FROM docs WHERE key = ?`, key).Scan(&cur); errors.Is(err, sql.ErrNoRows) {
+		return store.ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return store.ErrConflict
+}
+
 // Keys implements store.Store.
 func (s *Store) Keys(ctx context.Context, prefix string) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT key FROM docs WHERE substr(key, 1, ?) = ? ORDER BY key`, len(prefix), prefix)

@@ -10,6 +10,13 @@
 // (ynf.step.v1, for its last run) and a failure memory (ynf.failure.v1) per failure signature, in
 // the sandbox's namespace. -forget-memory empties that namespace, which `make reset` does, so
 // every run starts from the same memory.
+//
+// -memory-outage proves ADR-008's promise that a ynm outage loses nothing: ynm is made unreachable
+// for the whole run (a shim first on PATH that fails while a flag file exists, in front of a
+// scratch YNM_HOME), so every memory write queues in ynf's store while the factory carries on; the
+// run then checks `ynf doctor` reports the queue, brings ynm back, runs one more sweep, and checks
+// the queue is empty and every memory arrived. It costs no more than the run itself: the extra sweep
+// finds every item settled, so no model runs.
 package main
 
 import (
@@ -98,6 +105,7 @@ func main() {
 	lanes := flag.String("lanes", "gofmt,deps", "lanes to run and check")
 	timeout := flag.Duration("timeout", 15*time.Minute, "how long to wait for items to settle")
 	forget := flag.Bool("forget-memory", false, "empty the sandbox's ynm namespace and exit")
+	outage := flag.Bool("memory-outage", false, "run with ynm unreachable, then bring it back and check the queued memory writes arrive")
 	hideYnh := flag.Bool("hide-ynh", false, "hide ynh from ynf (YNF_YNH_BIN names nothing), so a lane with no runner falls back to its command")
 	image := flag.String("image", "", "run ynf inside this factory-flavoured harness image, as a job runner would (ADR-009, shape B)")
 	flag.Parse()
@@ -108,13 +116,13 @@ func main() {
 		}
 		return
 	}
-	if err := run(*root, *repo, *factory, *image, strings.Split(*lanes, ","), *timeout, *hideYnh); err != nil {
+	if err := run(*root, *repo, *factory, *image, *outage, strings.Split(*lanes, ","), *timeout, *hideYnh); err != nil {
 		fmt.Fprintln(os.Stderr, "e2e:", err)
 		os.Exit(1)
 	}
 }
 
-func run(root, repo, factory, image string, lanes []string, timeout time.Duration, hideYnh bool) error {
+func run(root, repo, factory, image string, outage bool, lanes []string, timeout time.Duration, hideYnh bool) error {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return err
@@ -204,6 +212,16 @@ func run(root, repo, factory, image string, lanes []string, timeout time.Duratio
 	} else {
 		fmt.Println("memory not checked: ynm is not installed")
 	}
+	var down *ynmOutage
+	if outage {
+		if !memoryOn {
+			return errors.New("-memory-outage needs ynm installed, and ynf on the host (not -image)")
+		}
+		if down, err = startOutage(tmp); err != nil {
+			return err
+		}
+		fmt.Println("ynm is unreachable for this run; its writes queue in ynf's store")
+	}
 	// Enrolment comes from the configuration repository, as a deployed factory's does (ADR-006).
 	inImage := ""
 	if image != "" {
@@ -291,13 +309,19 @@ func run(root, repo, factory, image string, lanes []string, timeout time.Duratio
 	}
 	fmt.Printf("settled in %s\n\n", time.Since(start).Round(time.Second))
 
+	failed := 0
+	if down != nil {
+		if err := down.recover(repo, ynf, cfg, logPath, memSince, lanes, expectedFailures(ff.Fixtures, lanes, numbers, repo)); err != nil {
+			fmt.Printf("FAIL  %-24s %s\n", "memory outage", err)
+			failed++
+		}
+	}
 	var memories []memoryRecord
 	if memoryOn {
 		if memories, err = listMemory(repo, memSince); err != nil {
 			return err
 		}
 	}
-	failed := 0
 	for _, f := range ff.Fixtures {
 		if !slices.Contains(lanes, f.Lane) {
 			continue
@@ -539,6 +563,143 @@ func check(f fixture, numbers map[string]int, items []item, repo, ynf, cfg, trac
 		detail += ", restarted after the crash"
 	}
 	return detail, nil
+}
+
+// ynmOutage is ynm taken away for a run. ynf finds ynm on PATH, so a shim named ynm goes first:
+// while the down file exists it fails the way an unreachable ynm does, otherwise it is the real
+// one. The shim and a scratch YNM_HOME keep the outage off the developer's own memory.
+type ynmOutage struct{ tmp, realYnm string }
+
+func startOutage(tmp string) (*ynmOutage, error) {
+	realYnm, err := exec.LookPath("ynm")
+	if err != nil {
+		return nil, err
+	}
+	o := &ynmOutage{tmp: tmp, realYnm: realYnm}
+	home := filepath.Join(tmp, "ynm-home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		return nil, err
+	}
+	_ = os.Setenv("YNM_HOME", home)
+	if out, err := sh("", realYnm, "init", "--personal"); err != nil {
+		return nil, fmt.Errorf("ynm init: %w\n%s", err, out)
+	}
+	shim := fmt.Sprintf("#!/bin/sh\nif [ -e %q ]; then echo 'ynm: unreachable (ynf e2e -memory-outage)' >&2; exit 1; fi\nexec %q \"$@\"\n", o.flag(), realYnm)
+	if err := os.MkdirAll(filepath.Join(tmp, "shim"), 0o755); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "shim", "ynm"), []byte(shim), 0o755); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(o.flag(), nil, 0o644); err != nil {
+		return nil, err
+	}
+	_ = os.Setenv("PATH", filepath.Join(tmp, "shim")+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return o, nil
+}
+
+func (o *ynmOutage) flag() string { return filepath.Join(o.tmp, "ynm-down") }
+
+// failure is one failure memory a fixture is expected to leave: its item and signature.
+type failure struct{ item, sig string }
+
+// expectedFailures are the failure memories the fixtures in the lanes should leave, which is what
+// puts memory writes in the queue.
+func expectedFailures(fs []fixture, lanes []string, numbers map[string]int, repo string) []failure {
+	var out []failure
+	for _, f := range fs {
+		if len(f.Expect.Signatures) == 0 || !slices.Contains(lanes, f.Lane) {
+			continue
+		}
+		_, key, _, err := subject(f, numbers, repo)
+		if err != nil {
+			continue
+		}
+		for _, sig := range f.Expect.Signatures {
+			out = append(out, failure{key, sig})
+		}
+	}
+	return out
+}
+
+// queued is how many memory writes `ynf doctor` says are queued; zero when it says nothing.
+func (o *ynmOutage) queued(ynf, cfg string) (int, error) {
+	out, err := sh("", ynf, "--config", cfg, "--format", "json", "doctor")
+	var rep struct {
+		Checks []struct{ Name, Detail string } `json:"checks"`
+	}
+	if jerr := json.Unmarshal([]byte(out), &rep); jerr != nil {
+		return 0, fmt.Errorf("ynf doctor: %v: %w", jerr, err)
+	}
+	for _, c := range rep.Checks {
+		if c.Name == "memory queue" {
+			var n int
+			if _, err := fmt.Sscanf(c.Detail, "%d memory writes queued since", &n); err != nil {
+				return 0, fmt.Errorf("ynf doctor says %q", c.Detail)
+			}
+			return n, nil
+		}
+	}
+	return 0, nil
+}
+
+// recover checks the outage from both ends: while ynm was down, nothing reached it and doctor
+// reports the queue; once it is back, one sweep sends the queue, doctor reports nothing, and the
+// memories are there for checkMemory to find.
+func (o *ynmOutage) recover(repo, ynf, cfg, logPath string, since time.Time, lanes []string, want []failure) error {
+	if len(want) == 0 {
+		return errors.New("no fixture in these lanes leaves a failure memory, so nothing would queue: the outage check needs one (the outage lane)")
+	}
+	n, err := o.queued(ynf, cfg)
+	if err != nil {
+		return err
+	}
+	if n < len(want) {
+		return fmt.Errorf("%d failure memories were expected, yet doctor reports %d queued memory writes", len(want), n)
+	}
+	// The real ynm, not the shim: what the outage kept from reaching it.
+	if out, err := sh("", o.realYnm, "list", "--json", "--namespace", namespaceFor(repo), "--limit", "10000", "--since", since.Format(time.RFC3339)); err != nil {
+		return fmt.Errorf("ynm list: %w", err)
+	} else if strings.Contains(out, `"memoryId"`) {
+		return errors.New("a memory reached ynm while it was unreachable")
+	}
+	fmt.Printf("ok    %-24s %d memory writes queued while ynm was unreachable, none reached it\n", "memory outage", n)
+
+	if err := os.Remove(o.flag()); err != nil {
+		return err
+	}
+	fmt.Println("ynm is back; one sweep sends the queue")
+	if out, err := stream(ynf, sweepArgs(cfg, logPath, lanes)...); err != nil {
+		return fmt.Errorf("ynf sweep after the outage: %w\n%s", err, out)
+	}
+	if left, err := o.queued(ynf, cfg); err != nil {
+		return err
+	} else if left != 0 {
+		return fmt.Errorf("%d memory writes are still queued after ynm came back", left)
+	}
+	got, err := listMemory(repo, since)
+	if err != nil {
+		return err
+	}
+	for _, w := range want {
+		if !slices.ContainsFunc(got, func(m memoryRecord) bool {
+			return m.Current.DataSchema == "ynf.failure.v1" && m.Current.Subject == w.sig && m.Current.Data["item"] == w.item
+		}) {
+			return fmt.Errorf("the queued %s on %s never reached ynm", w.sig, w.item)
+		}
+	}
+	fmt.Printf("ok    %-24s queue drained; the %d queued failure memories are in ynm\n", "memory outage", len(want))
+	return nil
+}
+
+// sweepArgs is a single sweep of the given lanes only: a sweep after the run must not take on work
+// the run was told to leave alone.
+func sweepArgs(cfg, logPath string, lanes []string) []string {
+	args := []string{"--config", cfg, "--format", "json", "--log-file", logPath, "sweep"}
+	for _, l := range lanes {
+		args = append(args, "--lane", l)
+	}
+	return args
 }
 
 // memoryNamespace is where the sandbox's memories go; {repo} is host/owner/name.
