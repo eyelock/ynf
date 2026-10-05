@@ -1048,6 +1048,41 @@ func TestMemoryIsWrittenNotRelayed(t *testing.T) {
 	}
 }
 
+// TestMemoryWritesQueueWhileYnmIsDownAndArriveAfter: a failure written while ynm is down is queued
+// in ynf's store, the step goes on, and the next sweep sends it once ynm is back (ADR-008).
+func TestMemoryWritesQueueWhileYnmIsDownAndArriveAfter(t *testing.T) {
+	h := newHarness(t)
+	mem := &fakeMemory{fail: true}
+	h.e.Memory = mem
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:fmt", "pkg:internal/format"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.f.setChecks(101, "failure")
+	h.advance(time.Minute)
+	if _, err := h.e.RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Escalated {
+		t.Fatalf("a down ynm must not stop the step: %s %s", it.State, it.Reason)
+	}
+	n, since, err := h.e.MemoryQueued(ctx)
+	if err != nil || n != 1 || since.IsZero() || len(mem.records) != 0 {
+		t.Fatalf("queued %d since %v (%v), sent %d", n, since, err, len(mem.records))
+	}
+
+	mem.mu.Lock()
+	mem.fail = false
+	mem.mu.Unlock()
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n, _, _ := h.e.MemoryQueued(ctx); n != 0 || len(mem.records) != 1 || mem.records[0].Subject != "sig/ci-diverges/lint" {
+		t.Fatalf("after ynm came back: %d queued, sent %+v", n, mem.records)
+	}
+}
+
 // TestAFailingCheckIsRememberedOncePerCommit: CI that stays failed across polls is one occurrence
 // in ynm, not one per poll; a new head commit that fails again is another.
 func TestAFailingCheckIsRememberedOncePerCommit(t *testing.T) {

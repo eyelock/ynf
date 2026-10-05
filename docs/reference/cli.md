@@ -25,7 +25,7 @@ an issue on GitHub Enterprise Server is `item/github.acme.internal/…`.
 | Command | Does |
 |---|---|
 | `ynf version` | Prints the version. |
-| `ynf doctor` | Checks the config, the store, each repository's lanes (and any shadowed factory folder), each forge and tracker, and git, docker, ynh and ynm. ynh and ynm are optional. |
+| `ynf doctor` | Checks the config, the store, each repository's lanes (and any shadowed factory folder), each forge and tracker, and git, docker, ynh and ynm. ynh and ynm are optional. When memory writes are waiting for ynm it adds a `memory queue` line, `N memory writes queued since <time>`, as a warning, not a failure; nothing is said when the queue is empty. |
 | `ynf forges` | Each forge ynf works with, checked by reaching an enrolled repository on it. |
 | `ynf trackers` | Each tracker: every forge's issues, and each declared tracker, whose MCP server is started and checked for the tools it is configured to call. |
 | `ynf ticket <ref>` | Reads a ticket exactly as `start` would, without starting anything: its title, state, labels, the repository it names, and its body. For checking a tracker's `fields`. |

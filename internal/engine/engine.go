@@ -108,6 +108,7 @@ type Engine struct {
 
 	mu       sync.Mutex
 	policies map[string]*RepoPolicy
+	memq     *memory.Queue
 	factory  *FactoryPolicy
 	// trackerHosts maps a configured tracker's name to its host, for shorthand references.
 	trackerHosts map[string]string
@@ -340,6 +341,7 @@ func (e *Engine) wantLane(name string) bool {
 
 // Sweep runs every enrolled repository's lane searches and starts a step for each new ticket.
 func (e *Engine) Sweep(ctx context.Context) error {
+	e.FlushMemory(ctx)
 	repos, err := e.Enrolled(ctx)
 	if err != nil {
 		return err

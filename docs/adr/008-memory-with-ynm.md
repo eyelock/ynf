@@ -133,8 +133,13 @@ any, is the harness's configuration.
 
 - Signature normalisation is a real piece of code with its own tests: too specific and nothing
   clusters, too broad and unrelated failures merge.
-- ynm being down must not stop ynf. Writes are queued in the item log and replayed; recall
-  failures degrade to "no prior context".
+- ynm being down must not stop ynf, or lose a record. A write ynm cannot take is queued in ynf's
+  own store, one document per record under `memory/queue/<ULID>`, and sent oldest first before
+  the next write and at every sweep. A record is claimed with a conditional write before it is
+  sent, so two workers sharing a store never send the same one; a claim left by a dead worker is
+  retaken after five minutes. The queue is bounded at 1000 records, dropping the oldest with a
+  warning, and a write made while it is not empty goes behind it. `ynf doctor` says how many are
+  queued and since when. Recall failures degrade to "no prior context".
 
 ## Open questions
 

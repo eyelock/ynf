@@ -203,6 +203,53 @@ func TestSweepUntilSettledAndDoctor(t *testing.T) {
 	}
 }
 
+// TestDoctorReportsQueuedMemoryWrites: nothing is said when the queue is empty; when writes wait
+// for ynm, doctor says how many and since when, as a warning, not a failure.
+func TestDoctorReportsQueuedMemoryWrites(t *testing.T) {
+	e := setup(t)
+	if code, out, _ := e.run("doctor"); strings.Contains(out, "memory queue") {
+		t.Fatalf("an empty queue is not reported: %d %s", code, out)
+	}
+	st, err := sqlite.Open(filepath.Join(e.dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, at := range []string{"2026-10-05T09:00:00Z", "2026-10-05T10:00:00Z"} {
+		doc, _ := json.Marshal(map[string]any{"record": map[string]any{"Subject": "sig/x"}, "queued": at})
+		if _, err := st.Put(context.Background(), fmt.Sprintf("memory/queue/%026d", i), doc, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = st.Close()
+	code, out, _ := e.run("--format", "json", "doctor")
+	var rep struct {
+		OK     bool
+		Checks []struct {
+			Name, Detail string
+			OK           bool
+		}
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatal(err, out)
+	}
+	found := false
+	for _, c := range rep.Checks {
+		if c.Name == "memory queue" {
+			found = true
+			want := time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC).Local().Format(time.RFC3339)
+			if c.OK || c.Detail != "2 memory writes queued since "+want {
+				t.Errorf("memory queue check: %+v", c)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("doctor %d did not report the queue: %s", code, out)
+	}
+	if _, human, _ := e.run("doctor"); !strings.Contains(human, "--    memory queue") {
+		t.Errorf("a queue is a warning, not a failure: %s", human)
+	}
+}
+
 func TestConfigErrors(t *testing.T) {
 	e := setup(t)
 	_ = os.WriteFile(e.cfg, []byte("version: 1\nrepos: []\n"), 0o644)

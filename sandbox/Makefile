@@ -11,6 +11,9 @@
 #   make e2e        rebuild the sandbox, run ynf against it until everything settles, and check
 #                   each fixture's expect block (tests the factory; LANES=gofmt,deps,reclaim by default)
 #   make e2e-only   the same, without the rebuild
+#   make e2e-memory-outage  e2e-only with ynm unreachable for the whole run, then brought back: the
+#                   memory writes must queue in ynf's store, show in `ynf doctor`, and arrive
+#                   after (ADR-008); it costs no more than e2e
 #   make e2e-factory  the same with ynf inside the factory image, as a job runner would run it
 #                   (ADR-009, shape B): the sandbox's harness built on ynf's factory image
 #                   (make -C .. factory-image first; FACTORY_BASE names it)
@@ -43,7 +46,7 @@ endif
 TF := terraform -chdir=terraform
 export GITHUB_TOKEN ?= $(shell gh auth token)
 
-.PHONY: settings init validate up down reset plan calibrate e2e e2e-only e2e-factory agent-image
+.PHONY: settings init validate up down reset plan calibrate e2e e2e-only e2e-memory-outage e2e-factory agent-image
 
 settings:
 	@[ -n "$(SANDBOX_OWNER)" ] || { echo "sandbox: no SANDBOX_OWNER. Copy sandbox.env.example to sandbox.env and set it (and the rest, if you want)."; exit 2; }
@@ -107,6 +110,9 @@ FACTORY_LANES   ?= gofmt,deps
 
 # Shape B: the sandbox's agent tools on the factory image, its harness in the factory flavour, and
 # the acceptance test with ynf running inside that image, every run inline beside it.
+e2e-memory-outage: reset settings
+	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(LANES) -memory-outage
+
 e2e-factory: reset
 	@set -e; ctx=$$(mktemp -d); trap 'rm -rf "$$ctx"' EXIT; \
 	cp images/agent/Dockerfile "$$ctx/"; mkdir -p "$$ctx/ynh"; \

@@ -21,6 +21,7 @@ type Store interface {
     // Documents (work items, aliases, lane state) with optimistic concurrency.
     Get(ctx context.Context, key string) (doc []byte, version string, err error)
     Put(ctx context.Context, key string, doc []byte, ifVersion string) (string, error) // "" = create only; ErrConflict
+    Delete(ctx context.Context, key string, ifVersion string) error // conditional like Put: ErrConflict, ErrNotFound
 
     // Append-only per-item log: events, decisions, run results. ULID-keyed, immutable.
     Append(ctx context.Context, item string, entry LogEntry) error
