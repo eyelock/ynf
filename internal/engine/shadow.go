@@ -347,6 +347,8 @@ func (e *Engine) shadowResolve(ctx context.Context, t *shadowTarget, getMirror f
 	}
 	if c.fix, err = t.fixes.FixFor(ctx, t.name, n); errors.Is(err, forge.ErrNoFix) {
 		return c, "no merged pull request closed it", nil
+	} else if errors.Is(err, forge.ErrRebased) {
+		return c, "rebase-merged; base unknown", nil
 	} else if errors.Is(err, forge.ErrNotFound) {
 		return c, "the fixing pull request was not found", nil
 	} else if err != nil {

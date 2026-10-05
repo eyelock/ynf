@@ -50,8 +50,10 @@ shadow run 01K9Q3…: lane lint-paydown, 14 candidate(s), 9 attempted, 5 skipped
 For each ticket that is run:
 
 - **The base** is the commit before the human fix: the first parent of the fix's merge commit.
-  That works for a squash merge and for a merge commit. A fix that was rebase merged has no single
-  merge commit, so its base is wrong; leave those tickets out with `--ticket`.
+  That works for a squash merge and for a merge commit. ynf finds the fix from GitHub's record of
+  what closed the ticket (a merged pull request, or a commit that one made), so the pull request must
+  have closed it by a closing reference such as `Closes #12`. A fix that was rebase merged has no
+  single merge commit, so ynf skips it as "rebase-merged; base unknown" rather than guess.
 - **The task** is built from the ticket as `start` builds it: its title, body and labels, never
   the pull request or its commit message, which would give the answer away. ynf's own lifecycle
   labels (a lane's `labels.on_*` additions) are dropped, so the ticket reads as it did before ynf
@@ -150,6 +152,7 @@ compare the yield on tickets before and after the cutoff, using `--since` and `-
 | the ticket is not closed | the search found it, but it is open again |
 | no merged pull request closed it | closed by hand, by a commit with no pull request, or by a pull request that was not merged |
 | the lane cannot run it | a `{label.<prefix>}` in the lane's command or sensor scopes has no matching label, or the lane's eligibility guard is false for the ticket as it was |
+| rebase-merged; base unknown | the fix was rebase merged, so its merge commit is only the last of its commits |
 | the merge commit is not in the clone | the fix's branch was force-pushed or deleted |
 | changed no files | the fix pull request had no diff |
 

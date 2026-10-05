@@ -10,9 +10,10 @@
 #                   YNH=/path/to/ynh to choose one)
 #   make e2e        rebuild the sandbox, run ynf against it until everything settles, and check
 #                   each fixture's expect block (tests the factory; LANES=gofmt,deps,reclaim by default)
-#   make e2e-only   the same, without the rebuild. With the gofmt lane it ends with shadow mode:
-#                   it merges a human fix for fmt-format into the sandbox main and runs ynf shadow on
-#                   it (SHADOW=false skips that; make reset undoes it)
+#   make e2e-only   the same, without the rebuild. Without a reset it leaves out shadow mode, whose
+#                   stage merges a human fix for fmt-format into the sandbox main and so cannot
+#                   run twice; SHADOW=true adds it. make e2e (and e2e-factory) reset first, so
+#                   they run it with the gofmt lane; SHADOW=false skips it there
 #   make e2e-factory  the same with ynf inside the factory image, as a job runner would run it
 #                   (ADR-009, shape B): the sandbox's harness built on ynf's factory image
 #                   (make -C .. factory-image first; FACTORY_BASE names it)
@@ -81,9 +82,12 @@ calibrate: settings
 	cd calibrate && go run . -root .. -repo $(SANDBOX_REPO)
 
 LANES ?= gofmt,deps,reclaim
-SHADOW ?= true
+SHADOW ?= false
+# make e2e and e2e-factory reset first, so they run shadow mode unless told not to.
+SHADOW_AFTER_RESET = $(if $(filter command line,$(origin SHADOW)),$(SHADOW),true)
 
-e2e: reset e2e-only
+e2e: reset
+	$(MAKE) e2e-only SHADOW=$(SHADOW_AFTER_RESET)
 
 e2e-only: settings
 	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(LANES) -shadow=$(SHADOW)
@@ -116,4 +120,4 @@ e2e-factory: reset
 	docker build -q --build-arg YNH_BASE=$(FACTORY_BASE) -t ynf-sandbox-agent:factory "$$ctx" >/dev/null; \
 	ynh image ynf-sandbox --from seed --base ynf-sandbox-agent:factory --entrypoint agent --tag $(FACTORY_HARNESS) >/dev/null; \
 	echo "built $(FACTORY_HARNESS) on $(FACTORY_BASE)"
-	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(FACTORY_LANES) -shadow=$(SHADOW) -image $(FACTORY_HARNESS)
+	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(FACTORY_LANES) -shadow=$(SHADOW_AFTER_RESET) -image $(FACTORY_HARNESS)

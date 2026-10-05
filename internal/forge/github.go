@@ -261,40 +261,124 @@ func (g *GitHub) File(ctx context.Context, repo, ref, path string) ([]byte, erro
 	return []byte(s), err
 }
 
-// FixFor implements Fixes: the issue's timeline says which commit closed it, and the pull requests
-// associated with that commit say which was merged there. A commit that closed it with no merged
-// pull request, or an issue closed by hand, is ErrNoFix.
+// GraphQLURL is the GraphQL endpoint beside the REST base: <base>graphql on api.github.com (and a
+// test server), <host>/api/graphql on GitHub Enterprise Server, whose REST base ends /api/v3/.
+func (g *GitHub) GraphQLURL() string {
+	u := *g.c.BaseURL
+	if p, ok := strings.CutSuffix(u.Path, "/api/v3/"); ok {
+		u.Path = p + "/api/graphql"
+	} else {
+		u.Path = strings.TrimSuffix(u.Path, "/") + "/graphql"
+	}
+	return u.String()
+}
+
+const closerQuery = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      timelineItems(itemTypes: [CLOSED_EVENT], last: 1) {
+        nodes {
+          ... on ClosedEvent {
+            closer {
+              __typename
+              ... on PullRequest {
+                number merged
+                mergeCommit { oid messageHeadline parents { totalCount } }
+                commits(last: 1) { totalCount nodes { commit { messageHeadline } } }
+              }
+              ... on Commit { oid }
+            }
+          }
+        }
+      }
+    }
+  }
+}`
+
+type closer struct {
+	Typename    string `json:"__typename"`
+	Number      int
+	Merged      bool
+	OID         string
+	MergeCommit *struct {
+		OID             string
+		MessageHeadline string
+		Parents         struct{ TotalCount int }
+	}
+	Commits struct {
+		TotalCount int
+		Nodes      []struct {
+			Commit struct{ MessageHeadline string }
+		}
+	}
+}
+
+// FixFor implements Fixes. GitHub's GraphQL ClosedEvent names what closed the issue, which the REST
+// timeline does not: a merged pull request gives the fix with its merge commit; a commit is looked
+// up for the merged pull request that made it; an issue closed by hand, or by a pull request that
+// was not merged, is ErrNoFix. A pull request that was rebase merged has no merge commit to take a
+// base from, and is ErrRebased.
 func (g *GitHub) FixFor(ctx context.Context, repo string, number int) (Fix, error) {
 	o, r := split(repo)
-	var sha string
-	opt := &github.ListOptions{PerPage: 100}
-	for {
-		evs, resp, err := g.c.Issues.ListIssueTimeline(ctx, o, r, number, opt)
+	body := map[string]any{"query": closerQuery, "variables": map[string]any{"owner": o, "name": r, "number": number}}
+	req, err := g.c.NewRequest(http.MethodPost, g.GraphQLURL(), body)
+	if err != nil {
+		return Fix{}, err
+	}
+	var res struct {
+		Data struct {
+			Repository *struct {
+				Issue *struct {
+					TimelineItems struct {
+						Nodes []struct{ Closer *closer }
+					}
+				}
+			}
+		}
+		Errors []struct{ Message string }
+	}
+	if _, err := g.c.Do(ctx, req, &res); err != nil {
+		return Fix{}, notFound(err)
+	}
+	if res.Data.Repository == nil || res.Data.Repository.Issue == nil {
+		if len(res.Errors) > 0 {
+			return Fix{}, fmt.Errorf("graphql: %s", res.Errors[0].Message)
+		}
+		return Fix{}, ErrNotFound
+	}
+	nodes := res.Data.Repository.Issue.TimelineItems.Nodes
+	if len(nodes) == 0 || nodes[0].Closer == nil {
+		return Fix{}, ErrNoFix
+	}
+	c := nodes[0].Closer
+	switch c.Typename {
+	case "PullRequest":
+		if !c.Merged || c.MergeCommit == nil {
+			return Fix{}, ErrNoFix
+		}
+		return fixOf(c)
+	case "Commit":
+		prs, _, err := g.c.PullRequests.ListPullRequestsWithCommit(ctx, o, r, c.OID, &github.ListOptions{PerPage: 100})
 		if err != nil {
 			return Fix{}, notFound(err)
 		}
-		for _, ev := range evs {
-			// The last close counts: an issue may have been reopened since.
-			if ev.GetEvent() == "closed" {
-				sha = ev.GetCommitID()
+		for _, pr := range prs {
+			if !pr.GetMergedAt().IsZero() && pr.GetMergeCommitSHA() == c.OID {
+				return Fix{PR: pr.GetNumber(), MergeSHA: c.OID}, nil
 			}
-		}
-		if resp.NextPage == 0 {
-			break
-		}
-		opt.Page = resp.NextPage
-	}
-	if sha == "" {
-		return Fix{}, ErrNoFix
-	}
-	prs, _, err := g.c.PullRequests.ListPullRequestsWithCommit(ctx, o, r, sha, &github.ListOptions{PerPage: 100})
-	if err != nil {
-		return Fix{}, notFound(err)
-	}
-	for _, pr := range prs {
-		if !pr.GetMergedAt().IsZero() && pr.GetMergeCommitSHA() == sha {
-			return Fix{PR: pr.GetNumber(), MergeSHA: sha}, nil
 		}
 	}
 	return Fix{}, ErrNoFix
+}
+
+// fixOf reads a merged pull request's fix. One parent and several commits is a squash or a rebase:
+// a squash's commit is titled for the pull request, a rebase's is a copy of the last commit, so
+// the same headline gives it away. Without the headlines it cannot be told, and is ErrRebased.
+func fixOf(c *closer) (Fix, error) {
+	if c.MergeCommit.Parents.TotalCount == 1 && c.Commits.TotalCount > 1 {
+		if len(c.Commits.Nodes) == 0 || c.MergeCommit.MessageHeadline == "" || c.MergeCommit.MessageHeadline == c.Commits.Nodes[0].Commit.MessageHeadline {
+			return Fix{}, ErrRebased
+		}
+	}
+	return Fix{PR: c.Number, MergeSHA: c.MergeCommit.OID}, nil
 }

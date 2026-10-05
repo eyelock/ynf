@@ -55,6 +55,10 @@ type Forge interface {
 // by a commit with no pull request, or by a pull request that was not merged.
 var ErrNoFix = errors.New("forge: no merged pull request closed it")
 
+// ErrRebased means a merged pull request was rebase merged, so its merge commit is only the last of
+// its commits and the commit before the change cannot be taken from it.
+var ErrRebased = errors.New("forge: rebase-merged; base unknown")
+
 // Fix is the merged pull request that closed a ticket (shadow mode).
 type Fix struct {
 	PR       int
