@@ -6,6 +6,13 @@
 // checked. A fixture with expect.crash is the crash test: ynf is killed (SIGKILL) as that
 // fixture's run starts, and a fresh ynf must restart it once its lease runs out.
 //
+// With the gofmt lane in -lanes, it ends with shadow mode (-shadow=false skips it): the human fix
+// for the fmt-format issue is merged, which closes it, and `ynf shadow run` takes the issue on
+// the commit before that fix. The patch is graded with the scripted form, the report is read, and
+// nothing outward changed: the issue's comments and labels, the pull requests, the branches, the
+// items and the stats are the same after as before. It merges a pull request into the sandbox's
+// main, so it is the last thing e2e does, and `make reset` is what undoes it.
+//
 // With ynm installed, memory is part of the check: every item that ran must have its step memory
 // (ynf.step.v1, for its last run) and a failure memory (ynf.failure.v1) per failure signature, in
 // the sandbox's namespace. -forget-memory empties that namespace, which `make reset` does, so
@@ -108,6 +115,7 @@ func main() {
 	outage := flag.Bool("memory-outage", false, "run with ynm unreachable, then bring it back and check the queued memory writes arrive")
 	hideYnh := flag.Bool("hide-ynh", false, "hide ynh from ynf (YNF_YNH_BIN names nothing), so a lane with no runner falls back to its command")
 	image := flag.String("image", "", "run ynf inside this factory-flavoured harness image, as a job runner would (ADR-009, shape B)")
+	shadowOn := flag.Bool("shadow", true, "with the gofmt lane, end by closing fmt-format with a merged human fix and proving shadow mode on it (merges into the sandbox's main)")
 	flag.Parse()
 	if *forget {
 		if err := forgetMemory(*repo); err != nil {
@@ -116,13 +124,13 @@ func main() {
 		}
 		return
 	}
-	if err := run(*root, *repo, *factory, *image, *outage, strings.Split(*lanes, ","), *timeout, *hideYnh); err != nil {
+	if err := run(*root, *repo, *factory, *image, *outage, strings.Split(*lanes, ","), *timeout, *hideYnh, *shadowOn); err != nil {
 		fmt.Fprintln(os.Stderr, "e2e:", err)
 		os.Exit(1)
 	}
 }
 
-func run(root, repo, factory, image string, outage bool, lanes []string, timeout time.Duration, hideYnh bool) error {
+func run(root, repo, factory, image string, outage bool, lanes []string, timeout time.Duration, hideYnh, shadowOn bool) error {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return err
@@ -342,6 +350,11 @@ func run(root, repo, factory, image string, outage bool, lanes []string, timeout
 	}
 	if failed > 0 {
 		return fmt.Errorf("%d fixture(s) did not end as expected", failed)
+	}
+	if shadowOn && slices.Contains(lanes, "gofmt") {
+		if err := shadowStage(ff.Fixtures, numbers, repo, ynf, cfg); err != nil {
+			return fmt.Errorf("shadow mode: %w", err)
+		}
 	}
 	passed = true
 	return nil
@@ -959,4 +972,172 @@ func lastLines(s string, n int) string {
 		l = l[len(l)-n:]
 	}
 	return strings.Join(l, "\n")
+}
+
+// shadowStage proves shadow mode on the live sandbox, with the gofmt lane (no model spend): the
+// fmt-format issue is closed by a merged pull request that formats internal/format, which is the
+// human fix, and shadow mode runs the lane on the commit before it.
+func shadowStage(fixtures []fixture, numbers map[string]int, repo, ynf, cfg string) error {
+	i := slices.IndexFunc(fixtures, func(f fixture) bool { return f.ID == "fmt-format" })
+	if i < 0 {
+		return errors.New("no fmt-format fixture")
+	}
+	n, ok := numbers[fixtures[i].Title]
+	if !ok {
+		return fmt.Errorf("no issue titled %q in the sandbox", fixtures[i].Title)
+	}
+	ref := fmt.Sprintf("%s#%d", repo, n)
+	fmt.Printf("\nshadow mode: merging the human fix that closes %s\n", ref)
+	if err := mergeHumanFix(repo, n); err != nil {
+		return err
+	}
+
+	// What shadow mode must not change, read now that the setup is done.
+	before, err := outwardState(repo, n, ynf, cfg)
+	if err != nil {
+		return err
+	}
+	ynfJSON := func(args ...string) (string, error) {
+		return sh("", ynf, append([]string{"--config", cfg, "--format", "json"}, args...)...)
+	}
+	out, err := ynfJSON("shadow", "run", "gofmt", "--repo", repo, "--ticket", ref)
+	if err != nil {
+		return fmt.Errorf("shadow run: %w\n%s", err, out)
+	}
+	var run struct {
+		ID         string `json:"id"`
+		Candidates int    `json:"candidates"`
+		Attempted  int    `json:"attempted"`
+		Attempts   []struct {
+			ID      string `json:"id"`
+			Outcome string `json:"outcome"`
+		} `json:"attempts"`
+	}
+	if err := json.Unmarshal([]byte(out), &run); err != nil {
+		return fmt.Errorf("shadow run output: %w\n%s", err, out)
+	}
+	if run.Candidates != 1 || run.Attempted != 1 || len(run.Attempts) != 1 || run.Attempts[0].Outcome != "converged" {
+		return fmt.Errorf("want one converged attempt, got %s", out)
+	}
+	type rate struct{ Successes, N int }
+	type report struct {
+		Attempted, Graded int
+		Pooled            struct {
+			Yield      *rate `json:"yield"`
+			UpperBound *rate `json:"upper_bound"`
+		} `json:"pooled"`
+		Grader struct{ Graded int } `json:"grader_check"`
+	}
+	read := func() (report, error) {
+		var r report
+		out, err := ynfJSON("shadow", "report", run.ID)
+		if err != nil {
+			return r, fmt.Errorf("shadow report: %w\n%s", err, out)
+		}
+		return r, json.Unmarshal([]byte(out), &r)
+	}
+	r, err := read()
+	if err != nil {
+		return err
+	}
+	// Before grading, only the automatic upper bound is known: the lane converged and its diff
+	// gate would have accepted the change.
+	if r.Pooled.Yield != nil || r.Pooled.UpperBound == nil || r.Pooled.UpperBound.Successes != 1 {
+		return fmt.Errorf("before grading, want only the upper bound 1/1: %+v", r)
+	}
+	if out, err := ynfJSON("shadow", "grade", run.ID, "--attempt", run.Attempts[0].ID, "--a", "equivalent", "--b", "equivalent"); err != nil {
+		return fmt.Errorf("shadow grade: %w\n%s", err, out)
+	}
+	if r, err = read(); err != nil {
+		return err
+	}
+	if r.Pooled.Yield == nil || r.Pooled.Yield.Successes != 1 || r.Pooled.Yield.N != 1 || r.Graded != 1 || r.Grader.Graded != 1 {
+		return fmt.Errorf("after grading, want yield 1/1 and one graded human patch: %+v", r)
+	}
+	after, err := outwardState(repo, n, ynf, cfg)
+	if err != nil {
+		return err
+	}
+	for name, was := range before {
+		if after[name] != was {
+			return fmt.Errorf("shadow mode changed %s:\n  before %s\n  after  %s", name, oneLine(was, 300), oneLine(after[name], 300))
+		}
+	}
+	fmt.Printf("ok    shadow mode             %s: one attempt on the commit before the human fix, graded, yield 1/1, nothing outward changed\n", ref)
+	return nil
+}
+
+// outwardState is everything shadow mode must leave alone, as text to compare: the issue's
+// comments and labels, every pull request and branch in the repository, and ynf's items and stats.
+func outwardState(repo string, issue int, ynf, cfg string) (map[string]string, error) {
+	state := map[string]string{}
+	for name, cmd := range map[string][]string{
+		"the issue's comments and labels": {"gh", "issue", "view", fmt.Sprint(issue), "-R", repo, "--json", "comments,labels"},
+		"the pull requests":               {"gh", "pr", "list", "-R", repo, "--state", "all", "--limit", "200", "--json", "number,state,headRefName,comments,labels"},
+		"the branches":                    {"gh", "api", "repos/" + repo + "/branches", "--paginate", "-q", ".[].name"},
+		"ynf's items":                     {ynf, "--config", cfg, "--format", "json", "items", "ls"},
+		"ynf's stats":                     {ynf, "--config", cfg, "--format", "json", "stats"},
+	} {
+		out, err := sh("", cmd[0], cmd[1:]...)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		state[name] = out
+	}
+	return state, nil
+}
+
+// mergeHumanFix is what a person did: a pull request that formats internal/format and says it
+// closes the issue, merged once the sandbox's required checks pass. Merging closes the issue.
+func mergeHumanFix(repo string, issue int) error {
+	dir, err := os.MkdirTemp("", "ynf-e2e-human-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	auth := []string{"-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential"}
+	run := func(name string, args ...string) (string, error) { return sh(dir, name, args...) }
+	if out, err := sh("", "git", append(auth, "clone", "-q", "--depth", "1", "--branch", "main", "https://github.com/"+repo+".git", dir)...); err != nil {
+		return fmt.Errorf("clone: %w\n%s", err, out)
+	}
+	const branch = "human-fix-format"
+	for _, c := range [][]string{
+		{"git", "checkout", "-q", "-b", branch},
+		{"gofmt", "-w", "internal/format"},
+		{"git", "add", "-A"},
+		{"git", "-c", "user.name=a person", "-c", "user.email=person@example.com", "commit", "-q", "-m", "fix: gofmt internal/format"},
+	} {
+		if out, err := run(c[0], c[1:]...); err != nil {
+			return fmt.Errorf("%s: %w\n%s", strings.Join(c, " "), err, out)
+		}
+	}
+	if out, err := run("git", append(auth, "push", "-q", "origin", "HEAD:refs/heads/"+branch)...); err != nil {
+		return fmt.Errorf("push: %w\n%s", err, out)
+	}
+	if out, err := sh("", "gh", "pr", "create", "--repo", repo, "--base", "main", "--head", branch,
+		"--title", "fix: gofmt internal/format", "--body", fmt.Sprintf("Closes #%d", issue)); err != nil {
+		return fmt.Errorf("open the fix: %w\n%s", err, out)
+	}
+	// The required checks start a moment after the pull request opens.
+	for try := 0; ; try++ {
+		out, err := sh("", "gh", "pr", "checks", branch, "-R", repo, "--watch", "--interval", "10")
+		if err == nil {
+			break
+		}
+		if try >= 24 || !strings.Contains(err.Error()+out, "no checks reported") {
+			return fmt.Errorf("the human fix's checks: %w\n%s", err, out)
+		}
+		time.Sleep(5 * time.Second)
+	}
+	if out, err := sh("", "gh", "pr", "merge", branch, "-R", repo, "--squash", "--delete-branch"); err != nil {
+		return fmt.Errorf("merge the human fix: %w\n%s", err, out)
+	}
+	for range 30 {
+		out, err := sh("", "gh", "issue", "view", fmt.Sprint(issue), "-R", repo, "--json", "state", "-q", ".state")
+		if err == nil && strings.TrimSpace(out) == "CLOSED" {
+			return nil
+		}
+		time.Sleep(2 * time.Second)
+	}
+	return fmt.Errorf("merging the fix did not close #%d", issue)
 }

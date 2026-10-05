@@ -11,7 +11,10 @@
 #   make e2e        rebuild the sandbox, run ynf against it until everything settles, and check
 #                   each fixture's expect block (tests the factory; LANES=gofmt,deps,reclaim,detect by default; ynh is hidden from ynf
 #                   so the detect lane proves its fallback to the command: HIDE_YNH=false to unhide it)
-#   make e2e-only   the same, without the rebuild
+#   make e2e-only   the same, without the rebuild. Without a reset it leaves out shadow mode, whose
+#                   stage merges a human fix for fmt-format into the sandbox main and so cannot
+#                   run twice; SHADOW=true adds it. make e2e (and e2e-factory) reset first, so
+#                   they run it with the gofmt lane; SHADOW=false skips it there
 #   make e2e-memory-outage  e2e-only with ynm unreachable for the whole run, then brought back: the
 #                   memory writes must queue in ynf's store, show in `ynf doctor`, and arrive
 #                   after (ADR-008); it costs no more than e2e
@@ -84,11 +87,15 @@ calibrate: settings
 
 LANES ?= gofmt,deps,reclaim,detect
 HIDE_YNH ?= true
+SHADOW ?= false
+# make e2e and e2e-factory reset first, so they run shadow mode unless told not to.
+SHADOW_AFTER_RESET = $(if $(filter command line,$(origin SHADOW)),$(SHADOW),true)
 
-e2e: reset e2e-only
+e2e: reset
+	$(MAKE) e2e-only SHADOW=$(SHADOW_AFTER_RESET)
 
 e2e-only: settings
-	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(LANES) -hide-ynh=$(HIDE_YNH)
+	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(LANES) -hide-ynh=$(HIDE_YNH) -shadow=$(SHADOW)
 
 YNH_BASE ?= ghcr.io/eyelock/ynh:0.10.0
 YNH_SRC ?=
@@ -116,7 +123,7 @@ FACTORY_LANES   ?= gofmt,deps
 OUTAGE_LANES ?= outage
 
 e2e-memory-outage: reset settings
-	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(OUTAGE_LANES) -memory-outage
+	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(OUTAGE_LANES) -memory-outage -shadow=false
 
 e2e-factory: reset
 	@set -e; ctx=$$(mktemp -d); trap 'rm -rf "$$ctx"' EXIT; \
@@ -124,4 +131,4 @@ e2e-factory: reset
 	docker build -q --build-arg YNH_BASE=$(FACTORY_BASE) -t ynf-sandbox-agent:factory "$$ctx" >/dev/null; \
 	ynh image ynf-sandbox --from seed --base ynf-sandbox-agent:factory --entrypoint agent --tag $(FACTORY_HARNESS) >/dev/null; \
 	echo "built $(FACTORY_HARNESS) on $(FACTORY_BASE)"
-	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(FACTORY_LANES) -image $(FACTORY_HARNESS)
+	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(FACTORY_LANES) -shadow=$(SHADOW_AFTER_RESET) -image $(FACTORY_HARNESS)

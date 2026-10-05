@@ -59,6 +59,10 @@ Usage:
   ynf replay <owner/name#number | key> [--policy lanes.yaml]
   ynf pause|resume <lane> --reason <text> [--repo owner/name]
   ynf stats [--lane name]...
+  ynf shadow run <lane> [--repo owner/name]... [--since 90d] [--limit 20] [--ticket <ref>]...
+  ynf shadow ls
+  ynf shadow grade [<shadow run id>] [--attempt <id> --a <grade> --b <grade>] [--regrade]
+  ynf shadow report [<shadow run id> | --lane name]
   ynf forges                    the forges ynf works with, each checked
   ynf trackers                  the trackers ynf works with, each checked
   ynf ticket <ref>              read a ticket as start would, without starting it
@@ -75,6 +79,7 @@ Global flags (before the command):
 `
 
 type app struct {
+	stdin          io.Reader
 	stdout, stderr io.Writer
 	cfgPath        string
 	format         string
@@ -96,7 +101,12 @@ func (m *multi) Set(v string) error { *m = append(*m, v); return nil }
 
 // Run runs the command line and returns the exit code.
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	a := &app{stdout: stdout, stderr: stderr}
+	return RunIn(ctx, args, os.Stdin, stdout, stderr)
+}
+
+// RunIn is Run with the input a command may read, such as the grades a person types.
+func RunIn(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	a := &app{stdin: stdin, stdout: stdout, stderr: stderr}
 	fs := flag.NewFlagSet("ynf", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() { _, _ = fmt.Fprint(stderr, usage) }
@@ -137,6 +147,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = a.handle(ctx, rest)
 	case "pause", "resume":
 		err = a.pause(ctx, cmd, rest)
+	case "shadow":
+		err = a.shadowCmd(ctx, rest)
 	case "stats":
 		err = a.stats(ctx, rest)
 	case "forges":

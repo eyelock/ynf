@@ -158,6 +158,17 @@ type step struct {
 	run    *RunRecord
 	result runner.Result
 	text   forge.Text
+
+	// Shadow mode runs a lane as the factory would, minus everything outward (FR-26): quiet keeps
+	// the run out of the item's log, and the rest stand in for what a real step reads from the
+	// ticket and the lane.
+	quiet bool
+	// labels, when labelsSet, are the ticket's labels the run reads, instead of the tracker's.
+	labels    []string
+	labelsSet bool
+	// imageBuilt means the lane's run.image is one ynf built for this run's pin, not one the
+	// lane names, so the harness in it is whatever the folder carried.
+	imageBuilt bool
 }
 
 // schedule sets the item's timer: what its decision asked for, or, while a lease is held, no later
@@ -388,7 +399,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	var harness runner.Harness
 	harnessKnown := false
 	if y, ok := r.(runner.YnhRunner); ok {
-		h, known, err := s.harness(y, job.Image, inImage, lane.Run.Image == "", inline, wt)
+		h, known, err := s.harness(y, job.Image, inImage, lane.Run.Image == "" || s.imageBuilt, inline, wt)
 		if err != nil {
 			return fail(runner.OperatorError, err)
 		}
@@ -424,8 +435,8 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		return fail(runner.Error, err)
 	}
 	_, cr := ex.Paths(job)
-	labels := []string(nil)
-	if tr, err := e.tracker(it.Ticket); err == nil {
+	labels := s.labels
+	if tr, err := e.tracker(it.Ticket); err == nil && !s.labelsSet {
 		if t, _, err := tr.Get(s.ctx, it.Ticket.Key); err == nil {
 			labels = t.Labels
 		}
@@ -645,7 +656,11 @@ func (s *step) harness(y runner.YnhRunner, image string, inImage, built, inline 
 	if y.Cfg.Harness == "" {
 		return h, false, errors.New("a ynh lane on the host needs ynh.harness, the harness to run")
 	}
-	h, err = runner.ReadHarness(filepath.Join(wt, filepath.FromSlash(y.Cfg.Harness)))
+	dir := y.Cfg.Harness
+	if !filepath.IsAbs(dir) { // shadow mode pins a harness folder outside the checkout
+		dir = filepath.Join(wt, filepath.FromSlash(dir))
+	}
+	h, err = runner.ReadHarness(dir)
 	return h, err == nil, nil
 }
 
@@ -776,6 +791,9 @@ func (s *step) record(key, kind string, body any) error {
 }
 
 func (s *step) recordRun(key string, r RunRecord) {
+	if s.quiet {
+		return
+	}
 	if err := s.record(key, "run", r); err != nil {
 		s.e.log().Error("record run", "item", key, "err", err)
 	}

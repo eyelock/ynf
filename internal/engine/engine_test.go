@@ -157,6 +157,7 @@ type fakeForge struct {
 	lanes        string
 	nextPR       int
 	files        map[string][]byte // repo:path, overriding lanes
+	fixes        map[int]forge.Fix // issue -> the merged pull request that closed it (shadow mode)
 }
 
 func newForge() *fakeForge {
