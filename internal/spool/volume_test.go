@@ -286,6 +286,27 @@ func TestCloseTakesAwayAVolumeWhoseRunNeverEnded(t *testing.T) {
 	}
 }
 
+// TestAnExecutorThatCannotUseAVolumeKeepsAPlainFolder: with volume false nothing is mounted, and
+// the watcher bounds the folder, whatever the host would allow.
+func TestAnExecutorThatCannotUseAVolumeKeepsAPlainFolder(t *testing.T) {
+	s, _ := newSpool(t)
+	fv := &fakeVolumes{}
+	s.Volumes = fv
+	r, err := s.BeginWith(manifest("plain"), false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m, _ := fv.counts(); m != 0 {
+		t.Errorf("mounted %d volumes for an executor that cannot use one", m)
+	}
+	_ = os.WriteFile(filepath.Join(r.Dir, "flood.bin"), make([]byte, 5<<10), 0o644)
+	time.Sleep(100 * time.Millisecond)
+	r.End(filepath.Join(t.TempDir(), "spool"))
+	if _, err := os.Stat(filepath.Join(r.Dir, "flood.bin")); !os.IsNotExist(err) {
+		t.Errorf("the watcher did not trim: %v", err)
+	}
+}
+
 // TestAVolumeThatWillNotUnmountIsLoggedAndTheStepGoesOn: the folder stays, and nothing fails.
 func TestAVolumeThatWillNotUnmountIsLoggedAndTheStepGoesOn(t *testing.T) {
 	s, logs := newSpool(t)

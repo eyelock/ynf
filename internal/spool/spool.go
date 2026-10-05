@@ -218,6 +218,12 @@ type Run struct {
 // The caller runs on without a spool when it returns an error: a spool that cannot be written
 // never fails a step.
 func (s *Spool) Begin(m Manifest, imageUser bool) (*Run, error) {
+	return s.BeginWith(m, imageUser, true)
+}
+
+// BeginWith is Begin for a run whose executor may not be able to use a volume: with volume false
+// the folder is a plain one, bound by the quota watcher, whatever the host allows.
+func (s *Spool) BeginWith(m Manifest, imageUser, volume bool) (*Run, error) {
 	if !ValidName(m.Run) {
 		return nil, fmt.Errorf("spool: %q is not a run id ynr reads", m.Run)
 	}
@@ -235,7 +241,10 @@ func (s *Spool) Begin(m Manifest, imageUser bool) (*Run, error) {
 		return nil, fmt.Errorf("spool: %w", err)
 	}
 	r := &Run{ID: m.Run, Dir: dir, s: s, stop: make(chan struct{}), done: make(chan struct{})}
-	if r.vol = s.mount(dir); r.vol != nil {
+	if volume {
+		r.vol = s.mount(dir)
+	}
+	if r.vol != nil {
 		// The volume's own root is the folder now, so it takes the mode again.
 		if err := os.Chmod(dir, mode); err != nil {
 			_ = r.vol.release()

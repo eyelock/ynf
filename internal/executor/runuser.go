@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -23,6 +24,18 @@ type RunUser interface {
 	// owner of the run's spool folder. An error means it could not be found out.
 	RunUID(ctx context.Context, j Job) (uid uint32, other bool, err error)
 }
+
+// SpoolVolumes is implemented by an executor that may not be able to use a run's spool folder
+// when it is a volume of its own, in which case the folder stays a plain one.
+type SpoolVolumes interface {
+	SpoolVolume() bool
+}
+
+// SpoolVolume implements SpoolVolumes. Docker Desktop for Mac cannot bind-mount a host folder
+// that is a mount of its own: the daemon fails with "error while creating mount source path ...
+// file exists", so a run there keeps a plain folder and the quota watcher. A docker daemon on
+// Linux binds one like any folder.
+func (Docker) SpoolVolume() bool { return runtime.GOOS != "darwin" }
 
 // RunUID implements RunUser: a run that keeps its image's own user writes as the user the image
 // names, found in the image's configuration, and in the image's /etc/passwd when it names the user

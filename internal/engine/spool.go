@@ -23,7 +23,11 @@ func (s *step) beginSpool(job *executor.Job, ex executor.Executor, m spool.Manif
 		job.NoOTLP = true // ynr serve ships to the operator's endpoint; the run does not
 	}
 	m.UID = s.runUser(*job, ex, m.Run)
-	run, err := e.Spool.Begin(m, job.ImageUser)
+	volume := true
+	if v, ok := ex.(executor.SpoolVolumes); ok {
+		volume = v.SpoolVolume()
+	}
+	run, err := e.Spool.BeginWith(m, job.ImageUser, volume)
 	if err != nil {
 		e.log().Warn("this run has no spool folder: its telemetry is not collected, and the run goes on", "run", m.Run, "err", err)
 		return nil

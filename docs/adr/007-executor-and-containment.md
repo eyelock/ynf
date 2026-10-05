@@ -160,7 +160,7 @@ telemetry and nothing else: the step goes on, and ynf says so in its log. The bo
 
 Where the host lets ynf make one, each run's folder is a size-limited volume of its own, sized by
 the quota: a tmpfs on Linux when ynf has `CAP_SYS_ADMIN`, a sparse disk image on macOS, which needs
-no privilege. A write past the limit fails inside the run, with no space left, and ynf has nothing
+no privilege. An executor that cannot use one says so, and its runs keep a plain folder. A write past the limit fails inside the run, with no space left, and ynf has nothing
 to remove. ynr reads the folder as it would any other: it checks each file against its own
 folder's device, so a volume of its own is accepted, and it still refuses a file with more than one
 link. Under `docker` only that volume is mounted into the container. The volume goes at the run's
@@ -179,11 +179,11 @@ gets:
 
 | Executor and host | Per-run folder | A full spool |
 |---|---|---|
-| `docker` on Docker Desktop for Mac | a disk image of the quota's size, attached at the run's folder and shared into the container like any folder of the host: a hard quota | a run cannot outgrow its own volume |
+| `docker` on Docker Desktop for Mac | its own folder, plain: the quota watcher is the bound. A disk image attached at the run's folder is read by `ynr serve` on the host, but Docker Desktop's daemon cannot bind it into a container (`error while creating mount source path ... file exists`), so ynf does not make one | there is no tmpfs on the host, so a RAM disk or a volume of its own for the spool root does it |
 | `docker` on Linux, ynf with `CAP_SYS_ADMIN` (root, or a job with that capability) | a tmpfs of the quota's size at the run's folder: a hard quota | a run cannot outgrow its own volume |
 | `docker` on Linux, ynf unprivileged | its own folder is the only part of the spool the run can write; the quota watcher is the bound | bounded by the filesystem the spool is on: put the root on a tmpfs or a volume of its own and a run that outruns the watcher fills that, never ynf's state |
 | `inline` in a job container | the run user's folder only. The container has no `CAP_SYS_ADMIN`, so no volume: the quota watcher is the bound. A job that does grant it gets a tmpfs | the job's spool volume, such as an `emptyDir` with a size limit, or a tmpfs |
-| `process`, on a laptop | the run is not contained and can write wherever the user can. On macOS, and on Linux with `CAP_SYS_ADMIN`, its spool folder is a volume as above; elsewhere the quota watcher is the bound | the laptop's own disk, unless the root is on a filesystem of its own |
+| `process`, on a laptop | the run is not contained and can write wherever the user can. On macOS, and on Linux with `CAP_SYS_ADMIN`, its spool folder is a volume as above, a hard quota; elsewhere the quota watcher is the bound | the laptop's own disk, unless the root is on a filesystem of its own |
 | a hosted CI runner | as `docker` or `inline`, whichever the job uses; an unprivileged runner gets the quota watcher | `/dev/shm` or another tmpfs, tolerated filling: the job loses telemetry, not work |
 
 What each gives besides the quota is that ynf's state, its store and its work folder are never on

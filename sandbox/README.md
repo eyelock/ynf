@@ -152,9 +152,9 @@ checks that:
   uid in its manifest, and its record arrived as the `spool` lane's does; e2e builds the image
   (`images/probe`) from the local Docker;
 - the `spool-flood` lane's run, which writes 20 MiB into its folder against a 1 MiB quota, was held
-  to the quota and the step still proposed. e2e says which path held it: where the host gives a run
-  folder a volume of its own (a disk image on macOS, a tmpfs on Linux with `CAP_SYS_ADMIN`), the
-  write failed at the volume's limit; elsewhere ynf took the excess away and said so;
+  to the quota and the step still proposed. e2e says which path held it: where the run's folder is a
+  volume of its own (a tmpfs on a Linux host where ynf has `CAP_SYS_ADMIN`), the write failed at the
+  volume's limit; elsewhere, such as Docker Desktop for Mac, ynf took the excess away and said so;
 - nothing was left unshipped in the spool, or what was is in the run capture.
 
 `YNF_YNR_BIN=/path/to/ynr` names a ynr, `YNR_SRC=/path/to/ynr` builds one from a checkout (it only

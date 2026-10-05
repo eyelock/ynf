@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -115,6 +116,15 @@ func TestADockerRunsUserThatCannotBeFoundOutIsAnError(t *testing.T) {
 	_ = os.WriteFile(failing, []byte("#!/bin/sh\necho no such image >&2\nexit 1\n"), 0o755)
 	if _, _, err := (executor.Docker{Bin: failing}).RunUID(context.Background(), executor.Job{Image: "agent", ImageUser: true}); err == nil {
 		t.Error("an image that is not there")
+	}
+}
+
+// TestDockerDesktopForMacKeepsAPlainSpoolFolder: its daemon cannot bind a folder that is a mount
+// of its own, so docker asks for no volume there and gets one on Linux.
+func TestDockerDesktopForMacKeepsAPlainSpoolFolder(t *testing.T) {
+	var v executor.SpoolVolumes = executor.Docker{}
+	if got, want := v.SpoolVolume(), runtime.GOOS != "darwin"; got != want {
+		t.Errorf("SpoolVolume on %s = %v, want %v", runtime.GOOS, got, want)
 	}
 }
 
