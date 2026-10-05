@@ -1894,11 +1894,12 @@ func TestATicketFromATrackerThatIsNotAForge(t *testing.T) {
 // inside the image that will run it, never the repository's copy (ADR-006, ADR-012).
 func TestALaneIsHeldToItsImagesHarness(t *testing.T) {
 	for _, c := range []struct{ manifest, want string }{
-		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"p"}},"agent":{"max_turns":12},"sensors":{"lint":{}}}`, "max_turns 20 loosens the harness's 12"},
+		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"p"}},"agent":{"max_turns":12},"sensors":{"lint":{"source":{"command":"golangci-lint run ./..."}}}}`, "max_turns 20 loosens the harness's 12"},
 		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"p"}},"agent":{"max_turns":30},"sensors":{"test":{}}}`, `sensor_scope names "lint"`},
-		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"other":{"prompt":"p"}},"agent":{"max_turns":30},"sensors":{"lint":{}}}`, `has no focus "tidy"`},
-		{`{"env_passthrough":[],"focuses":{"tidy":{"prompt":"p"}},"sensors":{"lint":{}}}`, "does not pass ANTHROPIC_API_KEY"},
-		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"p"}},"agent":{"max_turns":30},"sensors":{"lint":{}}}`, ""},
+		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"p"}},"agent":{"max_turns":30},"sensors":{"lint":{"source":{"command":"golangci-lint run --enable-all ./..."}}}}`, `sensor_scope.lint: "golangci-lint run ./x/..." is not "golangci-lint run --enable-all ./..." narrowed: `},
+		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"other":{"prompt":"p"}},"agent":{"max_turns":30},"sensors":{"lint":{"source":{"command":"golangci-lint run ./..."}}}}`, `has no focus "tidy"`},
+		{`{"env_passthrough":[],"focuses":{"tidy":{"prompt":"p"}},"sensors":{"lint":{"source":{"command":"golangci-lint run ./..."}}}}`, "does not pass ANTHROPIC_API_KEY"},
+		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"p"}},"agent":{"max_turns":30},"sensors":{"lint":{"source":{"command":"golangci-lint run ./..."}}}}`, ""},
 	} {
 		h := newHarness(t)
 		h.e.Interactive = false

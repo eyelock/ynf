@@ -60,7 +60,7 @@ ynh info <harness id> --format json   its manifest: focuses (prompt, profile), e
 ```
 
 ynf resolves a lane's focus to its prompt and profile, checks the harness passes the variables the
-lane gives it, and checks the lane only tightens budgets and scopes declared sensors (ADR-006), all
+lane gives it, and checks the lane only tightens budgets and narrows declared sensors (ADR-006), all
 against that answer and never against the repository's working copy, which may differ from what
 the image carries or not contain the harness at all. ynf asks the image's ynh rather than the
 host's, because the image's runs the agent.
@@ -94,8 +94,10 @@ run:
 | tracker and forge `github` for github.com | always available; any other instance, GitHub Enterprise Server or an `mcp` tracker, is configured, never detected |
 
 Precedence is explicit config, then detection, then the built-in fallback (`command` for the
-runner, `none` for memory). A lane that names a provider explicitly and cannot get it fails to
-load. A lane that relies on detection runs with whatever was detected. Every step records the
+runner, `none` for memory). A lane that names a provider explicitly and cannot get it is refused
+before anything runs, and never falls back. A lane that relies on detection runs with whatever was
+detected: with no runner named, a lane with a `ynh` block runs as ynh when ynh is detected and
+otherwise as its `command` block, and a lane with neither is refused. Every step records the
 providers it used and their versions, so a run on one machine is explainable on another, and
 `ynf doctor` prints which providers are installed and their versions.
 

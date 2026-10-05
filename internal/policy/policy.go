@@ -104,6 +104,15 @@ type Run struct {
 	Command  *Command `yaml:"command" json:"command,omitempty"`
 }
 
+// ImageFor is the image a run of the named runner uses: the command's own image when the command
+// runner runs and names one, else run.image.
+func (r Run) ImageFor(runner string) string {
+	if runner == "command" && r.Command != nil && r.Command.Image != "" {
+		return r.Command.Image
+	}
+	return r.Image
+}
+
 // Egress is what a run may reach (ADR-007).
 type Egress struct {
 	Allow []string `yaml:"allow" json:"allow"`
@@ -140,8 +149,11 @@ type Budgets struct {
 
 // Command is the command runner's settings.
 type Command struct {
-	Argv       []string `yaml:"argv" json:"argv"`
-	ResultFile string   `yaml:"result_file" json:"result_file,omitempty"`
+	Argv []string `yaml:"argv" json:"argv"`
+	// Image is the image the command runs in on a container executor. When the lane resolves to
+	// the command runner it wins over run.image; when it resolves to ynh it is ignored.
+	Image      string `yaml:"image" json:"image,omitempty"`
+	ResultFile string `yaml:"result_file" json:"result_file,omitempty"`
 }
 
 // PR is how changes are proposed.
@@ -301,6 +313,12 @@ func Expand(tmpl string, labels []string) (string, error) {
 		return v
 	})
 	return out, bad
+}
+
+// ExpandShape fills every {label.<prefix>} placeholder with a safe dummy path segment, to check
+// the shape of a template before any item's labels are known.
+func ExpandShape(tmpl string) string {
+	return placeholder.ReplaceAllString(tmpl, "x")
 }
 
 // LabelValue returns the value of the first '<prefix>:<value>' label.

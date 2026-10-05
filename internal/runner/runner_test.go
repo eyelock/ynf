@@ -194,7 +194,7 @@ func TestReadHarnessPassthrough(t *testing.T) {
 // TestALaneOnlyTightensItsHarness: budgets may only tighten the harness's own, and a sensor scope
 // may only name a sensor the harness declares (ADR-006).
 func TestALaneOnlyTightensItsHarness(t *testing.T) {
-	h, err := runner.ParseManifest([]byte(`{"agent":{"max_turns":12,"max_tokens":1000,"max_wall":"30m"},"sensors":{"lint":{},"test":{}}}`))
+	h, err := runner.ParseManifest([]byte(`{"agent":{"max_turns":12,"max_tokens":1000,"max_wall":"30m"},"sensors":{"lint":{"source":{"command":"x"}},"test":{"source":{"command":"go test ./..."}}}}`))
 	if err != nil {
 		t.Fatal(err)
 	}

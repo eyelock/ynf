@@ -139,9 +139,33 @@
                 }
               }
             },
+            "detail": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Text the last run's detail must contain, such as the reason a run was refused before it started."
+            },
             "start": {
               "type": "boolean",
               "description": "make e2e starts this fixture with ynf start --lane <lane> instead of letting a search find it."
+            },
+            "runner": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name"
+              ],
+              "description": "The runner the item's last run record names, and whether it was detected because the lane named none. make e2e hides ynh from ynf, so a lane with no runner falls back to its command.",
+              "properties": {
+                "name": {
+                  "enum": [
+                    "ynh",
+                    "command"
+                  ]
+                },
+                "detected": {
+                  "type": "boolean"
+                }
+              }
             },
             "crash": {
               "type": "boolean",
@@ -192,7 +216,7 @@
       }
     },
     "calibrate": {
-      "description": "What `make calibrate` checks: the fixture, not the factory. One of three forms: sensors (the lane's scoped sensors before and after a known fix), command (a command-runner lane's diff is non-empty and identical across runs), or disabled (the lane is switched off).",
+      "description": "What `make calibrate` checks: the fixture, not the factory. One of four forms: sensors (the lane's scoped sensors before and after a known fix), command (a command-runner lane's diff is non-empty and identical across runs), disabled (the lane is switched off), or refused (the lane's scope is not one ynf allows, so it never runs).",
       "oneOf": [
         {
           "type": "object",
@@ -297,6 +321,18 @@
           ],
           "properties": {
             "disabled": {
+              "const": true
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "refused"
+          ],
+          "properties": {
+            "refused": {
               "const": true
             }
           }

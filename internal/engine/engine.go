@@ -88,6 +88,10 @@ type Engine struct {
 	// ImageCapabilities reports the capabilities version of the ynh inside an agent image; nil
 	// skips the check.
 	ImageCapabilities func(ctx context.Context, image string) (string, error)
+	// DetectYnh reports whether the host's ynh is there and supported, for a lane that names no
+	// runner (ADR-012); the CLI passes runner.DetectedYnh, which asks once per process. Nil means
+	// ynh is not detected, and a lane that names ynh is not checked against it.
+	DetectYnh func(ctx context.Context) runner.Detection
 	// Getenv reads the variables a lane passes into its runs (run.env). Default os.Getenv.
 	Getenv func(string) string
 
@@ -114,6 +118,14 @@ type Engine struct {
 	trackerHosts map[string]string
 	// forgeNames maps a declared forge's name to its host, for listing.
 	forgeNames map[string]string
+}
+
+// HostYnh is what detecting ynh on the host found: nothing when no detection is wired.
+func (e *Engine) HostYnh(ctx context.Context) runner.Detection {
+	if e.DetectYnh == nil {
+		return runner.Detection{Detail: "ynh detection is not wired"}
+	}
+	return e.DetectYnh(ctx)
 }
 
 // RepoPolicy is a repository's lane policy, read from its default branch.
