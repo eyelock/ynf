@@ -74,7 +74,9 @@ func Environ(ctx context.Context, environ []string) []string {
 }
 
 // Transport is an http.RoundTripper that sends the W3C trace-context headers of the request's
-// context, for every HTTP call ynf makes to another system.
+// context. It is for calls to the eyelock tools (ynh, ynm, ynf, ynr), as ynr ADR-006 rule 4 has
+// it: trace context goes only to the processes ynf spawns and to those tools, never to third
+// parties such as forges, trackers or model APIs. Today ynf uses it for its calls to ynm.
 func Transport(next http.RoundTripper) http.RoundTripper {
 	if next == nil {
 		next = http.DefaultTransport

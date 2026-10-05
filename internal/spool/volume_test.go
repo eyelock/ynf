@@ -20,6 +20,8 @@ type fakeVolumes struct {
 	mounted   []string
 	unmounted []string
 	failUn    error
+	attachErr error
+	detached  []string
 	size      int64
 	entries   int
 }

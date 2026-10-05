@@ -168,8 +168,29 @@ end, whether the step succeeded or failed, was interrupted or panicked, and only
 are shipped or captured: with `ynr serve` running, ynf waits up to ten seconds for it to ship and
 delete the run's closed files; whatever is left, which includes a file still open, is copied into
 the run's capture (ADR-010); then the volume is unmounted and its folder removed. The job's end
-unmounts any volume whose run never reached its end. A ynf killed outright cannot do that, and
-leaves its volumes mounted for the operator to detach.
+unmounts any volume whose run never reached its end. A ynf killed outright cannot do that, so the
+next factory job (`sweep`, `serve`, `handle` or `shadow run`) does it for the dead one at its
+start, before it makes volumes of its own: it copies what is left in each such volume into the run
+capture, within the capture limits, unmounts it, and removes the folder. It logs what it cleaned
+once per job, and a volume it cannot clean is logged and left for the next job; none of it fails
+the job.
+
+Telling a dead ynf's volume from a live run's is the part that must not go wrong, since a live
+run's volume taken away costs the run its files. When ynf makes a run's volume it writes a lease,
+`manifests/<run id>.owner`, beside the manifest in the folder a run cannot reach: the host's name,
+ynf's PID and that process's start time. A volume is stale only when its lease is for this host
+and no process has that PID with that start time. The PID alone would not do, since the system
+reuses PIDs and a dead ynf's may belong to another process by the next job; with the start time, a
+reused PID reads as dead. Another ynf running on the same host and sharing the spool root has a
+lease that reads as alive, so its volumes are left, as are this process's own, and a host that
+cannot say whether a process is running counts it as running. A lease from another host is left,
+since a mount is the host's. A run folder with no lease, such as one made by a ynf that wrote none,
+is left too: ynf cleans up only what it can show it made.
+
+Only ynf's own volumes are found. On Linux that is a tmpfs of source `ynf-run` mounted at the
+run's folder under `runs/`, as the kernel's mount table lists it. On macOS it is the disk image
+ynf made for the run, found by the image path the lease records, in a folder of ynf's own naming;
+the other disk images attached to the machine are never matched, and never detached.
 
 Where a volume cannot be made, ynf holds the folder to the quota by measuring it every quarter of a
 second while the run lasts and removing the largest files, never following a link, until it is back

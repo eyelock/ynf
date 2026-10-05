@@ -86,6 +86,9 @@ type Spool struct {
 	// Drain is how long a run's end waits for ynr serve to ship the run's files before its volume
 	// is taken away; default DefaultDrain.
 	Drain time.Duration
+	// Alive reports whether the ynf process that holds a run volume's lease is running, for the
+	// volumes a killed ynf left (CleanStale). Nil checks the process table.
+	Alive func(pid int, start string) bool
 
 	volumeNote sync.Once
 
@@ -260,6 +263,10 @@ func (s *Spool) BeginWith(m Manifest, imageUser, volume bool) (*Run, error) {
 		return nil, err
 	}
 	if r.vol != nil {
+		// A volume without a lease is never cleaned up after: failing to write one costs only that.
+		if err := s.writeOwner(m.Run, s.Volumes.Backing(dir)); err != nil {
+			s.Log.Warn("a run's spool volume has no lease: a later job cannot clean it up if ynf is killed", "run", m.Run, "err", err)
+		}
 		s.mu.Lock()
 		s.active[m.Run] = r
 		s.mu.Unlock()

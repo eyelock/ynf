@@ -103,6 +103,7 @@ type app struct {
 	spool     *spool.Spool
 	spoolErr  error
 	serve     *spool.Serve
+	capture   string // the job's capture folder for spool files, once named
 }
 
 type multi []string

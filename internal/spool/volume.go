@@ -25,6 +25,15 @@ type Volumes interface {
 	// work whether or not anything is left in it. It returns an error wrapping ErrNoVolume when
 	// the host does not allow a volume.
 	Mount(dir string, size int64, entries int) (unmount func() error, err error)
+	// Backing is what, besides the mount point, identifies the volume Mount made at dir, for a
+	// later ynf to find it by: the disk image's path on macOS, empty where the mount point is all
+	// there is.
+	Backing(dir string) string
+	// Attached finds the volume that ynf made at dir (with that backing) and returns how to take
+	// it away, which removes whatever Backing names too. It returns nil when there is none. It is
+	// for a volume whose ynf was killed, and it must match only what ynf itself made: never a
+	// mount or an image that merely is attached to the host.
+	Attached(dir, backing string) (detach func() error, err error)
 }
 
 // DefaultDrain is how long a run's end waits for ynr serve to ship the run's closed files before
@@ -121,6 +130,7 @@ func (r *Run) unmountVolume() {
 		r.s.Log.Warn("a run's spool volume could not be unmounted", "run", r.ID, "dir", r.Dir, "err", err)
 		return
 	}
+	_ = os.Remove(r.s.ownerPath(r.ID)) // the lease goes with the volume
 	_ = os.Remove(r.Dir)
 }
 
