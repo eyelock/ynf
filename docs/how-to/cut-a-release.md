@@ -25,9 +25,8 @@ changes land on `develop` through feature pull requests, and a release branch ca
    ```
 
 4. **Open a pull request from `release/vX.Y.Z` into `main`,** with the release notes as its
-   description, and merge it with a true merge (not squash) once CI is green. Then open a second
-   pull request from the release branch into `develop`, so `develop` has the pins too (the
-   back-merge), and delete the release branch after both are in.
+   description, and merge it with **Create a merge commit** (not squash) once CI is green. GitHub
+   deletes the release branch when it merges.
 
 5. **Tag `vX.Y.Z` on `main` and push the tag.**
 
@@ -46,14 +45,30 @@ changes land on `develop` through feature pull requests, and a release branch ca
    - **factory image:** builds `ghcr.io/eyelock/ynf-factory:X.Y.Z` and `:latest` for amd64 and
      arm64 from the pinned ynh and ynm releases, reading ynm's release with `RELEASE_TOKEN`.
 
+6. **Check what it published:** the GitHub release's assets; the signature, with
+   `cosign verify-blob --bundle checksums.txt.sigstore.json --certificate-identity-regexp
+   'https://github.com/eyelock/ynf/' --certificate-oidc-issuer
+   https://token.actions.githubusercontent.com checksums.txt`; the formula in
+   `eyelock/homebrew-tap`; and the factory image for both architectures. GoReleaser writes a
+   commit list as the release's description: replace it with the release notes,
+   `gh release edit vX.Y.Z --notes-file <notes>`.
+
+7. **Back-merge into `develop` once the release works,** with a pull request from `main` into
+   `develop`, merged with **Create a merge commit**. Waiting means a hotfix the release needed
+   reaches `develop` in the same back-merge.
+
+If the release workflow fails before publishing anything, fix it with a hotfix, then move the
+tag to the hotfix's merge commit and push it again: no release, formula or image exists for it
+yet, so nothing has used it.
+
 The version is the tag: `ynf version` prints it, and a build from anything but a clean tag says
 `dev-<branch>-<commit>`.
 
 ## A hotfix
 
 Branch `hotfix/<what>` from the release tag, fix, and open a pull request into `main`. Merge it
-with a true merge, tag the next patch version on `main`, and back-merge the hotfix branch into
-`develop`.
+with **Create a merge commit**, tag the next patch version on `main`, and back-merge `main` into
+`develop` once that release works.
 
 ## The docs site
 
