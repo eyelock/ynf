@@ -473,7 +473,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 // vendor's API host allowed through the egress proxy (ADR-007, ADR-012).
 func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, ynhHost runner.Detection, wt, runDir string) (executor.Job, bool, error) {
 	e := s.e
-	job := executor.Job{Worktree: wt, RunDir: runDir, Image: lane.Run.Image, Timeout: e.RunTimeout, Env: map[string]string{}, Secrets: map[string]string{}}
+	job := executor.Job{Worktree: wt, RunDir: runDir, Image: lane.Run.ImageFor(r.Name()), Timeout: e.RunTimeout, Env: map[string]string{}, Secrets: map[string]string{}}
 	if lane.Run.Egress != nil {
 		job.Egress = append([]string(nil), lane.Run.Egress.Allow...)
 	}

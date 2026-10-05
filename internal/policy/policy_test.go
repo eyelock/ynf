@@ -352,3 +352,17 @@ func TestYnhEffortLevels(t *testing.T) {
 		}
 	}
 }
+
+func TestACommandsImageWinsOnlyForTheCommandRunner(t *testing.T) {
+	r := policy.Run{Image: "agent:1", Command: &policy.Command{Argv: []string{"x"}, Image: "golang:1"}}
+	if r.ImageFor("command") != "golang:1" || r.ImageFor("ynh") != "agent:1" {
+		t.Fatalf("%q %q", r.ImageFor("command"), r.ImageFor("ynh"))
+	}
+	r.Command.Image = ""
+	if r.ImageFor("command") != "agent:1" {
+		t.Fatal("run.image is the default")
+	}
+	if (policy.Run{Image: "a"}).ImageFor("command") != "a" {
+		t.Fatal("no command block")
+	}
+}

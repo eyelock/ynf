@@ -156,7 +156,8 @@ func (e *Engine) LaneRuns(ctx context.Context, repo string) ([]LaneRun, error) {
 			continue
 		}
 		lr.Executor = ex.Name()
-		if l.Run.Ynh == nil {
+		lr.Image = l.Run.ImageFor(lr.Runner)
+		if l.Run.Ynh == nil || lr.Runner == "command" {
 			lr.Where = "a command, not a harness"
 			out = append(out, lr)
 			continue

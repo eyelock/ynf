@@ -80,6 +80,10 @@ never falls back: where ynh runs on the host and is missing, the run is refused.
 says `runner_detected` and the ynh version, and `ynf harness` and `ynf lanes show` say what an
 unnamed runner resolves to here.
 
+A lane with both blocks can name each one's image: `run.command.image` is used when it resolves to the
+command runner and wins over `run.image`; when it resolves to ynh it is ignored, and ynh uses
+`run.image` or the image it builds from `ynh.base`.
+
 ## Where the file is found
 
 The first of these that has `config.yaml`; any later one is shadowed and `ynf doctor` says so:

@@ -102,24 +102,28 @@ lanes:
       on_review:   { add: [ynf:in-review], remove: [ynf:proposed] }
       on_escalate: { add: [ynf:needs-human], remove: [ynf:working, ynf:proposed] }
 
-  # gofmt again, with no runner named (ADR-012): ynh runs it when ynh is detected on the host,
-  # else the command does. `make e2e` hides ynh from ynf (YNF_YNH_BIN names nothing), so this
-  # proves the fallback with no model; a host where ynh is detected would run the harness in the
-  # command's image, so keep ynh hidden when running it (make e2e does).
+  # gofmt again, with no runner named (ADR-012): the harness runs it as ynh when ynh is detected
+  # on the host, else the command does, each in its own image. `make e2e` hides ynh, so it runs
+  # the command at no cost.
   detect:
     kind: originate
     intake:
       - github.search: 'repo:eyelock/ynf-sandbox is:issue is:open label:"ynf:detect"'
         every: 5m
     run:
-      image: golang:1.26-alpine
+      env: [ANTHROPIC_API_KEY]
       ynh:
         harness: .
+        base: ynf-sandbox-agent:latest
         focus: tidy
+        auto_approve: edits
+        sensor_scope:
+          lint: 'GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run ./{label.pkg}/...'
+          test: 'go test -count=1 ./{label.pkg}/...'
+          docs: 'sh scripts/check-docs.sh {label.pkg}'
       command:
+        image: golang:1.26-alpine
         argv: ['gofmt', '-w', './{label.pkg}']
-      egress:
-        allow: []
     when:
       converged: open_pr
       ci_failed: escalate

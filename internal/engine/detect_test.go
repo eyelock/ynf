@@ -124,3 +124,29 @@ func TestLaneRunsSayWhatAnUnnamedRunnerResolvesTo(t *testing.T) {
 		}
 	}
 }
+
+func TestLaneRunsShowTheImageOfTheRunnerChosen(t *testing.T) {
+	h := newHarness(t)
+	h.f.lanes = lanesYAML + `  imaged:
+    kind: originate
+    intake: [{github.search: "label:ynf:imaged", every: 5m}]
+    run:
+      image: ghcr.io/o/agent@sha256:abc
+      ynh: {harness: "."}
+      command: {image: golang:1, argv: [gofmt]}
+    when: {converged: open_pr}
+`
+	h.e.ImageHarness = imageCarries(t, testManifest)
+	for found, want := range map[bool]string{false: "golang:1", true: "ghcr.io/o/agent@sha256:abc"} {
+		h.e.DetectYnh = func(context.Context) runner.Detection { return runner.Detection{Found: found, Version: "1"} }
+		runs, err := h.e.LaneRuns(context.Background(), "o/r")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range runs {
+			if r.Lane == "imaged" && r.Image != want {
+				t.Errorf("ynh found %v: image %q, want %q", found, r.Image, want)
+			}
+		}
+	}
+}

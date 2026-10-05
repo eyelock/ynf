@@ -311,7 +311,7 @@
         "image": {
           "type": "string",
           "minLength": 1,
-          "description": "The container image a docker, ecs or k8s-job executor runs the command runner in, pinned by tag or digest. The ynh runner builds its own with `ynh image`."
+          "description": "The container image a docker, ecs or k8s-job executor runs the runner in, pinned by tag or digest. The ynh runner builds its own with `ynh image` when this is omitted. For the command runner, command.image wins when set."
         },
         "egress": {
           "$ref": "#/$defs/egress"
@@ -415,6 +415,11 @@
                 "$ref": "#/$defs/template"
               },
               "description": "Run without a shell. Exit 0 is 'converged', anything else 'error', unless result_file says more."
+            },
+            "image": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The container image the command runner runs in on a docker, ecs or k8s-job executor, pinned by tag or digest. When the lane resolves to the command runner it wins over run.image; when it resolves to ynh it is ignored, so a lane with both blocks can name each one's image."
             },
             "result_file": {
               "type": "string",
