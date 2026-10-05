@@ -18,8 +18,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: read access to ynr
         env:
-          YNR_READ_PACKAGES: ${{ secrets.YNR_READ_PACKAGES }}
-        run: git config --global url."https://x-access-token:${YNR_READ_PACKAGES}@github.com/eyelock/ynr".insteadOf "https://github.com/eyelock/ynr"
+          YNR_READ_REPO: ${{ secrets.YNR_READ_REPO }}
+        run: git config --global url."https://x-access-token:${YNR_READ_REPO}@github.com/eyelock/ynr".insteadOf "https://github.com/eyelock/ynr"
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
