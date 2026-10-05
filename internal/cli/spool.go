@@ -69,12 +69,26 @@ func (a *app) startJob(log *slog.Logger) {
 	a.spool.Log = log
 	a.spool.Volumes = hostVolumes() // a hard quota per run where the host allows one
 	a.eng.Spool = a.spool
+	if a.job {
+		// A ynf that was killed leaves its run volumes mounted; a job takes them away before it
+		// makes its own, keeping what is in them.
+		a.spool.CleanStale(a.captureDir())
+	}
 	if !a.job || !a.tsettings.Collector.Enabled {
 		return
 	}
 	a.eng.SpoolCollector = true
 	a.serve = spool.StartServe(a.tsettings.Collector, spool.YnrBin(), a.tsettings.Root, os.Environ(), log)
 	a.spool.Shipping = a.serve.Running
+}
+
+// captureDir is where the job's spool files that no run has a capture for go (ADR-010), named once
+// so what the job's start keeps and what its end sweeps are in the same place.
+func (a *app) captureDir() string {
+	if a.capture == "" {
+		a.capture = filepath.Join(a.cfg.WorkPath(), "spool-capture", time.Now().UTC().Format("20060102T150405Z"))
+	}
+	return a.capture
 }
 
 // endJob is the end of a factory job, after ynf's own telemetry is flushed and closed: ynr serve is
@@ -84,7 +98,7 @@ func (a *app) endJob() {
 	if a.spool == nil || a.eng == nil {
 		return
 	}
-	dir := filepath.Join(a.cfg.WorkPath(), "spool-capture", time.Now().UTC().Format("20060102T150405Z"))
+	dir := a.captureDir()
 	if !a.job || !a.tsettings.Collector.Enabled {
 		a.spool.Close(dir) // no run volume outlives the command
 		return
