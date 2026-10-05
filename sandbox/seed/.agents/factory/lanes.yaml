@@ -13,8 +13,8 @@
 # sensors check its work between turns. The base needs a ynh with capabilities 0.9.0.
 # A scope may only narrow a sensor the harness declares (ADR-006): its command is the harness's,
 # with a path word replaced by one beneath it, so no flag, environment setting or cache location
-# can ride along. golangci-lint's cache is the agent image's to provide (GOLANGCI_LINT_CACHE in
-# sandbox/images/agent/Dockerfile), and what a lint run blocks on is ynh's baseline ratchet's.
+# can ride along. ynf sets golangci-lint's cache per run (GOLANGCI_LINT_CACHE, in the run folder),
+# and what a lint run blocks on is ynh's baseline ratchet's.
 version: 1
 
 defaults:

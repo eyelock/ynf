@@ -75,7 +75,7 @@ repository is disposable.
 | `seed/.agents/harness/plugin.json` | The sandbox's own ynh harness: `tidy`, `docs` and `fix-ci` focuses; `lint`, `test` and `docs` sensors |
 | `fixtures.yaml` | Every issue and pull request, its lane, and what ynf should do with it ([schema](fixtures.schema.json)) |
 | `fixtures/` | Issue and pull request bodies, the files committed on fixture branches (in `<id>/testdata/`, so Go tooling in this repository ignores their planted problems), and each fixture's known fix (`<id>.fix.patch`) |
-| `images/agent/` | The agent base image the ynh lanes build on: ynh's image plus Go and golangci-lint (`make agent-image`), and the lint cache it writes to |
+| `images/agent/` | The agent base image the ynh lanes build on: ynh's image plus Go and golangci-lint (`make agent-image`) |
 | `calibrate/` | `make calibrate`: a small Go program that proves each fixture still fails before its known fix and passes after |
 | `sandbox.env.example` | Your settings: the owner, the names, and where Terraform keeps its state |
 | `terraform/` | The repository, labels, issues, fixture pull request and branch protection |
@@ -112,7 +112,7 @@ that package, so a run is judged on the debt it was asked to pay down rather tha
 | `fmt-format` | gofmt | a deterministic diff from the command runner |
 | `deps-bump` | deps | ignored |
 | `fix-ci-retry` | fix-ci | an adopted pull request gets a commit, never a force-push |
-| `relaxed-scope` | relaxed | a scope that replaces lint with `true` is refused before any run, with no model spend |
+| `relaxed-scope` | relaxed | a scope that replaces lint with `true` is refused before any run, with no model spend; it is a ynh lane, so `make e2e` runs it only with `LANES=relaxed,...` and the agent image and ynh available |
 
 The CI gate (`.golangci.ci.yml`) is deliberately stricter than the harness's lint sensor: it also
 rejects errors discarded with `_ =`, and it only checks new code. That gap is what produces the
