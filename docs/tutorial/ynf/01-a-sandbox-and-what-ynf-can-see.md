@@ -136,7 +136,7 @@ ok    config                   /Users/you/ynf-tutorial/config.yaml
 ok    store                    sqlite://state.db
 ok    factory                  <you>/ynf-sandbox-factory at 998570c (.agents/factory)
 ok    repos                    <you>/ynf-sandbox
-ok    lanes <you>/ynf-sandbox .agents/factory on main at 43e2224: deps, doc-drift, fix-ci, gofmt, lint-paydown, reclaim
+ok    lanes <you>/ynf-sandbox .agents/factory on main at 43e2224: deps, doc-drift, fix-ci, gofmt, lint-paydown, reclaim, relaxed
 ok    forge default            github.com: reached <you>/ynf-sandbox
 ok    tracker tracker          tracker.ynf-sandbox.invalid: its server has the tools it is configured to call
 ok    git                      git version 2.54.0
@@ -153,7 +153,7 @@ ok    docker                   27.4.0
   records the commit its configuration was read at.
 - **The repositories it enrols:** one, your sandbox.
 - **That repository's lanes,** read from its default branch at a commit (`43e2224`). Lanes are the
-  rules for what ynf does with a ticket. There are six; lesson 2 is about them.
+  rules for what ynf does with a ticket. There are seven; lesson 2 is about them.
 - **The forge,** GitHub, reached with your token.
 - **The tracker,** by starting its MCP server and checking it has every tool the configuration
   names.
@@ -210,6 +210,8 @@ Expected:
         harness ., carried in the repository at ., read when a run checks it out
   ok    reclaim: originate lane, command on docker
         a command, not a harness
+  ok    relaxed: originate lane, ynh on docker
+        harness ., carried in the repository at ., read when a run checks it out
 ```
 
 Each lane runs work with a **runner**, on an **executor**. Two runners appear here:
@@ -218,12 +220,12 @@ Each lane runs work with a **runner**, on an **executor**. Two runners appear he
 - **`ynh`:** an agent, run by ynh with a harness of instructions and checks. That's the factory
   track.
 
-All six run on the `docker` executor: in a container, with a fresh copy of the repository, and no
+All seven run on the `docker` executor: in a container, with a fresh copy of the repository, and no
 network beyond what the lane allows.
 
 ## Keep the agents out of this track
 
-Three lanes run agents: `doc-drift`, `fix-ci` and `lint-paydown`. Pause them, so nothing in this
+Three lanes run agents: `doc-drift`, `fix-ci` and `lint-paydown`. A fourth, `relaxed`, is refused before it starts one (the sandbox README says why). Pause them, so nothing in this
 track starts one even if it finds their tickets. Pause `reclaim` too until lesson 6, which is about
 it:
 

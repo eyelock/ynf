@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/eyelock/ynf/internal/memory"
+	"github.com/eyelock/ynf/internal/store/sqlite"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -24,25 +25,40 @@ import (
 // own stores are never touched; the server is killed, with its process group, when the test ends.
 func hostedYnm(t *testing.T, token string) (endpoint, store string, env []string) {
 	t.Helper()
+	h := newHostedYnm(t, token)
+	h.start(t)
+	return h.endpoint, h.store, h.env
+}
+
+// restartableYnm is a hosted ynm that can be taken down and brought back on the same port and store.
+type restartableYnm struct {
+	endpoint, store string
+	env             []string
+	start           func(t *testing.T)
+	stop            func()
+}
+
+func newHostedYnm(t *testing.T, token string) *restartableYnm {
+	t.Helper()
 	bin, err := exec.LookPath("ynm")
 	if err != nil {
 		t.Skip("ynm is not on PATH")
 	}
 	dir := t.TempDir()
-	store = filepath.Join(dir, "store")
-	env = append(os.Environ(), "YNM_HOME="+filepath.Join(dir, "home"), "YNM_USER=ynf-test", "YNM_NO_CLAUDE_CLI=1")
+	h := &restartableYnm{store: filepath.Join(dir, "store")}
+	h.env = append(os.Environ(), "YNM_HOME="+filepath.Join(dir, "home"), "YNM_USER=ynf-test", "YNM_NO_CLAUDE_CLI=1")
 	run := func(args ...string) {
 		t.Helper()
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		c := exec.CommandContext(ctx, bin, args...)
-		c.Env = env
+		c.Env = h.env
 		if out, err := c.CombinedOutput(); err != nil {
 			t.Fatalf("ynm %s: %v\n%s", strings.Join(args, " "), err, out)
 		}
 	}
-	run("init", "--bare", store)
-	run("init", "--cwd", store)
+	run("init", "--bare", h.store)
+	run("init", "--cwd", h.store)
 
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -50,48 +66,54 @@ func hostedYnm(t *testing.T, token string) (endpoint, store string, env []string
 	}
 	port := l.Addr().(*net.TCPAddr).Port
 	_ = l.Close()
+	h.endpoint = fmt.Sprintf("http://localhost:%d/mcp", port)
 
 	logf, err := os.Create(filepath.Join(dir, "serve.log"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := exec.Command(bin, "serve", "--http", "--port", fmt.Sprint(port), "--token", token, "--no-personal", "--cwd", store)
-	srv.Env = env
-	srv.Stdout, srv.Stderr = logf, logf
-	srv.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := srv.Start(); err != nil {
-		t.Fatal(err)
-	}
-	exited := make(chan struct{})
-	go func() { _ = srv.Wait(); close(exited) }()
-	t.Cleanup(func() {
-		_ = syscall.Kill(-srv.Process.Pid, syscall.SIGKILL)
-		<-exited
-		_ = logf.Close()
-	})
+	t.Cleanup(func() { h.stop(); _ = logf.Close() })
+	h.stop = func() {}
+	h.start = func(t *testing.T) {
+		t.Helper()
+		srv := exec.Command(bin, "serve", "--http", "--port", fmt.Sprint(port), "--token", token, "--no-personal", "--cwd", h.store)
+		srv.Env = h.env
+		srv.Stdout, srv.Stderr = logf, logf
+		srv.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		if err := srv.Start(); err != nil {
+			t.Fatal(err)
+		}
+		exited := make(chan struct{})
+		go func() { _ = srv.Wait(); close(exited) }()
+		h.stop = func() {
+			_ = syscall.Kill(-srv.Process.Pid, syscall.SIGKILL)
+			<-exited
+			h.stop = func() {}
+		}
 
-	// ynm listens on localhost, so the name is used, not an address.
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/health", port))
-		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				break
+		// ynm listens on localhost, so the name is used, not an address.
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			resp, err := http.Get(fmt.Sprintf("http://localhost:%d/health", port))
+			if err == nil {
+				_ = resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					return
+				}
+			}
+			select {
+			case <-exited:
+				b, _ := os.ReadFile(logf.Name())
+				t.Fatalf("ynm serve exited early:\n%s", b)
+			case <-time.After(200 * time.Millisecond):
+			}
+			if time.Now().After(deadline) {
+				b, _ := os.ReadFile(logf.Name())
+				t.Fatalf("ynm serve not healthy within 30s:\n%s", b)
 			}
 		}
-		select {
-		case <-exited:
-			b, _ := os.ReadFile(logf.Name())
-			t.Fatalf("ynm serve exited early:\n%s", b)
-		case <-time.After(200 * time.Millisecond):
-		}
-		if time.Now().After(deadline) {
-			b, _ := os.ReadFile(logf.Name())
-			t.Fatalf("ynm serve not healthy within 30s:\n%s", b)
-		}
 	}
-	return fmt.Sprintf("http://localhost:%d/mcp", port), store, env
+	return h
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -195,5 +217,58 @@ func TestYnmHTTPAgainstARealServer(t *testing.T) {
 	}
 	if got := recall(t, endpoint, "demo", r.Namespace); len(got) != 1 {
 		t.Errorf("a refused write stored something: %v", got)
+	}
+}
+
+// TestQueueDrainsToARealServerThatCameBack: writes made while a real `ynm serve --http` is down are
+// queued in ynf's store, nothing is lost and nothing fails; once the server is back they arrive in
+// ynm and the queue is empty. Skipped without ynm on PATH.
+func TestQueueDrainsToARealServerThatCameBack(t *testing.T) {
+	h := newHostedYnm(t, "demo")
+	h.start(t)
+	st, err := sqlite.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	y := &memory.YnmHTTP{Endpoint: h.endpoint, Token: "demo"}
+	defer y.Close()
+	var n int
+	q := &memory.Queue{Memory: y, Store: st, Owner: "test", Now: time.Now, NewID: func() string { n++; return fmt.Sprintf("%026d", n) }}
+	ctx := context.Background()
+	ns := "factory/github.com/o/r"
+	write := func(sig string) {
+		t.Helper()
+		err := q.Remember(ctx, memory.Record{Type: "episodic", Namespace: ns, Level: "distributed", Subject: sig,
+			Summary: sig + " on o/r", Content: sig + " failed", Tags: []string{"ynf", "failure", "occurrence"}, DataSchema: "ynf.failure.v1"})
+		if err != nil {
+			t.Fatalf("a write must not fail because ynm is down: %v", err)
+		}
+	}
+
+	write("sig/ci/one") // up: sent straight away
+	if got := recall(t, h.endpoint, "demo", ns); len(got) != 1 {
+		t.Fatalf("while up: %v", got)
+	}
+
+	h.stop()
+	write("sig/ci/two")
+	write("sig/ci/three")
+	if c, since, err := q.Pending(ctx); err != nil || c != 2 || since.IsZero() {
+		t.Fatalf("queued while down: %d %v %v", c, since, err)
+	}
+
+	h.start(t)
+	write("sig/ci/four") // behind the queue, which drains first
+	if c, _, _ := q.Pending(ctx); c != 0 {
+		t.Fatalf("%d still queued after ynm came back", c)
+	}
+	hits := recall(t, h.endpoint, "demo", ns)
+	got := map[string]int{}
+	for _, hit := range hits {
+		got[fmt.Sprint(hit["subject"])]++
+	}
+	if len(hits) != 4 || got["sig/ci/one"] != 1 || got["sig/ci/two"] != 1 || got["sig/ci/three"] != 1 || got["sig/ci/four"] != 1 {
+		t.Fatalf("ynm holds %v, want each of the four once", got)
 	}
 }

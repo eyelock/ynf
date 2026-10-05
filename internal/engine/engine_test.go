@@ -1049,6 +1049,41 @@ func TestMemoryIsWrittenNotRelayed(t *testing.T) {
 	}
 }
 
+// TestMemoryWritesQueueWhileYnmIsDownAndArriveAfter: a failure written while ynm is down is queued
+// in ynf's store, the step goes on, and the next sweep sends it once ynm is back (ADR-008).
+func TestMemoryWritesQueueWhileYnmIsDownAndArriveAfter(t *testing.T) {
+	h := newHarness(t)
+	mem := &fakeMemory{fail: true}
+	h.e.Memory = mem
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:fmt", "pkg:internal/format"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.f.setChecks(101, "failure")
+	h.advance(time.Minute)
+	if _, err := h.e.RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Escalated {
+		t.Fatalf("a down ynm must not stop the step: %s %s", it.State, it.Reason)
+	}
+	n, since, err := h.e.MemoryQueued(ctx)
+	if err != nil || n != 1 || since.IsZero() || len(mem.records) != 0 {
+		t.Fatalf("queued %d since %v (%v), sent %d", n, since, err, len(mem.records))
+	}
+
+	mem.mu.Lock()
+	mem.fail = false
+	mem.mu.Unlock()
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n, _, _ := h.e.MemoryQueued(ctx); n != 0 || len(mem.records) != 1 || mem.records[0].Subject != "sig/ci-diverges/lint" {
+		t.Fatalf("after ynm came back: %d queued, sent %+v", n, mem.records)
+	}
+}
+
 // TestAFailingCheckIsRememberedOncePerCommit: CI that stays failed across polls is one occurrence
 // in ynm, not one per poll; a new head commit that fails again is another.
 func TestAFailingCheckIsRememberedOncePerCommit(t *testing.T) {
@@ -1860,11 +1895,12 @@ func TestATicketFromATrackerThatIsNotAForge(t *testing.T) {
 // inside the image that will run it, never the repository's copy (ADR-006, ADR-012).
 func TestALaneIsHeldToItsImagesHarness(t *testing.T) {
 	for _, c := range []struct{ manifest, want string }{
-		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"p"}},"agent":{"max_turns":12},"sensors":{"lint":{}}}`, "max_turns 20 loosens the harness's 12"},
+		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"p"}},"agent":{"max_turns":12},"sensors":{"lint":{"source":{"command":"golangci-lint run ./..."}}}}`, "max_turns 20 loosens the harness's 12"},
 		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"p"}},"agent":{"max_turns":30},"sensors":{"test":{}}}`, `sensor_scope names "lint"`},
-		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"other":{"prompt":"p"}},"agent":{"max_turns":30},"sensors":{"lint":{}}}`, `has no focus "tidy"`},
-		{`{"env_passthrough":[],"focuses":{"tidy":{"prompt":"p"}},"sensors":{"lint":{}}}`, "does not pass ANTHROPIC_API_KEY"},
-		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"p"}},"agent":{"max_turns":30},"sensors":{"lint":{}}}`, ""},
+		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"p"}},"agent":{"max_turns":30},"sensors":{"lint":{"source":{"command":"golangci-lint run --enable-all ./..."}}}}`, `sensor_scope.lint: "golangci-lint run ./x/..." is not "golangci-lint run --enable-all ./..." narrowed: `},
+		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"other":{"prompt":"p"}},"agent":{"max_turns":30},"sensors":{"lint":{"source":{"command":"golangci-lint run ./..."}}}}`, `has no focus "tidy"`},
+		{`{"env_passthrough":[],"focuses":{"tidy":{"prompt":"p"}},"sensors":{"lint":{"source":{"command":"golangci-lint run ./..."}}}}`, "does not pass ANTHROPIC_API_KEY"},
+		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"p"}},"agent":{"max_turns":30},"sensors":{"lint":{"source":{"command":"golangci-lint run ./..."}}}}`, ""},
 	} {
 		h := newHarness(t)
 		h.e.Interactive = false

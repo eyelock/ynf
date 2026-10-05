@@ -24,6 +24,10 @@ type Store interface {
 	// Put writes a document if its current version is ifVersion; "" means create only. It returns
 	// the new version, or ErrConflict.
 	Put(ctx context.Context, key string, doc []byte, ifVersion string) (string, error)
+	// Delete removes a document if its current version is ifVersion. ErrConflict means it was
+	// changed since; ErrNotFound means it is already gone. Unlike Put there is no unconditional
+	// form, so a delete can never remove a document someone else has just rewritten.
+	Delete(ctx context.Context, key string, ifVersion string) error
 	// Keys lists document keys with a prefix, sorted.
 	Keys(ctx context.Context, prefix string) ([]string, error)
 

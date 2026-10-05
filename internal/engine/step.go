@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -66,18 +65,21 @@ func configSHA(rp *RepoPolicy) string {
 
 // RunRecord is the log entry for a run.
 type RunRecord struct {
-	RunID    string   `json:"run_id"`
-	Runner   string   `json:"runner"`
-	Executor string   `json:"executor"`
-	Argv     []string `json:"argv"`
-	Base     string   `json:"base"`
-	Exit     int      `json:"exit"`
-	Outcome  string   `json:"outcome"`
-	Detail   string   `json:"detail,omitempty"`
-	Changed  []string `json:"changed,omitempty"`
-	Denied   []string `json:"denied,omitempty"` // hosts the egress proxy refused
-	StepDir  string   `json:"step_dir"`
-	Duration string   `json:"duration"`
+	RunID  string `json:"run_id"`
+	Runner string `json:"runner"`
+	// RunnerDetected is set when the lane named no runner and detection chose this one, so the
+	// log and stats can tell a named runner from a detected one (ADR-012).
+	RunnerDetected bool     `json:"runner_detected,omitempty"`
+	Executor       string   `json:"executor"`
+	Argv           []string `json:"argv"`
+	Base           string   `json:"base"`
+	Exit           int      `json:"exit"`
+	Outcome        string   `json:"outcome"`
+	Detail         string   `json:"detail,omitempty"`
+	Changed        []string `json:"changed,omitempty"`
+	Denied         []string `json:"denied,omitempty"` // hosts the egress proxy refused
+	StepDir        string   `json:"step_dir"`
+	Duration       string   `json:"duration"`
 	// Model and Usage are what the runner reports, for comparing outcomes and cost by model and
 	// effort (ADR-011). ynf's own store is the run history; memory holds only failure patterns.
 	Model string `json:"model,omitempty"`
@@ -324,15 +326,18 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	}
 	// A run refused or broken before it starts still says what it would have used: the lane's
 	// runner and executor, until the executor is built and names itself.
-	runnerName, executorName := lane.Run.Runner, lane.Run.Executor
+	runnerName, executorName, detected := lane.Run.Runner, lane.Run.Executor, false
 	fail := func(outcome string, err error) event.Event {
-		return finished(RunRecord{Runner: runnerName, Executor: executorName, Outcome: outcome, Detail: err.Error()})
+		return finished(RunRecord{Runner: runnerName, RunnerDetected: detected, Executor: executorName, Outcome: outcome, Detail: err.Error()})
 	}
 
-	r, err := runner.For(lane)
+	ynhHost := e.HostYnh(s.ctx)
+	res, err := runner.Resolve(lane, ynhHost)
 	if err != nil {
 		return fail(runner.OperatorError, err)
 	}
+	r, detected := res.Runner, res.Detected
+	runnerName = r.Name()
 	ex, err := e.Executor(lane.Run.Executor)
 	if err != nil {
 		return fail(runner.OperatorError, err)
@@ -377,7 +382,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		return fail(runner.Error, err)
 	}
 
-	job, inImage, err := s.job(lane, r, ex, wt, runDir)
+	job, inImage, err := s.job(lane, r, ex, ynhHost, wt, runDir)
 	if err != nil {
 		return fail(runner.OperatorError, err)
 	}
@@ -391,6 +396,8 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	// The harness the lane is held to is the one that will run: inside the image, or in the
 	// folder ynh runs on the host (ADR-012).
 	var focus *runner.Focus
+	var harness runner.Harness
+	harnessKnown := false
 	if y, ok := r.(runner.YnhRunner); ok {
 		h, known, err := s.harness(y, job.Image, inImage, lane.Run.Image == "" || s.imageBuilt, inline, wt)
 		if err != nil {
@@ -400,6 +407,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 			y.Cfg.Harness = h.ID // run the harness installed here, by its id
 			r = y
 		}
+		harness, harnessKnown = h, known
 		if known {
 			if err := s.checkPassthrough(lane, y, h, ex.Name() == "docker" && len(job.Egress) > 0); err != nil {
 				return fail(runner.OperatorError, err)
@@ -433,6 +441,13 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 			labels = t.Labels
 		}
 	}
+	// The scopes were checked above without labels; now with this item's, so what runs is what was
+	// narrowed.
+	if y, ok := r.(runner.YnhRunner); ok && harnessKnown {
+		if err := harness.CheckScopes(y.Cfg, labels); err != nil {
+			return fail(runner.OperatorError, err)
+		}
+	}
 	argv, err := r.Command(runner.Spec{Lane: lane, Labels: labels, TaskFile: cr + "/task.md", RunDir: cr, Feedback: feedback, InImage: inImage, Contained: ex.Contained(), Focus: focus, HostAutoApprove: e.HostAutoApprove})
 	if err != nil {
 		return fail(runner.OperatorError, err)
@@ -445,7 +460,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	stop := s.progress(log, filepath.Join(runDir, "trajectory.jsonl"))
 	out, err := ex.Run(s.ctx, job)
 	stop()
-	rec := RunRecord{Runner: r.Name(), Executor: ex.Name(), Argv: argv, Base: base, StepDir: stepDir, Denied: out.Denied}
+	rec := RunRecord{Runner: r.Name(), RunnerDetected: detected, Executor: ex.Name(), Argv: argv, Base: base, StepDir: stepDir, Denied: out.Denied}
 	_ = os.WriteFile(filepath.Join(runDir, "stdout"), out.Stdout, 0o644)
 	_ = os.WriteFile(filepath.Join(runDir, "stderr"), out.Stderr, 0o644)
 	switch {
@@ -461,6 +476,9 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 			rec.Detail += ": " + tail(string(out.Stderr))
 		}
 	}
+	if detected && rec.RunnerVersion == "" && r.Name() == "ynh" {
+		rec.RunnerVersion = ynhHost.Version // the detected version, when the run did not report its own
+	}
 	rec.Duration = e.Now().Sub(start).Round(time.Millisecond).String()
 	if rec.Changed, err = s.g.Changed(s.ctx, wt); err != nil {
 		rec.Outcome, rec.Detail = runner.Error, err.Error()
@@ -474,9 +492,9 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 // job describes the run for the executor. A ynh lane on a contained executor runs in an agent
 // image ynf builds from the harness (or the lane's run.image), as the image's own user, with the
 // vendor's API host allowed through the egress proxy (ADR-007, ADR-012).
-func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, wt, runDir string) (executor.Job, bool, error) {
+func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, ynhHost runner.Detection, wt, runDir string) (executor.Job, bool, error) {
 	e := s.e
-	job := executor.Job{Worktree: wt, RunDir: runDir, Image: lane.Run.Image, Timeout: e.RunTimeout, Env: map[string]string{}, Secrets: map[string]string{}}
+	job := executor.Job{Worktree: wt, RunDir: runDir, Image: lane.Run.ImageFor(r.Name()), Timeout: e.RunTimeout, Env: map[string]string{}, Secrets: map[string]string{}}
 	if lane.Run.Egress != nil {
 		job.Egress = append([]string(nil), lane.Run.Egress.Allow...)
 	}
@@ -492,6 +510,12 @@ func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, wt, 
 	y, isYnh := r.(runner.YnhRunner)
 	if !isYnh {
 		return job, false, nil
+	}
+	// A lane that names ynh never falls back, and never runs without it: where ynh runs on this
+	// host (inline, the process executor, or an image built here), a missing or unsupported ynh
+	// refuses the run before anything starts. A published image carries its own ynh.
+	if e.DetectYnh != nil && lane.Run.Runner == "ynh" && !ynhHost.Found && (ex.Name() == "inline" || !ex.Contained() || job.Image == "") {
+		return job, false, fmt.Errorf("lane %s names runner ynh, and %s", lane.Name, ynhUnusable(ynhHost))
 	}
 	if ex.Name() == "inline" {
 		// The factory image: ynh is installed here and the job runner contains it (ADR-007), so a
@@ -563,27 +587,18 @@ func withModelHosts(hosts []string, y runner.YnhRunner) []string {
 	return hosts
 }
 
+func ynhUnusable(d runner.Detection) string {
+	if d.Detail != "" {
+		return "ynh is not usable on this host: " + d.Detail
+	}
+	return "ynh was not found on this host"
+}
+
 // autoApproveCapabilities is the first ynh capabilities version with --auto-approve.
 const autoApproveCapabilities = "0.9.0"
 
 // atLeast compares dotted versions numerically; anything unparseable is too old.
-func atLeast(have, want string) bool {
-	h, w := strings.Split(have, "."), strings.Split(want, ".")
-	for i := range w {
-		if i >= len(h) {
-			return false
-		}
-		hn, err1 := strconv.Atoi(h[i])
-		wn, err2 := strconv.Atoi(w[i])
-		if err1 != nil || err2 != nil {
-			return false
-		}
-		if hn != wn {
-			return hn > wn
-		}
-	}
-	return true
-}
+func atLeast(have, want string) bool { return runner.AtLeast(have, want) }
 
 // proxyVars are what a worker behind the egress proxy needs to reach it.
 var proxyVars = []string{"HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"}

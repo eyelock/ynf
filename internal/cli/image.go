@@ -18,12 +18,12 @@ import (
 )
 
 // imageBuilder returns the engine's agent image builder when building is allowed (images.build)
-// and ynh is on PATH (ADR-012: detected, never required).
+// and ynh is on PATH or named by YNF_YNH_BIN (ADR-012: detected, never required).
 func imageBuilder(allowed bool) func(context.Context, string, policy.Ynh) (string, error) {
 	if !allowed {
 		return nil
 	}
-	if _, err := exec.LookPath("ynh"); err != nil {
+	if _, err := exec.LookPath(runner.YnhBin()); err != nil {
 		return nil
 	}
 	return buildHarnessImage
@@ -56,7 +56,7 @@ func buildHarnessImage(ctx context.Context, wt string, cfg policy.Ynh) (string, 
 	if cfg.Base != "" {
 		args = append(args, "--base", cfg.Base)
 	}
-	if out, err := output(ctx, "", "ynh", args...); err != nil {
+	if out, err := output(ctx, "", runner.YnhBin(), args...); err != nil {
 		return "", fmt.Errorf("ynh image: %w\n%s", err, tailLines(out, 10))
 	}
 	return tag, nil
@@ -79,7 +79,7 @@ func imageHarness(ctx context.Context, image, want string) (runner.Harness, erro
 	}
 	ynh := func(args ...string) (string, error) {
 		if image == "" { // the ynh installed here: an inline run in the factory image
-			return stdoutOf(ctx, "ynh", args...)
+			return stdoutOf(ctx, runner.YnhBin(), args...)
 		}
 		return stdoutOf(ctx, "docker", append([]string{"run", "--rm", "--network", "none", "--entrypoint", "ynh", image}, args...)...)
 	}
@@ -144,7 +144,7 @@ func pickHarness(hs []listed, want string) (string, error) {
 
 // hostCapabilities asks this machine's ynh for its capabilities version.
 func hostCapabilities(ctx context.Context) (string, error) {
-	out, err := stdoutOf(ctx, "ynh", "version", "--format", "json")
+	out, err := stdoutOf(ctx, runner.YnhBin(), "version", "--format", "json")
 	if err != nil {
 		return "", err
 	}

@@ -146,6 +146,23 @@ fixtures:
         - the command runner, no model; detected providers recorded on the step
         - the same input always produces the same diff
 
+  - id: detect-format
+    kind: issue
+    title: internal/format is not gofmt-clean, by whatever runs here
+    body: fixtures/detect-format.md
+    labels: ["ynf:detect", "pkg:internal/format"]
+    lane: detect
+    calibrate:
+      command: { deterministic: true }
+    expect:
+      result: in_review
+      runner: { name: command, detected: true }
+      labels: { present: [ynf:in-review], absent: [ynf:detect, ynf:working, ynf:proposed] }
+      checks:
+        - the lane names no runner and has a ynh block and a command; e2e hides ynh from ynf, so detection finds none and the lane runs its command, with no model
+        - the run record says runner command and runner_detected, so `ynf items log` shows it
+        - "`ynf harness` says what the lane resolves to here: command (ynh was not found)"
+
   - id: reclaim-crash
     kind: issue
     title: internal/format is not gofmt-clean, slowly
@@ -208,6 +225,21 @@ fixtures:
         - a ticket in a tracker that is not a forge (the sandbox's JIRA stand-in), naming its repository
         - e2e starts it with ynf start tracker/SBX-1 --repo; the pull request is linked on the ticket
 
+  - id: outage-probe
+    kind: issue
+    title: A lane whose command always fails
+    body: fixtures/outage-probe.md
+    labels: ["ynf:outage", "pkg:internal/format"]
+    lane: outage
+    calibrate:
+      disabled: true
+    expect:
+      result: escalated
+      signatures: ["sig/outcome/error"]
+      checks:
+        - the command exits 3, so the run ends error and the item escalates at once; no model runs
+        - the failure memory (sig/outcome/error) is what `make e2e-memory-outage` queues while ynm is unreachable, and finds in ynm after
+
   - id: deps-bump
     kind: issue
     title: Bump the Go toolchain
@@ -230,12 +262,31 @@ fixtures:
     pull_request:
       branch: human/retry-helper
       files: fixtures/fix-ci-retry/testdata
+    # The lane's scoped sensors are the harness's own, so they pass on the pull request as it
+    # stands: only CI's stricter lint config fails it. The agent works from the failing check the
+    # task quotes, not from a red sensor.
     calibrate:
-      before: [lint]
+      before: []
       fix: fixtures/fix-ci-retry.fix.patch
       after: []
     expect:
       result: in_review
       checks:
-        - CI lint fails on `_ = fn()` (check-blank), which the harness's own lint config allows
+        - CI lint fails on `_ = fn()` (check-blank), which the harness's own lint config allows, so the lane's sensors start green
         - ynf adopts the pull request, adds a commit, never force-pushes, and leaves the author as owner
+
+  - id: relaxed-scope
+    kind: prompt
+    title: Run the lint lane with a scope that relaxes lint
+    body: fixtures/relaxed-scope.md
+    labels: ["pkg:internal/format"]
+    lane: relaxed
+    calibrate:
+      refused: true
+    expect:
+      result: escalated
+      detail: 'sensor_scope.lint: "true" is not "golangci-lint run ./..." narrowed'
+      checks:
+        - the lane's scope replaces the lint sensor's command with `true`, which is not the declared command narrowed
+        - ynf refuses it before the run, as operator_error, naming the sensor, the declared command, the scope and why
+        - no agent runs, so no model is called and nothing is spent

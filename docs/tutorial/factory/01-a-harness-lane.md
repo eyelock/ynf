@@ -72,7 +72,7 @@ The lint lane runs ynh, and names a harness rather than a command:
     "auto_approve": "edits",
     "sensor_scope": {
       "docs": "sh scripts/check-docs.sh {label.pkg}",
-      "lint": "GOLANGCI_LINT_CACHE=\"$PWD/.cache/golangci-lint\" golangci-lint run ./{label.pkg}/...",
+      "lint": "golangci-lint run ./{label.pkg}/...",
       "test": "go test -count=1 ./{label.pkg}/..."
     }
   }
@@ -137,6 +137,8 @@ Expected:
         harness ., carried in the repository at ., read when a run checks it out
   ok    reclaim: originate lane, command on docker
         a command, not a harness
+  ok    relaxed: originate lane, ynh on docker
+        harness ., carried in the repository at ., read when a run checks it out
 ```
 
 ## The agent image
@@ -206,7 +208,10 @@ operator_error the lane does not fit its harness: max_turns 20 loosens the harne
 
 ynh never started an agent, so this cost nothing. The same check refuses a `sensor_scope` that
 names a sensor the harness doesn't declare: `sensor_scope names "security", which the harness does
-not declare`. A lane scopes the harness's sensors; it can't invent new ones.
+not declare`. A lane scopes the harness's sensors; it can't invent new ones. Nor can it redefine
+one: a scope may only narrow the declared command, `golangci-lint run ./...` to `golangci-lint run
+./{label.pkg}/...`. A scope of `true`, an added flag or a different program is refused the same
+way, before the run, with the sensor, the declared command, the scope and why.
 
 Put the lane back, and the item with it:
 
