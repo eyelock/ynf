@@ -110,8 +110,11 @@ FACTORY_LANES   ?= gofmt,deps
 
 # Shape B: the sandbox's agent tools on the factory image, its harness in the factory flavour, and
 # the acceptance test with ynf running inside that image, every run inline beside it.
+# The outage lane's command always fails, so its item leaves a failure memory to queue, with no model.
+OUTAGE_LANES ?= outage
+
 e2e-memory-outage: reset settings
-	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(LANES) -memory-outage
+	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(OUTAGE_LANES) -memory-outage
 
 e2e-factory: reset
 	@set -e; ctx=$$(mktemp -d); trap 'rm -rf "$$ctx"' EXIT; \

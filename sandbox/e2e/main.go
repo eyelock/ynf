@@ -299,7 +299,7 @@ func run(root, repo, factory, image string, outage bool, lanes []string, timeout
 
 	failed := 0
 	if down != nil {
-		if err := down.recover(repo, ynf, cfg, logPath, memSince, wantFailures(ff.Fixtures, lanes)); err != nil {
+		if err := down.recover(repo, ynf, cfg, logPath, memSince, lanes, expectedFailures(ff.Fixtures, lanes, numbers, repo)); err != nil {
 			fmt.Printf("FAIL  %-24s %s\n", "memory outage", err)
 			failed++
 		}
@@ -551,10 +551,26 @@ func startOutage(tmp string) (*ynmOutage, error) {
 
 func (o *ynmOutage) flag() string { return filepath.Join(o.tmp, "ynm-down") }
 
-// wantFailures reports whether any fixture in the lanes expects failure signatures, which is what
+// failure is one failure memory a fixture is expected to leave: its item and signature.
+type failure struct{ item, sig string }
+
+// expectedFailures are the failure memories the fixtures in the lanes should leave, which is what
 // puts memory writes in the queue.
-func wantFailures(fs []fixture, lanes []string) bool {
-	return slices.ContainsFunc(fs, func(f fixture) bool { return len(f.Expect.Signatures) > 0 && slices.Contains(lanes, f.Lane) })
+func expectedFailures(fs []fixture, lanes []string, numbers map[string]int, repo string) []failure {
+	var out []failure
+	for _, f := range fs {
+		if len(f.Expect.Signatures) == 0 || !slices.Contains(lanes, f.Lane) {
+			continue
+		}
+		_, key, _, err := subject(f, numbers, repo)
+		if err != nil {
+			continue
+		}
+		for _, sig := range f.Expect.Signatures {
+			out = append(out, failure{key, sig})
+		}
+	}
+	return out
 }
 
 // queued is how many memory writes `ynf doctor` says are queued; zero when it says nothing.
@@ -581,13 +597,16 @@ func (o *ynmOutage) queued(ynf, cfg string) (int, error) {
 // recover checks the outage from both ends: while ynm was down, nothing reached it and doctor
 // reports the queue; once it is back, one sweep sends the queue, doctor reports nothing, and the
 // memories are there for checkMemory to find.
-func (o *ynmOutage) recover(repo, ynf, cfg, logPath string, since time.Time, expectQueued bool) error {
+func (o *ynmOutage) recover(repo, ynf, cfg, logPath string, since time.Time, lanes []string, want []failure) error {
+	if len(want) == 0 {
+		return errors.New("no fixture in these lanes leaves a failure memory, so nothing would queue: the outage check needs one (the outage lane)")
+	}
 	n, err := o.queued(ynf, cfg)
 	if err != nil {
 		return err
 	}
-	if expectQueued && n == 0 {
-		return errors.New("the run had failures to remember, yet doctor reports no queued memory writes")
+	if n < len(want) {
+		return fmt.Errorf("%d failure memories were expected, yet doctor reports %d queued memory writes", len(want), n)
 	}
 	// The real ynm, not the shim: what the outage kept from reaching it.
 	if out, err := sh("", o.realYnm, "list", "--json", "--namespace", namespaceFor(repo), "--limit", "10000", "--since", since.Format(time.RFC3339)); err != nil {
@@ -601,7 +620,7 @@ func (o *ynmOutage) recover(repo, ynf, cfg, logPath string, since time.Time, exp
 		return err
 	}
 	fmt.Println("ynm is back; one sweep sends the queue")
-	if out, err := stream(ynf, "--config", cfg, "--format", "json", "--log-file", logPath, "sweep"); err != nil {
+	if out, err := stream(ynf, sweepArgs(cfg, logPath, lanes)...); err != nil {
 		return fmt.Errorf("ynf sweep after the outage: %w\n%s", err, out)
 	}
 	if left, err := o.queued(ynf, cfg); err != nil {
@@ -609,8 +628,29 @@ func (o *ynmOutage) recover(repo, ynf, cfg, logPath string, since time.Time, exp
 	} else if left != 0 {
 		return fmt.Errorf("%d memory writes are still queued after ynm came back", left)
 	}
-	fmt.Printf("ok    %-24s queue drained\n", "memory outage")
+	got, err := listMemory(repo, since)
+	if err != nil {
+		return err
+	}
+	for _, w := range want {
+		if !slices.ContainsFunc(got, func(m memoryRecord) bool {
+			return m.Current.DataSchema == "ynf.failure.v1" && m.Current.Subject == w.sig && m.Current.Data["item"] == w.item
+		}) {
+			return fmt.Errorf("the queued %s on %s never reached ynm", w.sig, w.item)
+		}
+	}
+	fmt.Printf("ok    %-24s queue drained; the %d queued failure memories are in ynm\n", "memory outage", len(want))
 	return nil
+}
+
+// sweepArgs is a single sweep of the given lanes only: a sweep after the run must not take on work
+// the run was told to leave alone.
+func sweepArgs(cfg, logPath string, lanes []string) []string {
+	args := []string{"--config", cfg, "--format", "json", "--log-file", logPath, "sweep"}
+	for _, l := range lanes {
+		args = append(args, "--lane", l)
+	}
+	return args
 }
 
 // memoryNamespace is where the sandbox's memories go; {repo} is host/owner/name.
