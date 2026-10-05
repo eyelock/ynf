@@ -110,9 +110,12 @@ what people read is unchanged byte for byte, and what the bridge sends leaves ou
 people and scrubs secrets and email addresses.
 
 *Where it goes.* The SDK is set up once at process start (`internal/telemetry`), and writes, in
-order: to the operator's `OTEL_EXPORTER_OTLP_*` endpoint if set; else to the spool, if `YNR_SPOOL`
+order: to the operator's `OTEL_EXPORTER_OTLP_*` endpoint if set; else to `factory/` under the
+spool root in ynf's configuration, if it names one (ADR-009); else to the spool, if `YNR_SPOOL`
 names a folder or the laptop default `$XDG_STATE_HOME/ynr/spool/local` exists, through ynr's spool
-exporter, into the folder named; else nowhere, with the no-op providers. `ynf serve` looks for a
+exporter, into the folder named; else nowhere, with the no-op providers. In a factory job with the
+collector on, the spool root comes first: ynf writes to the spool whatever the operator set, and the
+operator's endpoint is `ynr serve`'s upstream instead (ynr ADR-004). `ynf serve` looks for a
 spool again once a minute when it found none. The resource is `service.name=ynf`, ynf's version
 and a ULID for each process, and `OTEL_RESOURCE_ATTRIBUTES` is honoured. ynf joins the trace in
 `TRACEPARENT` and `TRACESTATE`, else starts one; every process it starts gets them, and every HTTP
@@ -134,6 +137,26 @@ the intake that started it, and ynf keeps the last step's span ids, and an intak
 linked to yet, on the item in its store, so this works across processes on every provider.
 Nothing in ynf reads telemetry.
 
+*The spool and the collector in a factory job.* With a spool root, ynf lays it out as ynr reads it
+(ynr ADR-003): `factory/` for its own writer, `runs/<run id>/` for each run, and
+`manifests/<run id>.json` for each run, which names the run's lane id, harness, focus, item and
+step. Before a run starts, ynf makes its folder and writes its manifest (to a temporary name, then
+renamed, never over a link), and starts the run with `YNR_SPOOL` set to its folder, `TRACEPARENT`
+and `TRACESTATE`, and without the operator's `OTEL_EXPORTER_OTLP_*` when the collector is on.
+ADR-007 says how a run is kept to its folder. A lane with `run.ynh.telemetry_relay` also sets
+`YNH_TELEMETRY_RELAY=1` for its runs, so `ynh agent run` relays the vendor CLI's telemetry into
+that folder (ynr ADR-004); command lanes refuse the setting, since they have no vendor. When the
+configuration enables the collector, and only then, a factory job (`sweep`, `serve`, `handle` and
+`shadow run`) starts `ynr serve --spool <root> --collector-id <id>`, with the instance and the
+upstream when there are any, and stops it at the job's end with `SIGTERM`, giving it the archive time
+to ship before what is left goes into the run capture (ADR-010). `ynf start`, a person's own
+command, and commands that only read or record start nothing. If `ynr` is missing or fails, the job
+says so in its log and in `ynf doctor` and runs on: telemetry never fails the factory. A job killed
+without a chance to stop `ynr serve` leaves it running until its container ends. The spool and the
+manifest are written, and the folder given, with the collector off too, whenever a root is
+configured, for an operator's own `ynr serve`; the run's files are then copied into its capture
+when it ends.
+
 *Metrics.* Runs by outcome, lane and model; tokens and cost by model, as the runner reports them;
 lease expiries by lane. Attributes are low-cardinality, with each limit declared in the registry,
 and never an item key, run id or trace id.
@@ -145,7 +168,11 @@ binary, `ynf telemetry registry --format json` prints it, and the Go constants y
 generated from it. CI checks it with Weaver.
 
 *People and content.* An actor appears only as a host-qualified handle, such as
-`github.com/octocat`, never a name or email. No prompt, ticket text, code, diff or memory body is
+`github.com/octocat`, never a name or email. ynf's forge and tracker ports return structure and no
+author: the facts a decision reads hold labels, states and check conclusions, and the review logins
+the GitHub adapter reads are folded into whether a pull request is approved and discarded. No
+record of ynf's names a person today, and `telemetry.Handle` is where one would be qualified by
+host if a port ever returned one. No prompt, ticket text, code, diff or memory body is
 exported, and secrets are redacted at the source.
 
 **Exit codes**, for every command: `0` success, `2` usage, `20` an adapter failed (the forge, git,

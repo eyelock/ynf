@@ -68,6 +68,7 @@ lanes:
         sandbox: srt
         auto_approve: edits              # inside containment only (ADR-007)
         budgets: { max_turns: 20 }       # may only tighten the harness's own
+        telemetry_relay: true            # YNH_TELEMETRY_RELAY=1: the vendor's telemetry, relayed (ADR-011)
         sensor_scope:                    # narrows declared sensors to the item
           lint: 'golangci-lint run ./{label.pkg}/...'
       executor: docker
@@ -161,6 +162,14 @@ asks for.
 **Every decision records the policy hash**, the SHA-256 of the effective lane's normalised YAML,
 plus both source commits, just as ynh records `harness.sha`. A step's log entry is
 `{event, facts, policy: {hash, config_sha, repo_sha}, decision}`.
+
+**The vendor relay is a lane's setting, in its `ynh` block.** `telemetry_relay: true` sets
+`YNH_TELEMETRY_RELAY=1` for the lane's runs, so `ynh agent run` starts `ynr relay` beside the
+vendor CLI and the vendor's telemetry reaches the run's spool folder (ADR-011). It is policy and
+not a harness's: whether a factory pays for the relay's records is the lane's call, and it is
+reviewed with the rest of the lane. It belongs to the ynh runner, since only the vendor CLIs ynh
+launches export telemetry that needs relaying, so a lane that names the command runner refuses it
+at load. It is in the policy hash like every other setting.
 
 **A lane has an id.** Telemetry names a lane by where it is defined plus its name, host first:
 `github.com/acme/factory-config#lint-paydown` for a lane in the configuration repository, however

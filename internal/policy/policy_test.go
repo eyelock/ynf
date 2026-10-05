@@ -38,7 +38,7 @@ func TestSandboxLanesLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(f.Names(), ",")
-	if got != "deps,detect,doc-drift,fix-ci,gofmt,lint-paydown,outage,reclaim,relaxed" {
+	if got != "deps,detect,doc-drift,fix-ci,gofmt,lint-paydown,outage,reclaim,relaxed,spool,spool-flood" {
 		t.Fatalf("lanes %s", got)
 	}
 	if d := f.Lanes["deps"]; d.On() || d.Kind != "originate" || len(d.Intake) != 1 {

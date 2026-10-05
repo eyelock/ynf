@@ -12,7 +12,8 @@ import (
 )
 
 // The OpenTelemetry proof (ADR-011, ynr ADR-002): ynf runs with YNR_SPOOL set to a temporary
-// folder, and the spool files, read back as JSON lines, must show a gofmt step as one trace with
+// folder (or, with ynr, a spool root and a collector: see collector.go), and what was written,
+// read back as JSON lines, must show a gofmt step as one trace with
 // its spans and attributes, an item's second step linked to its first, and every received
 // CloudEvent mirrored once. It reads files only: nothing in ynf reads telemetry back.
 
@@ -34,6 +35,8 @@ type spoolSpan struct {
 		TraceID string `json:"traceId"`
 		SpanID  string `json:"spanId"`
 	} `json:"links"`
+	// Res is the span's resource attributes: for a record that went through ynr, what it stamped.
+	Res map[string]string `json:"-"`
 }
 
 func (s spoolSpan) attr(k string) string {
@@ -51,6 +54,7 @@ func (s spoolSpan) attr(k string) string {
 type spoolEvent struct {
 	Name, SpanID string
 	Attrs        []otlpAttr
+	Res          map[string]string
 }
 
 type spoolData struct {
@@ -71,6 +75,9 @@ func readSpool(dir string) (spoolData, error) {
 		for sc.Scan() {
 			var req struct {
 				ResourceSpans []struct {
+					Resource struct {
+						Attributes []otlpAttr `json:"attributes"`
+					} `json:"resource"`
 					ScopeSpans []struct {
 						Spans []spoolSpan `json:"spans"`
 					} `json:"scopeSpans"`
@@ -90,15 +97,22 @@ func readSpool(dir string) (spoolData, error) {
 				return d, fmt.Errorf("%s: %w", f, err)
 			}
 			for _, rs := range req.ResourceSpans {
+				res := map[string]string{}
+				for _, a := range rs.Resource.Attributes {
+					res[a.Key] = a.Value.StringValue + a.Value.IntValue
+				}
 				for _, ss := range rs.ScopeSpans {
-					d.spans = append(d.spans, ss.Spans...)
+					for _, s := range ss.Spans {
+						s.Res = res
+						d.spans = append(d.spans, s)
+					}
 				}
 			}
 			for _, rl := range req.ResourceLogs {
 				for _, sl := range rl.ScopeLogs {
 					for _, l := range sl.LogRecords {
 						if l.EventName != "" {
-							d.events = append(d.events, spoolEvent{l.EventName, l.SpanID, l.Attributes})
+							d.events = append(d.events, spoolEvent{Name: l.EventName, SpanID: l.SpanID, Attrs: l.Attributes})
 						}
 					}
 				}
@@ -109,12 +123,18 @@ func readSpool(dir string) (spoolData, error) {
 	return d, nil
 }
 
-// checkTelemetry proves the spool. keys are the items of the lanes this run covered.
-func checkTelemetry(spool string, keys []string, lane string) error {
+// checkSpool proves the spool ynf wrote, when there is no collector.
+func checkSpool(spool string, keys []string, lane string) error {
 	d, err := readSpool(spool)
 	if err != nil {
 		return err
 	}
+	return checkTelemetry(d, keys, lane)
+}
+
+// checkTelemetry proves what was written, from the spool or as a collector shipped it. keys are
+// the items of the lanes this run covered.
+func checkTelemetry(d spoolData, keys []string, lane string) error {
 	byID := map[string]spoolSpan{}
 	for _, s := range d.spans {
 		byID[s.SpanID] = s

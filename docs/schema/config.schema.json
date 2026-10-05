@@ -129,6 +129,68 @@
       "type": "string",
       "description": "The user inline runs run as. Default ynh, the user agent images are built for. It must not be the user ynf runs as."
     },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "OpenTelemetry (ADR-011). Without this block ynf writes where the environment says: the operator's OTEL_EXPORTER_OTLP_*, else the spool named by YNR_SPOOL or the laptop default, else nowhere.",
+      "properties": {
+        "spool": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The spool root, relative to the config file's folder. ynf writes its own telemetry to factory/ under it, gives each run a folder at runs/<run id>/ and a manifest at manifests/<run id>.json, and starts each run with YNR_SPOOL set to its own folder. Put it on a filesystem of its own, apart from ynf's state, such as a tmpfs (ADR-007). The root must be readable by the run user in an inline job."
+        },
+        "run_quota": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(KiB|MiB|GiB)$",
+          "description": "How large a run's folder may grow before ynf removes the largest files from it. Default 64MiB. ADR-007 says what this does and does not guarantee."
+        },
+        "collector": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Whether ynf starts ynr serve on the spool for the length of a factory job: sweep, serve, handle and shadow run. Off by default, and never turned on because ynr was found (ADR-012).",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Start ynr serve for a factory job. Needs telemetry.spool and an upstream."
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]*$",
+              "description": "The collector's identity: the runner pool or the host this job runs on, stable across jobs. Never the job's own id."
+            },
+            "instance": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+              "description": "The job within the pool, such as a CI run id. It is recorded as data, not identity."
+            },
+            "upstream": {
+              "type": "string",
+              "pattern": "^https?://",
+              "description": "The OTLP/HTTP endpoint ynr serve ships to. Default: the operator's OTEL_EXPORTER_OTLP_ENDPOINT (or a signal's own endpoint) from the environment. ynr serve needs one until it has an object store of its own, so a collector enabled with neither fails at config load."
+            },
+            "archive": {
+              "$ref": "#/$defs/duration",
+              "description": "How long ynr serve has at a job's end to ship what is left, after SIGTERM. Default 30s. What it has not shipped is put into the run capture."
+            }
+          },
+          "if": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          },
+          "then": {
+            "required": [
+              "id"
+            ]
+          }
+        }
+      }
+    },
     "memory": {
       "type": "object",
       "additionalProperties": false,

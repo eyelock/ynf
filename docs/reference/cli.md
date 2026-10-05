@@ -25,7 +25,7 @@ an issue on GitHub Enterprise Server is `item/github.acme.internal/…`.
 | Command | Does |
 |---|---|
 | `ynf version` | Prints the version. |
-| `ynf doctor` | Checks the config, the store, each repository's lanes (and any shadowed factory folder), each forge and tracker, and git, docker, ynh and ynm. ynh and ynm are optional. When memory writes are waiting for ynm it adds a `memory queue` line, `N memory writes queued since <time>`, as a warning, not a failure; nothing is said when the queue is empty. The ynh line is the detection a lane with no `run.runner` uses. |
+| `ynf doctor` | Checks the config, the store, each repository's lanes (and any shadowed factory folder), each forge and tracker, and git, docker, ynh and ynm. ynh and ynm are optional. When memory writes are waiting for ynm it adds a `memory queue` line, `N memory writes queued since <time>`, as a warning, not a failure; nothing is said when the queue is empty. The ynh line is the detection a lane with no `run.runner` uses. A `ynr` line, also optional, shows what `ynr info --format json` answered, and says plainly when `telemetry.collector` is on and `ynr` is not there: a factory job then runs on without a collector. With `telemetry.spool` set, a `telemetry` line says the root is usable. |
 | `ynf forges` | Each forge ynf works with, checked by reaching an enrolled repository on it. |
 | `ynf trackers` | Each tracker: every forge's issues, and each declared tracker, whose MCP server is started and checked for the tools it is configured to call. |
 | `ynf ticket <ref>` | Reads a ticket exactly as `start` would, without starting anything: its title, state, labels, the repository it names, and its body. For checking a tracker's `fields`. |
@@ -72,7 +72,7 @@ With `--format json`, an error is `{"error": {"code": <exit code>, "message": ".
 
 ## Environment
 
-ynf writes OpenTelemetry where [See ynf in OpenTelemetry](../how-to/see-ynf-in-opentelemetry.md) says; the variables it reads for that are `OTEL_EXPORTER_OTLP_*`, `YNR_SPOOL`, `XDG_STATE_HOME`, `OTEL_RESOURCE_ATTRIBUTES`, `TRACEPARENT` and `TRACESTATE`, listed there.
+ynf writes OpenTelemetry where [See ynf in OpenTelemetry](../how-to/see-ynf-in-opentelemetry.md) says; the variables it reads for that are `OTEL_EXPORTER_OTLP_*`, `YNR_SPOOL`, `XDG_STATE_HOME`, `OTEL_RESOURCE_ATTRIBUTES`, `TRACEPARENT` and `TRACESTATE`, listed there. `YNF_YNR_BIN` names the `ynr` that `doctor` asks and a factory job with `telemetry.collector` on starts, else `ynr` on `PATH`. A factory job is `sweep`, `serve`, `handle` and `shadow run`; [Configuration](configuration.md#a-factory-job-with-the-collector-on) says what it does when the collector is on.
 
 | Variable | Used for |
 |---|---|

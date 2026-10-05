@@ -9,9 +9,13 @@
 #                   the fixtures, not the factory; needs ynh with .agents/harness support,
 #                   YNH=/path/to/ynh to choose one)
 #   make e2e        rebuild the sandbox, run ynf against it until everything settles, and check
-#                   each fixture's expect block (tests the factory; LANES=gofmt,deps,reclaim,detect by default; ynh is hidden from ynf
-#                   so the detect lane proves its fallback to the command: HIDE_YNH=false to unhide it)
-#   make e2e-only   the same, without the rebuild. Without a reset it leaves out shadow mode, whose
+#                   each fixture's expect block (tests the factory; LANES=gofmt,deps,reclaim,detect,spool,spool-flood by default; ynh is hidden from ynf
+#                   so the detect lane proves its fallback to the command: HIDE_YNH=false to unhide it).
+#                   With ynr it also runs ynf as a factory job with a spool and the collector on, and
+#                   checks manifests, run folders, the run quota and what ynr shipped: YNF_YNR_BIN=path
+#                   names a ynr, YNR_SRC=path to a ynr checkout builds one (it only builds it), and
+#                   ynr on PATH is used otherwise. With none, those checks are skipped, and it says why.
+#   make e2e-only  the same, without the rebuild. Without a reset it leaves out shadow mode, whose
 #                   stage merges a human fix for fmt-format into the sandbox main and so cannot
 #                   run twice; SHADOW=true adds it. make e2e (and e2e-factory) reset first, so
 #                   they run it with the gofmt lane; SHADOW=false skips it there
@@ -85,7 +89,7 @@ reset: down up
 calibrate: settings
 	cd calibrate && go run . -root .. -repo $(SANDBOX_REPO)
 
-LANES ?= gofmt,deps,reclaim,detect
+LANES ?= gofmt,deps,reclaim,detect,spool,spool-flood
 HIDE_YNH ?= true
 SHADOW ?= false
 # make e2e and e2e-factory reset first, so they run shadow mode unless told not to.

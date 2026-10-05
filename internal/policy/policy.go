@@ -141,6 +141,9 @@ type Ynh struct {
 	AutoApprove string            `yaml:"auto_approve" json:"auto_approve,omitempty"`
 	Budgets     *Budgets          `yaml:"budgets" json:"budgets,omitempty"`
 	SensorScope map[string]string `yaml:"sensor_scope" json:"sensor_scope,omitempty"`
+	// TelemetryRelay sets YNH_TELEMETRY_RELAY=1 for the lane's runs, so ynh agent run starts ynr
+	// relay beside the vendor CLI and the vendor's telemetry reaches the run's spool folder.
+	TelemetryRelay bool `yaml:"telemetry_relay" json:"telemetry_relay,omitempty"`
 }
 
 // Budgets may only tighten the harness's own.

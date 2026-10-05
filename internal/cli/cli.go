@@ -22,6 +22,7 @@ import (
 	"github.com/eyelock/ynf/internal/engine"
 	"github.com/eyelock/ynf/internal/forge"
 	"github.com/eyelock/ynf/internal/runner"
+	"github.com/eyelock/ynf/internal/spool"
 	"github.com/eyelock/ynf/internal/store"
 	"github.com/eyelock/ynf/internal/store/s3store"
 	"github.com/eyelock/ynf/internal/store/sqlite"
@@ -95,6 +96,13 @@ type app struct {
 
 	cfg *config.Config
 	eng *engine.Engine
+
+	// The spool and the collector (ADR-009, ADR-011): job is set for a factory job.
+	job       bool
+	tsettings config.TelemetrySettings
+	spool     *spool.Spool
+	spoolErr  error
+	serve     *spool.Serve
 }
 
 type multi []string
@@ -135,7 +143,7 @@ func RunIn(ctx context.Context, args []string, stdin io.Reader, stdout, stderr i
 	default:
 		// Telemetry is set up once, here, before anything that logs or spawns (ADR-011). It never
 		// changes output or exit codes: a serve looks for a spool again once a minute.
-		a.tel = telemetry.Setup(ctx, telemetry.Options{Version: ynf.Version, Watch: cmd == "serve"})
+		a.tel = telemetry.Setup(ctx, telemetry.Options{Version: ynf.Version, Watch: cmd == "serve", Spool: a.telemetrySettings(cmd, rest)})
 		ctx = a.tel.Context(ctx)
 	}
 	switch cmd {
@@ -186,11 +194,13 @@ func RunIn(ctx context.Context, args []string, stdin io.Reader, stdout, stderr i
 		a.eng.CloseTrackers()
 		_ = a.eng.Store.Close()
 	}
+	// The flush is bounded and swallows its errors, so it never changes the exit code. It comes
+	// first, so ynf's own files are closed when ynr serve is given its archive time.
+	a.tel.Shutdown(context.Background())
+	a.endJob()
 	if a.logClose != nil {
 		a.logClose()
 	}
-	// The flush is bounded and swallows its errors, so it never changes the exit code.
-	a.tel.Shutdown(context.Background())
 	return a.exit(err)
 }
 
@@ -386,6 +396,7 @@ func (a *app) engine() (*engine.Engine, error) {
 		Log:       logger,
 		Telemetry: a.tel,
 	}
+	a.startJob(logger)
 	return a.eng, nil
 }
 

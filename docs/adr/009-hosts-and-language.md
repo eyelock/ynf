@@ -48,9 +48,13 @@ implementation), the AWS SDK v2 (S3 conditional writes, DynamoDB conditions) and
 the image that carries them, `ghcr.io/eyelock/ynf-factory:<ynf version>`:
 
 ```
-ghcr.io/eyelock/ynh:<pinned>        ynh, git, Node and the vendor CLIs    (published by ynh)
-  └─ ynf-factory:<version>          + ynf, + ynm (its Node build)          (published by ynf)
+ghcr.io/eyelock/ynh:<pinned>        ynh, git, Node, the vendor CLIs, ynr (slim)   (published by ynh)
+  └─ ynf-factory:<version>          + ynf, + ynm (its Node build)                  (published by ynf)
 ```
+
+The `ynr` in the image is the slim build that ynh's base image ships, so the factory image has it
+without carrying a collector of its own: the relay for a run and `ynr serve` for a job are there
+wherever the image runs. Its presence turns nothing on (ADR-012).
 
 The ynh and ynm versions it takes are pinned in one file in this repository, and a change to
 either is an ordinary pull request that runs the acceptance tests against the composed image
@@ -69,9 +73,20 @@ Layers are shared through the registry, so the factory flavour costs one small l
 
 **An instance's settings and the factory's configuration are separate.** An instance's own
 `config.yaml` holds what belongs to that machine: its store, its memory, its credentials by
-variable name, and which configuration repository it follows. Enrolment, trackers, forges and
+variable name, its telemetry, and which configuration repository it follows. Enrolment, trackers, forges and
 default lanes are the factory's, in its configuration repository (ADR-006), so every worker in a
 pool follows one reviewed source.
+
+**Telemetry is configured per instance, because a spool and a collector belong to the machine or
+the runner pool.** A `telemetry` block holds the spool root (a folder of its own, apart from the
+store and the work folder, such as a tmpfs), the run quota, and the collector: whether ynf starts
+`ynr serve` for a factory job, the collector's id (the runner pool or the host, stable from job to
+job, never the job's own id), an optional instance (the job itself, which is data, not identity),
+the upstream `ynr serve` ships to, and the archive time it is given at the job's end (30 seconds,
+default). The collector is off unless the block turns it on. When it is on and the block names no
+upstream, ynf takes the operator's `OTEL_EXPORTER_OTLP_ENDPOINT`, and when there is neither the
+configuration does not load, since `ynr serve` has nowhere to ship until it has an object store of
+its own. A factory job is `ynf sweep`, `ynf serve`, `ynf handle` or `ynf shadow run` (ADR-011).
 
 **Conventions copied from ynh:** `--format json` on every command with one stable object per
 invocation, meaningful exit codes, and every `YNF_*` environment variable a fallback for an

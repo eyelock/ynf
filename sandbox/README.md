@@ -71,7 +71,7 @@ repository is disposable.
 | Path | What it is |
 |---|---|
 | `seed/` | The repository's contents, pushed as one commit on `main` |
-| `seed/.agents/factory/lanes.yaml` | The sandbox's factory: nine lanes ([schema](../docs/schema/lanes.schema.json)) |
+| `seed/.agents/factory/lanes.yaml` | The sandbox's factory: eleven lanes ([schema](../docs/schema/lanes.schema.json)) |
 | `seed/.agents/harness/plugin.json` | The sandbox's own ynh harness: `tidy`, `docs` and `fix-ci` focuses; `lint`, `test` and `docs` sensors |
 | `fixtures.yaml` | Every issue and pull request, its lane, and what ynf should do with it ([schema](fixtures.schema.json)) |
 | `fixtures/` | Issue and pull request bodies, the files committed on fixture branches (in `<id>/testdata/`, so Go tooling in this repository ignores their planted problems), and each fixture's known fix (`<id>.fix.patch`) |
@@ -92,6 +92,8 @@ in the sandbox cannot read what it is being tested on.
 | `doc-drift` | originate | ynh, focus `docs` | issues labelled `ynf:docs` | a docs-only change judged by a docs sensor; egress denial |
 | `gofmt` | originate | command (`gofmt -w`) | issues labelled `ynf:fmt` | a runner with no model, and deterministic output |
 | `detect` | originate | none named: ynh if detected, else command (`gofmt -w`) | issues labelled `ynf:detect` | detection: `make e2e` hides ynh, so the lane falls back to its command with no model |
+| `spool` | originate | command (a record into the run's spool folder, then `gofmt -w`) | issues labelled `ynf:spool` | the run's own telemetry reaching the collector with run provenance and the manifest's lane |
+| `spool-flood` | originate | command (20 MiB into the run's spool folder, then `gofmt -w`) | issues labelled `ynf:spool-flood` | a run filling its folder: held to the quota, the step unaffected |
 | `reclaim` | originate | command (`gofmt -w`, slowly) | issues labelled `ynf:reclaim` | killing ynf mid-run and a fresh one taking over |
 | `fix-ci` | adopt | ynh, focus `fix-ci` | pull requests labelled `ynf:fix-ci` | adopting someone else's pull request |
 | `relaxed` | originate | ynh, focus `tidy` | issues labelled `ynf:relaxed` (none exist) | a scope that replaces lint with `true` is refused before any run |
@@ -113,6 +115,8 @@ that package, so a run is judged on the debt it was asked to pay down rather tha
 | `docs-status-iana` | doc-drift | the run's fetch of www.iana.org is denied and recorded |
 | `fmt-format` | gofmt | a deterministic diff from the command runner |
 | `detect-format` | detect | no runner named, ynh hidden: the command runs, and the run record says `runner_detected` |
+| `spool-probe` | spool | draft pull request; with ynr, the run's own record arrives with run provenance and its manifest's lane |
+| `spool-flood` | spool-flood | draft pull request; the run's folder is held to the run quota and ynf says so |
 | `deps-bump` | deps | ignored |
 | `fix-ci-retry` | fix-ci | an adopted pull request gets a commit, never a force-push |
 | `relaxed-scope` | relaxed | a scope that replaces lint with `true` is refused before any run, with no model spend; it is a ynh lane, so `make e2e` runs it only with `LANES=relaxed,...` and the agent image and ynh available |
@@ -130,6 +134,26 @@ the variable does not reach ynf) and, once the fixtures check out, reads the spo
 gofmt item's first step is one trace with its claim, probe, decide, act, run and call spans and its
 item, step, lane, policy hash, lease epoch and repository attributes; its later steps link to the
 step before; and every received CloudEvent has exactly one `ynf.intake.received` event (ADR-011).
+
+With `ynr` available, e2e runs ynf as a factory job instead: a spool root and the collector in
+ynf's configuration, ynf starting `ynr serve` for the sweep, and a small OTLP/HTTP receiver of
+e2e's own as its upstream. The same checks then read what the receiver was sent, and e2e also
+checks that:
+
+- ynf's own records came from `factory/` (`ynr.provenance=factory`, the collector id and instance);
+- each gofmt, `spool` and `spool-flood` run had its manifest, naming its lane, item and step, and
+  a folder of its own under `runs/`;
+- the `spool` lane's run, which writes a record of its own into its folder claiming another lane and
+  provenance, arrived with `ynr.provenance=run`, the lane the manifest names, the run, item and
+  step, and as a child of the step's `ynf.run` span;
+- the `spool-flood` lane's run, which writes 20 MiB into its folder against a 1 MiB quota, was held
+  to the quota, ynf said so, and the step still proposed;
+- nothing was left unshipped in the spool, or what was is in the run capture.
+
+`YNF_YNR_BIN=/path/to/ynr` names a ynr, `YNR_SRC=/path/to/ynr` builds one from a checkout (it only
+builds it, into e2e's temporary folder), and ynr on `PATH` is used otherwise. With none, those
+checks are skipped and e2e says why. The ynr binary and the receiver are host-side, so
+`make e2e-factory`, where ynf runs in an image, does not run them.
 
 ## Changing it
 

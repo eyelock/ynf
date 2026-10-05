@@ -58,6 +58,9 @@ func (a *app) doctor(ctx context.Context) error {
 			detail += " (shadows " + strings.Join(a.cfg.Shadowed, ", ") + ")"
 		}
 		add("config", true, detail)
+		if ok, detail := a.spoolCheck(); detail != "" {
+			add("telemetry", ok, detail)
+		}
 		if _, err := a.engine(); err != nil {
 			add("engine", false, err.Error())
 		} else {
@@ -105,14 +108,14 @@ func (a *app) doctor(ctx context.Context) error {
 			}
 		}
 	}
-	optional := map[string]bool{"ynh": true, "ynm": true, "memory queue": true} // ADR-012
+	optional := map[string]bool{"ynh": true, "ynm": true, "ynr": true, "memory queue": true} // ADR-012
 	if a.eng != nil {
 		// Writes ynm could not take wait in ynf's store: worth saying, not a failure.
 		if n, since, err := a.eng.MemoryQueued(ctx); err == nil && n > 0 {
 			add("memory queue", false, fmt.Sprintf("%d memory writes queued since %s", n, since.Local().Format(time.RFC3339)))
 		}
 	}
-	for _, tool := range []struct{ name, args string }{{"git", "--version"}, {"docker", "version --format {{.Server.Version}}"}, {"ynh", "version"}, {"ynm", "--version"}} {
+	for _, tool := range []struct{ name, args string }{{"git", "--version"}, {"docker", "version --format {{.Server.Version}}"}, {"ynh", "version"}, {"ynm", "--version"}, {"ynr", ""}} {
 		if tool.name == "ynh" {
 			// The same detection a lane with no runner uses (ADR-012), so doctor and a run agree.
 			d := runner.DetectedYnh(ctx)
@@ -124,6 +127,12 @@ func (a *app) doctor(ctx context.Context) error {
 				detail = "found but not supported (" + d.Detail + ")"
 			}
 			add("ynh", d.Found, detail)
+			continue
+		}
+		if tool.name == "ynr" {
+			// Detected like ynh, and unlike it nothing uses it by being found (ADR-012).
+			ok, detail := ynrCheck(ctx, a.cfg)
+			add("ynr", ok, detail)
 			continue
 		}
 		c := exec.CommandContext(ctx, tool.name, strings.Fields(tool.args)...)

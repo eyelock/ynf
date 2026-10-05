@@ -32,6 +32,18 @@ the trajectory in blobs under the step, linked from the item log. Retention is p
 (`retention: 90d` by default, 2026-10-03), because trajectories can hold source, customer data
 and tokens ynh never saw.
 
+The spool files that were not shipped belong to the run capture too (ADR-011): the files a run
+wrote into its own folder, `*.jsonl` and `*.open.jsonl`, and ynf's own from `factory/`. They are
+copied, not moved, since a spool on a persistent volume is read by the next `ynr serve`, and
+ynr removes what it has shipped. A run's are copied under its step, in a `spool/` folder beside its
+trajectory, when the run ends and nothing ships them (ynr serve is not running); when it is, at the
+end of the job, after `ynr serve` has had its archive time, whatever is still in `runs/` and
+`factory/` is copied the same way, a run's into its own, the rest under a folder for the job. Only
+regular files are copied, opened without following a link, and the limits are 32 MiB for a run's and
+256 MiB for a job's, past which a file stays where it is and the log says so. Spool files hold
+telemetry that ynf and ynr already keep content out of, and they follow the lane's retention like
+the rest of the capture.
+
 **Stop conditions are lane policy,** in the same reviewed YAML as everything else (ADR-006):
 
 | Condition | Computed from | Effect |
