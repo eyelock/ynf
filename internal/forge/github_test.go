@@ -113,6 +113,18 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.comments = append(f.comments, c["body"])
 		w.WriteHeader(http.StatusCreated)
 		reply(map[string]any{"id": 1})
+	case p == "/repos/o/r/issues/10/timeline": // closed by a merge commit
+		reply([]any{map[string]any{"event": "labeled"}, map[string]any{"event": "closed", "commit_id": "m10"}})
+	case p == "/repos/o/r/issues/11/timeline": // closed by hand
+		reply([]any{map[string]any{"event": "closed"}})
+	case p == "/repos/o/r/issues/12/timeline": // closed by a commit whose pull request was not merged here
+		reply([]any{map[string]any{"event": "closed", "commit_id": "c12"}})
+	case p == "/repos/o/r/issues/13/timeline": // closed, reopened, closed again by hand
+		reply([]any{map[string]any{"event": "closed", "commit_id": "m10"}, map[string]any{"event": "reopened"}, map[string]any{"event": "closed"}})
+	case p == "/repos/o/r/commits/m10/pulls":
+		reply([]any{map[string]any{"number": 5, "merged_at": "2026-09-01T00:00:00Z", "merge_commit_sha": "m10"}})
+	case p == "/repos/o/r/commits/c12/pulls":
+		reply([]any{map[string]any{"number": 6, "merge_commit_sha": "c12"}})
 	case p == "/repos/o/r":
 		reply(map[string]any{"default_branch": "main"})
 	case p == "/repos/o/r/contents/.agents/factory/lanes.yaml":
@@ -295,5 +307,22 @@ func TestHead(t *testing.T) {
 	}
 	if _, err := g.Head(context.Background(), "o/r", "gone"); !errors.Is(err, forge.ErrNotFound) {
 		t.Fatalf("a missing branch: %v", err)
+	}
+}
+
+func TestFixFor(t *testing.T) {
+	g, _ := setup(t)
+	ctx := context.Background()
+	fix, err := g.FixFor(ctx, "o/r", 10)
+	if err != nil || fix != (forge.Fix{PR: 5, MergeSHA: "m10"}) {
+		t.Fatalf("%+v %v", fix, err)
+	}
+	for _, n := range []int{11, 12, 13} {
+		if _, err := g.FixFor(ctx, "o/r", n); !errors.Is(err, forge.ErrNoFix) {
+			t.Errorf("#%d: %v, want ErrNoFix", n, err)
+		}
+	}
+	if _, err := g.FixFor(ctx, "o/r", 404); !errors.Is(err, forge.ErrNotFound) {
+		t.Errorf("missing issue: %v", err)
 	}
 }

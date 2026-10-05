@@ -30,7 +30,7 @@ ynf lanes        validate [--file <path>] | show --repo <host/org/repo> [<lane>]
 ynf pause        <lane> --reason <text> [--repo …]
 ynf resume       <lane> --reason <text> [--repo …]
 ynf stats        [--lane <name>] [--window 30d]
-ynf shadow       <lane> --since 90d
+ynf shadow       run <lane> [--since 90d] | ls | grade [<run>] | report [<run> | --lane <lane>]
 
 Connections
 ynf trackers     ls | get <ref>                                           get reads without starting

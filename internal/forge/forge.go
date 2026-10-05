@@ -51,6 +51,22 @@ type Forge interface {
 	File(ctx context.Context, repo, ref, path string) ([]byte, error)
 }
 
+// ErrNoFix means a closed ticket was not closed by a merged pull request: it was closed by hand,
+// by a commit with no pull request, or by a pull request that was not merged.
+var ErrNoFix = errors.New("forge: no merged pull request closed it")
+
+// Fix is the merged pull request that closed a ticket (shadow mode).
+type Fix struct {
+	PR       int
+	MergeSHA string // the commit the merge made on the base branch
+}
+
+// Fixes is what a forge that records what closed an issue offers: the merged pull request whose
+// merge closed it, or ErrNoFix. Shadow mode reads it to find the answer a ticket's history holds.
+type Fixes interface {
+	FixFor(ctx context.Context, repo string, number int) (Fix, error)
+}
+
 // Issues is what a forge that also tracks issues offers, keyed by repository and number.
 type Issues interface {
 	Ticket(ctx context.Context, repo string, number int) (facts.Ticket, Text, error)

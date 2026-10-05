@@ -260,3 +260,41 @@ func (g *GitHub) File(ctx context.Context, repo, ref, path string) ([]byte, erro
 	s, err := fc.GetContent()
 	return []byte(s), err
 }
+
+// FixFor implements Fixes: the issue's timeline says which commit closed it, and the pull requests
+// associated with that commit say which was merged there. A commit that closed it with no merged
+// pull request, or an issue closed by hand, is ErrNoFix.
+func (g *GitHub) FixFor(ctx context.Context, repo string, number int) (Fix, error) {
+	o, r := split(repo)
+	var sha string
+	opt := &github.ListOptions{PerPage: 100}
+	for {
+		evs, resp, err := g.c.Issues.ListIssueTimeline(ctx, o, r, number, opt)
+		if err != nil {
+			return Fix{}, notFound(err)
+		}
+		for _, ev := range evs {
+			// The last close counts: an issue may have been reopened since.
+			if ev.GetEvent() == "closed" {
+				sha = ev.GetCommitID()
+			}
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opt.Page = resp.NextPage
+	}
+	if sha == "" {
+		return Fix{}, ErrNoFix
+	}
+	prs, _, err := g.c.PullRequests.ListPullRequestsWithCommit(ctx, o, r, sha, &github.ListOptions{PerPage: 100})
+	if err != nil {
+		return Fix{}, notFound(err)
+	}
+	for _, pr := range prs {
+		if !pr.GetMergedAt().IsZero() && pr.GetMergeCommitSHA() == sha {
+			return Fix{PR: pr.GetNumber(), MergeSHA: sha}, nil
+		}
+	}
+	return Fix{}, ErrNoFix
+}
