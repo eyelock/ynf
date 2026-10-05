@@ -146,6 +146,23 @@ fixtures:
         - the command runner, no model; detected providers recorded on the step
         - the same input always produces the same diff
 
+  - id: detect-format
+    kind: issue
+    title: internal/format is not gofmt-clean, by whatever runs here
+    body: fixtures/detect-format.md
+    labels: ["ynf:detect", "pkg:internal/format"]
+    lane: detect
+    calibrate:
+      command: { deterministic: true }
+    expect:
+      result: in_review
+      runner: { name: command, detected: true }
+      labels: { present: [ynf:in-review], absent: [ynf:detect, ynf:working, ynf:proposed] }
+      checks:
+        - the lane names no runner and has a ynh block and a command; e2e hides ynh from ynf, so detection finds none and the lane runs its command, with no model
+        - the run record says runner command and runner_detected, so `ynf items log` shows it
+        - "`ynf harness` says what the lane resolves to here: command (ynh was not found)"
+
   - id: reclaim-crash
     kind: issue
     title: internal/format is not gofmt-clean, slowly

@@ -43,8 +43,12 @@ type fixture struct {
 		Signatures []string `yaml:"signatures"`
 		Detail     string   `yaml:"detail"`
 		Crash      bool     `yaml:"crash"`
-		Start      bool     `yaml:"start"`
-		Labels     struct {
+		Runner     *struct {
+			Name     string `yaml:"name"`
+			Detected bool   `yaml:"detected"`
+		} `yaml:"runner"`
+		Start  bool `yaml:"start"`
+		Labels struct {
 			Present []string `yaml:"present"`
 			Absent  []string `yaml:"absent"`
 		} `yaml:"labels"`
@@ -94,6 +98,7 @@ func main() {
 	lanes := flag.String("lanes", "gofmt,deps", "lanes to run and check")
 	timeout := flag.Duration("timeout", 15*time.Minute, "how long to wait for items to settle")
 	forget := flag.Bool("forget-memory", false, "empty the sandbox's ynm namespace and exit")
+	hideYnh := flag.Bool("hide-ynh", false, "hide ynh from ynf (YNF_YNH_BIN names nothing), so a lane with no runner falls back to its command")
 	image := flag.String("image", "", "run ynf inside this factory-flavoured harness image, as a job runner would (ADR-009, shape B)")
 	flag.Parse()
 	if *forget {
@@ -103,13 +108,13 @@ func main() {
 		}
 		return
 	}
-	if err := run(*root, *repo, *factory, *image, strings.Split(*lanes, ","), *timeout); err != nil {
+	if err := run(*root, *repo, *factory, *image, strings.Split(*lanes, ","), *timeout, *hideYnh); err != nil {
 		fmt.Fprintln(os.Stderr, "e2e:", err)
 		os.Exit(1)
 	}
 }
 
-func run(root, repo, factory, image string, lanes []string, timeout time.Duration) error {
+func run(root, repo, factory, image string, lanes []string, timeout time.Duration, hideYnh bool) error {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return err
@@ -180,6 +185,12 @@ func run(root, repo, factory, image string, lanes []string, timeout time.Duratio
 	}
 	_ = os.Setenv("PATH", tmp+string(os.PathListSeparator)+os.Getenv("PATH"))
 	_ = os.Setenv("YNF_SANDBOX_TRACKER_DATA", trackerData)
+	if hideYnh {
+		// ynf detects ynh by asking this binary (ADR-012): nothing is there, so a lane with no
+		// runner runs its command, as it would on a machine without ynh.
+		_ = os.Setenv("YNF_YNH_BIN", filepath.Join(tmp, "no-ynh"))
+		fmt.Println("ynh hidden from ynf: a lane with no runner falls back to its command")
+	}
 
 	cfg := filepath.Join(tmp, "config.yaml")
 	// A short lease so the crash test's restart comes about half a minute after the kill.
@@ -486,6 +497,36 @@ func check(f fixture, numbers map[string]int, items []item, repo, ynf, cfg, trac
 			}
 		}
 		detail += ", labelled " + strings.Join(want.Present, ",")
+	}
+	if want := f.Expect.Runner; want != nil {
+		logged, err := sh("", ynf, "--config", cfg, "--format", "json", "items", "log", ref)
+		if err != nil {
+			return "", fmt.Errorf("items log: %w", err)
+		}
+		var entries []struct {
+			Kind string          `json:"kind"`
+			Body json.RawMessage `json:"body"`
+		}
+		if err := json.Unmarshal([]byte(logged), &entries); err != nil {
+			return "", fmt.Errorf("items log output: %w", err)
+		}
+		var got *struct {
+			Runner         string `json:"runner"`
+			RunnerDetected bool   `json:"runner_detected"`
+		}
+		for _, en := range entries {
+			var r struct {
+				Runner         string `json:"runner"`
+				RunnerDetected bool   `json:"runner_detected"`
+			}
+			if en.Kind == "run" && json.Unmarshal(en.Body, &r) == nil {
+				got = &r
+			}
+		}
+		if got == nil || got.Runner != want.Name || got.RunnerDetected != want.Detected {
+			return "", fmt.Errorf("%s: its last run record says %+v, expected runner %s, detected %v", name, got, want.Name, want.Detected)
+		}
+		detail += fmt.Sprintf(", ran as %s (detected %v)", got.Runner, got.RunnerDetected)
 	}
 	if f.Expect.Crash {
 		log, err := sh("", ynf, "--config", cfg, "items", "log", ref)

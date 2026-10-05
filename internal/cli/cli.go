@@ -21,6 +21,7 @@ import (
 	"github.com/eyelock/ynf/internal/decide"
 	"github.com/eyelock/ynf/internal/engine"
 	"github.com/eyelock/ynf/internal/forge"
+	"github.com/eyelock/ynf/internal/runner"
 	"github.com/eyelock/ynf/internal/store"
 	"github.com/eyelock/ynf/internal/store/s3store"
 	"github.com/eyelock/ynf/internal/store/sqlite"
@@ -335,6 +336,7 @@ func (a *app) engine() (*engine.Engine, error) {
 		ImageHarness:      imageHarness,
 		ImageCapabilities: imageCapabilities,
 		HostCapabilities:  hostCapabilities,
+		DetectYnh:         runner.DetectedYnh,
 		Repos:             c.Repos,
 		ConfigRepo:        configRepo(c),
 		Lanes:             a.lanes,

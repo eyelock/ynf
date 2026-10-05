@@ -94,8 +94,10 @@ run:
 | tracker and forge `github` for github.com | always available; any other instance, GitHub Enterprise Server or an `mcp` tracker, is configured, never detected |
 
 Precedence is explicit config, then detection, then the built-in fallback (`command` for the
-runner, `none` for memory). A lane that names a provider explicitly and cannot get it fails to
-load. A lane that relies on detection runs with whatever was detected. Every step records the
+runner, `none` for memory). A lane that names a provider explicitly and cannot get it is refused
+before anything runs, and never falls back. A lane that relies on detection runs with whatever was
+detected: with no runner named, a lane with a `ynh` block runs as ynh when ynh is detected and
+otherwise as its `command` block, and a lane with neither is refused. Every step records the
 providers it used and their versions, so a run on one machine is explainable on another, and
 `ynf doctor` prints which providers are installed and their versions.
 
