@@ -18,13 +18,15 @@ import (
 	"time"
 
 	"github.com/eyelock/ynf/internal/egress"
+	"github.com/eyelock/ynf/internal/spool"
 	"github.com/eyelock/ynf/internal/telemetry"
 )
 
 // Container paths: what a contained command sees.
 const (
-	WorkDir = "/work"
-	RunDir  = "/run/ynf"
+	WorkDir  = "/work"
+	RunDir   = "/run/ynf"
+	SpoolDir = spool.ContainerPath
 )
 
 // ErrEgress means the lane allows hosts but the egress proxy cannot be started. A containment
@@ -48,6 +50,13 @@ type Job struct {
 	Secrets map[string]string
 	// Share are folders the run needs beside its own, if any; the inline executor hands them to the run user too.
 	Share []string
+	// Spool is the run's own spool folder on the host, when it has one (ynr ADR-004): the run
+	// writes its telemetry there, as YNR_SPOOL. A docker run has this folder mounted at SpoolDir,
+	// and nothing else of the spool; the inline executor hands it to the run user.
+	Spool string
+	// NoOTLP starts the run without the operator's OTEL_EXPORTER_OTLP_*: the collector is on, and
+	// ynr serve ships to the operator's endpoint instead.
+	NoOTLP bool
 }
 
 // Output is how the command ended.
@@ -111,7 +120,13 @@ func (d Docker) Args(j Job, name, network string) ([]string, error) {
 	if !j.ImageUser {
 		args = append(args, "--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()))
 	}
-	args = append(args, "-v", j.Worktree+":"+WorkDir, "-v", j.RunDir+":"+RunDir, "-w", WorkDir)
+	args = append(args, "-v", j.Worktree+":"+WorkDir, "-v", j.RunDir+":"+RunDir)
+	if j.Spool != "" {
+		// Only the run's own folder: it needs no network path to a collector, and cannot reach
+		// the manifests, ynf's folder or another run's.
+		args = append(args, "-v", j.Spool+":"+SpoolDir)
+	}
+	args = append(args, "-w", WorkDir)
 	env := map[string]string{
 		// A fresh cache per run (ADR-007): shared caches make sensors lie.
 		"XDG_CACHE_HOME":      RunDir + "/cache",
@@ -135,12 +150,21 @@ func (d Docker) Args(j Job, name, network string) ([]string, error) {
 		env["NO_PROXY"], env["no_proxy"] = "localhost,127.0.0.1", "localhost,127.0.0.1"
 	}
 	for k, v := range j.Env {
+		if j.NoOTLP && strings.HasPrefix(k, "OTEL_EXPORTER_OTLP_") {
+			continue
+		}
 		env[k] = v
+	}
+	if j.Spool != "" {
+		env["YNR_SPOOL"] = SpoolDir
 	}
 	for _, k := range sortedKeys(env) {
 		args = append(args, "-e", k+"="+env[k])
 	}
 	for _, k := range sortedKeys(j.Secrets) {
+		if j.NoOTLP && strings.HasPrefix(k, "OTEL_EXPORTER_OTLP_") {
+			continue
+		}
 		args = append(args, "-e", k)
 	}
 	args = append(args, j.Image)
@@ -273,17 +297,17 @@ func (Process) Run(ctx context.Context, j Job) (Output, error) {
 		return Output{}, errors.New("empty command")
 	}
 	cache := filepath.Join(j.RunDir, "cache")
-	env := append(os.Environ(),
+	environ := os.Environ()
+	if j.NoOTLP {
+		environ = spool.StripOTLP(environ)
+	}
+	env := append(environ,
 		"XDG_CACHE_HOME="+cache,
 		"GOCACHE="+filepath.Join(cache, "go-build"),
 		"GOLANGCI_LINT_CACHE="+filepath.Join(cache, "golangci-lint"),
 		"GOFLAGS=-modcacherw",
 	)
-	for _, m := range []map[string]string{j.Env, j.Secrets} {
-		for _, k := range sortedKeys(m) {
-			env = append(env, k+"="+m[k])
-		}
-	}
+	env = appendJobEnv(env, j)
 	return run(ctx, j.Timeout, j.Worktree, j.Argv[0], j.Argv[1:], env)
 }
 
@@ -328,4 +352,21 @@ func sortedKeys(m map[string]string) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// appendJobEnv adds the job's own environment, its secrets and its spool folder to env. Later
+// entries win, so the run's YNR_SPOOL is its own folder whatever the host's environment said.
+func appendJobEnv(env []string, j Job) []string {
+	for _, m := range []map[string]string{j.Env, j.Secrets} {
+		for _, k := range sortedKeys(m) {
+			if j.NoOTLP && strings.HasPrefix(k, "OTEL_EXPORTER_OTLP_") {
+				continue
+			}
+			env = append(env, k+"="+m[k])
+		}
+	}
+	if j.Spool != "" {
+		env = append(env, "YNR_SPOOL="+j.Spool)
+	}
+	return env
 }

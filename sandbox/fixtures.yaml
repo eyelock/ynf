@@ -240,6 +240,36 @@ fixtures:
         - the command exits 3, so the run ends error and the item escalates at once; no model runs
         - the failure memory (sig/outcome/error) is what `make e2e-memory-outage` queues while ynm is unreachable, and finds in ynm after
 
+  - id: spool-probe
+    kind: issue
+    title: internal/format is not gofmt-clean, and the run reports in
+    body: fixtures/spool-probe.md
+    labels: ["ynf:spool", "pkg:internal/format"]
+    lane: spool
+    calibrate:
+      command: { deterministic: true }
+    expect:
+      result: in_review
+      labels: { present: [ynf:in-review], absent: [ynf:spool, ynf:working, ynf:proposed] }
+      checks:
+        - the run has a spool folder and a manifest naming its lane, item and step, and writes a record into the folder in the trace ynf gave it
+        - with ynr available, the record reaches e2e's receiver with provenance run and the lane the manifest names, not the one the run claimed; without it this check is skipped, and e2e says why
+
+  - id: spool-flood
+    kind: issue
+    title: internal/format is not gofmt-clean, and the run fills its spool folder
+    body: fixtures/spool-flood.md
+    labels: ["ynf:spool-flood", "pkg:internal/format"]
+    lane: spool-flood
+    calibrate:
+      command: { deterministic: true }
+    expect:
+      result: in_review
+      labels: { present: [ynf:in-review], absent: [ynf:spool-flood, ynf:working, ynf:proposed] }
+      checks:
+        - the run writes 20 MiB into its spool folder, past the run quota, and goes on to a draft pull request
+        - ynf removes the excess from the folder and says so in its log; the step is unaffected
+
   - id: deps-bump
     kind: issue
     title: Bump the Go toolchain

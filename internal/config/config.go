@@ -8,11 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/eyelock/ynf"
 	"github.com/eyelock/ynf/internal/policy"
+	"github.com/eyelock/ynf/internal/spool"
 	"gopkg.in/yaml.v3"
 )
 
@@ -65,6 +67,24 @@ type Config struct {
 		// store keeps nothing at the personal level.
 		Level string `yaml:"level"`
 	} `yaml:"memory"`
+
+	// Telemetry is where ynf and its runs write OpenTelemetry, and whether ynf starts ynr serve for
+	// a factory job (ADR-009, ADR-011). Without it, ynf writes where the environment says.
+	Telemetry *struct {
+		// Spool is the spool root: factory/ for ynf, runs/<run id>/ for each run, and
+		// manifests/<run id>.json.
+		Spool string `yaml:"spool"`
+		// RunQuota is how large a run's folder may grow, such as 64MiB.
+		RunQuota  string `yaml:"run_quota"`
+		Collector *struct {
+			Enabled  bool   `yaml:"enabled"`
+			ID       string `yaml:"id"`
+			Instance string `yaml:"instance"`
+			Upstream string `yaml:"upstream"`
+			// Archive is how long ynr serve has at a job's end to ship what is left.
+			Archive string `yaml:"archive"`
+		} `yaml:"collector"`
+	} `yaml:"telemetry"`
 
 	Path     string   `yaml:"-"` // the file it was loaded from
 	Shadowed []string `yaml:"-"` // other candidates found at the same level
@@ -120,7 +140,79 @@ func Load(path string) (*Config, error) {
 		host, _ := os.Hostname()
 		c.Owner = fmt.Sprintf("ynf@%s/%d", host, os.Getpid())
 	}
+	if _, err := c.TelemetrySettings(os.Getenv); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	return &c, nil
+}
+
+// TelemetrySettings is the telemetry block, resolved: the spool root as an absolute path, the run
+// quota, and the collector with its upstream filled from the operator's OpenTelemetry environment
+// when the block names none. getenv reads that environment. It is an error for the collector to be
+// enabled with no upstream: ynr serve has nowhere to ship until it has an object store of its own.
+func (c *Config) TelemetrySettings(getenv func(string) string) (TelemetrySettings, error) {
+	var t TelemetrySettings
+	b := c.Telemetry
+	if b == nil {
+		return t, nil
+	}
+	if b.Spool != "" {
+		t.Root = c.rel(b.Spool)
+	}
+	if b.RunQuota != "" {
+		q, err := ParseSize(b.RunQuota)
+		if err != nil {
+			return t, fmt.Errorf("telemetry.run_quota: %w", err)
+		}
+		t.Quota = q
+	}
+	col := b.Collector
+	if col == nil || !col.Enabled {
+		return t, nil
+	}
+	if t.Root == "" {
+		return t, errors.New("telemetry.collector is enabled, and it reads a spool: set telemetry.spool")
+	}
+	t.Collector = spool.Collector{Enabled: true, ID: col.ID, Instance: col.Instance, Upstream: col.Upstream, Archive: spool.DefaultArchive}
+	if col.Archive != "" {
+		d, err := time.ParseDuration(col.Archive)
+		if err != nil || d <= 0 {
+			return t, fmt.Errorf("telemetry.collector.archive %q is not a duration", col.Archive)
+		}
+		t.Collector.Archive = d
+	}
+	if t.Collector.Upstream == "" {
+		t.Collector.Upstream = spool.UpstreamFromEnv(getenv)
+	}
+	if t.Collector.Upstream == "" {
+		return t, errors.New("telemetry.collector is enabled with no upstream: ynr serve needs somewhere to ship until it has an object store of its own. " +
+			"Set telemetry.collector.upstream, or OTEL_EXPORTER_OTLP_ENDPOINT in the environment")
+	}
+	return t, nil
+}
+
+// TelemetrySettings is the telemetry block, resolved.
+type TelemetrySettings struct {
+	Root      string // the spool root, absolute; empty when none is configured
+	Quota     int64  // bytes a run's folder may hold; 0 is the default
+	Collector spool.Collector
+}
+
+// ParseSize reads a size such as 64MiB: a whole number and KiB, MiB or GiB.
+func ParseSize(s string) (int64, error) {
+	for _, u := range []struct {
+		suffix string
+		mult   int64
+	}{{"KiB", 1 << 10}, {"MiB", 1 << 20}, {"GiB", 1 << 30}} {
+		if n, ok := strings.CutSuffix(s, u.suffix); ok {
+			v, err := strconv.ParseInt(n, 10, 64)
+			if err != nil || v <= 0 {
+				break
+			}
+			return v * u.mult, nil
+		}
+	}
+	return 0, fmt.Errorf("%q is not a size: want a whole number and KiB, MiB or GiB", s)
 }
 
 // Dir is the folder the config was loaded from; relative paths in it resolve against this.

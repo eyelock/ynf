@@ -56,6 +56,8 @@ type Options struct {
 	Watch bool
 	// WatchEvery is how often Watch looks; default a minute.
 	WatchEvery time.Duration
+	// Spool is ynf's own configuration of where it writes: the spool root, and the collector.
+	Spool Settings
 	// FlushTimeout bounds the flush at exit; default 2 seconds.
 	FlushTimeout time.Duration
 }
@@ -109,7 +111,7 @@ func Setup(ctx context.Context, o Options) *T {
 			semconv.ServiceVersion(o.Version),
 			semconv.ServiceInstanceID(ulid.Make().String()),
 		))
-	c := Choose(o.Environ)
+	c := ChooseWith(o.Environ, o.Spool)
 	t.cur.Store(t.build(ctx, c))
 	if o.Watch && c.Mode == ModeNone {
 		t.wg.Add(1)
@@ -226,7 +228,7 @@ func (t *T) watch() {
 		case <-t.stop:
 			return
 		case <-tick.C:
-			if c := Choose(t.opts.Environ); c.Mode != ModeNone {
+			if c := ChooseWith(t.opts.Environ, t.opts.Spool); c.Mode != ModeNone {
 				t.cur.Store(t.build(context.Background(), c))
 				return
 			}

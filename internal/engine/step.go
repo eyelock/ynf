@@ -26,6 +26,7 @@ import (
 	"github.com/eyelock/ynf/internal/lease"
 	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/runner"
+	"github.com/eyelock/ynf/internal/spool"
 	"github.com/eyelock/ynf/internal/store"
 	"github.com/eyelock/ynf/internal/telemetry"
 	"github.com/eyelock/ynf/internal/tracker"
@@ -560,6 +561,14 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		return fail(runner.OperatorError, err)
 	}
 	job.Argv = argv
+	if y, ok := r.(runner.YnhRunner); ok && y.Cfg.TelemetryRelay {
+		// ynh agent run starts ynr relay for the vendor CLI, which writes into the run's folder.
+		job.Env["YNH_TELEMETRY_RELAY"] = "1"
+		if e.Spool == nil {
+			e.log().Warn("telemetry_relay is on, and there is no spool root to relay into: set telemetry.spool", "item", it.Key, "lane", lane.Name)
+		}
+	}
+	spoolRun := s.beginSpool(&job, spool.Manifest{Run: runID, Lane: laneID, Harness: usedHarness, Focus: usedFocus, Item: it.Key, Step: s.id})
 
 	log := e.log().With("item", it.Key, "run", runID)
 	log.Info("run started", "lane", lane.Name, "runner", r.Name(), "executor", ex.Name(), "image", job.Image, "base", base, "attempt", it.Attempts)
@@ -569,6 +578,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		return ex.Run(ctx, job)
 	})
 	stop()
+	s.endSpool(spoolRun, stepDir)
 	rec := RunRecord{Runner: r.Name(), RunnerDetected: detected, Executor: ex.Name(), Argv: argv, Base: base, StepDir: stepDir, Denied: out.Denied}
 	_ = os.WriteFile(filepath.Join(runDir, "stdout"), out.Stdout, 0o644)
 	_ = os.WriteFile(filepath.Join(runDir, "stderr"), out.Stderr, 0o644)

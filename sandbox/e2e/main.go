@@ -105,6 +105,9 @@ type item struct {
 	Branch   string         `json:"branch"`
 }
 
+// ynrFlag and ynrSrc say which ynr the collector checks use (collector.go).
+var ynrFlag, ynrSrc string
+
 func main() {
 	root := flag.String("root", ".", "the sandbox/ directory")
 	repo := flag.String("repo", "eyelock/ynf-sandbox", "the sandbox repository")
@@ -115,6 +118,8 @@ func main() {
 	outage := flag.Bool("memory-outage", false, "run with ynm unreachable, then bring it back and check the queued memory writes arrive")
 	hideYnh := flag.Bool("hide-ynh", false, "hide ynh from ynf (YNF_YNH_BIN names nothing), so a lane with no runner falls back to its command")
 	image := flag.String("image", "", "run ynf inside this factory-flavoured harness image, as a job runner would (ADR-009, shape B)")
+	flag.StringVar(&ynrFlag, "ynr", "", "the ynr to use for the collector checks (default: YNF_YNR_BIN, a build of -ynr-src, or ynr on PATH); off skips them")
+	flag.StringVar(&ynrSrc, "ynr-src", "", "a ynr checkout to build the collector checks' ynr from (default: YNR_SRC); it is only built, never changed")
 	shadowOn := flag.Bool("shadow", true, "with the gofmt lane, end by closing fmt-format with a merged human fix and proving shadow mode on it (merges into the sandbox's main)")
 	flag.Parse()
 	if *forget {
@@ -202,14 +207,31 @@ func run(root, repo, factory, image string, outage bool, lanes []string, timeout
 	_ = os.Setenv("PATH", tmp+string(os.PathListSeparator)+os.Getenv("PATH"))
 	_ = os.Setenv("YNF_SANDBOX_TRACKER_DATA", trackerData)
 	// ynf writes its OpenTelemetry to a spool of this run's own, and the run reads it back (ADR-011).
-	// Inside an image the variable does not reach ynf, so that run is not checked.
+	// With ynr, ynf is configured as a factory job with the collector on: ynr serve ships what is in
+	// the spool to a receiver of e2e's own, and the run reads it from there, with what ynr stamped.
+	// Without ynr, those checks are skipped, and said to be. Inside an image the variable does not
+	// reach ynf, so that run is not checked.
 	spool := ""
+	var col *collectorSetup
 	if image == "" {
 		spool = filepath.Join(tmp, "spool")
 		if err := os.MkdirAll(spool, 0o755); err != nil {
 			return err
 		}
-		_ = os.Setenv("YNR_SPOOL", spool)
+		bin, why := ynrBinary(ynrFlag, ynrSrc, tmp)
+		if bin == "" {
+			fmt.Printf("collector, manifest and quota checks skipped: %s\n  ynf writes to a spool of this run's own, and only the step and intake checks run\n", why)
+			_ = os.Setenv("YNR_SPOOL", spool)
+		} else {
+			rcv, err := startReceiver()
+			if err != nil {
+				return err
+			}
+			defer rcv.close()
+			col = &collectorSetup{spool: spool, rcv: rcv, bin: bin}
+			_ = os.Setenv("YNF_YNR_BIN", bin)
+			fmt.Printf("collector on: ynf starts %s as ynr serve for the sweep, shipping to a receiver at %s\n", bin, rcv.url)
+		}
 	}
 	if hideYnh {
 		// ynf detects ynh by asking this binary (ADR-012): nothing is there, so a lane with no
@@ -250,7 +272,11 @@ func run(root, repo, factory, image string, outage bool, lanes []string, timeout
 		}
 		fmt.Printf("ynf runs inside %s, as a job runner would run it\n", image)
 	}
-	if err := os.WriteFile(cfg, fmt.Appendf(nil, "version: 1\nfactory: {repo: %s}\npoll: {ci: 15s, review: 1m}\nlease: {ttl: 30s, heartbeat: 10s}\n%s%s", factory, mem, inImage), 0o644); err != nil {
+	telemetryCfg := ""
+	if col != nil {
+		telemetryCfg = col.config()
+	}
+	if err := os.WriteFile(cfg, fmt.Appendf(nil, "version: 1\nfactory: {repo: %s}\npoll: {ci: 15s, review: 1m}\nlease: {ttl: 30s, heartbeat: 10s}\n%s%s%s", factory, mem, inImage, telemetryCfg), 0o644); err != nil {
 		return err
 	}
 	// Memories written before this run are not evidence for it (e2e-only skips the reset).
@@ -314,6 +340,10 @@ func run(root, repo, factory, image string, outage bool, lanes []string, timeout
 			return fmt.Errorf("%s: its run never started, so there was nothing to kill", f.ID)
 		}
 		fmt.Printf("\nkilled ynf (SIGKILL) as #%d's run started (%s); a fresh ynf takes over\n\n", n, f.ID)
+		if col != nil {
+			// ynr serve is not ynf's child in the sense that dies with it: a job's container ends it.
+			stopOrphans(spool)
+		}
 	}
 	out, err := stream(ynf, args...)
 	if err != nil {
@@ -362,13 +392,11 @@ func run(root, repo, factory, image string, outage bool, lanes []string, timeout
 		return fmt.Errorf("%d fixture(s) did not end as expected", failed)
 	}
 	if spool != "" && slices.Contains(lanes, "gofmt") {
-		var keys []string
-		for _, it := range res.Items {
-			if it.Lane == "gofmt" {
-				keys = append(keys, it.Key)
+		if col != nil {
+			if err := checkCollector(*col, filepath.Join(tmp, "work"), logPath, res.Items, lanes); err != nil {
+				return err
 			}
-		}
-		if err := checkTelemetry(spool, keys, "gofmt"); err != nil {
+		} else if err := checkSpool(spool, gofmtKeys(res.Items), "gofmt"); err != nil {
 			return err
 		}
 	}

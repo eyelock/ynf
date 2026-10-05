@@ -28,6 +28,13 @@ the folder the file is in.
 | `memory.endpoint` | none | The hosted ynm's MCP endpoint, for `transport: http`. |
 | `memory.token_env` | none | The variable holding the bearer token for `transport: http`, such as a machine token from your identity provider's client-credentials grant; its subject is the writer in ynm's audit log. A shared static token names no one, so every worker's writes are recorded as `token:static`; records still land in ynf's namespace. ynf refuses to start without it. |
 | `memory.level` | `personal`; `distributed` over http | The level ynf writes at. A shared store keeps nothing at the personal level, so writes to one say `distributed`. |
+| `telemetry.spool` | none | The spool root (ADR-011), relative to the file's folder. ynf writes its own telemetry to `factory/` under it, gives each run a folder at `runs/<run id>/` and a manifest at `manifests/<run id>.json`, and starts each run with `YNR_SPOOL` set to its own folder. Put it on a filesystem of its own, apart from `work_dir` and the store, such as a tmpfs (ADR-007). Without it, ynf writes where the environment says, as [See ynf in OpenTelemetry](../how-to/see-ynf-in-opentelemetry.md) describes. |
+| `telemetry.run_quota` | `64MiB` | How large a run's folder may grow (`KiB`, `MiB` or `GiB`) before ynf removes the largest files from it. This bounds a flood; it is not a hard limit. ADR-007 says what each executor and host guarantees. |
+| `telemetry.collector.enabled` | `false` | Start `ynr serve` on the spool for the length of a factory job (below). Off by default, and never turned on because `ynr` was found (ADR-012). Needs `telemetry.spool`, `collector.id` and an upstream. |
+| `telemetry.collector.id` | required when enabled | The collector's identity: the runner pool or the host the job runs on, stable from one job to the next. Never the job's own id. Lower-case letters, digits, `.`, `_` and `-`, as `ynr serve` asks. |
+| `telemetry.collector.instance` | none | The job within the pool, such as a CI run id (a string: quote a number). It is recorded as data on what the collector ships, not as identity. |
+| `telemetry.collector.upstream` | the operator's endpoint | The OTLP/HTTP endpoint `ynr serve` ships to. When it is not set, ynf uses `OTEL_EXPORTER_OTLP_ENDPOINT` (or a signal's own endpoint, `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and the others, with its `/v1/<signal>` path taken off), then `YNR_UPSTREAM`. `ynr serve` needs one until it has an object store of its own, so a collector that is enabled with none fails at config load, saying so. The endpoint's headers are not passed on. |
+| `telemetry.collector.archive` | `30s` | How long `ynr serve` has at a job's end, after `SIGTERM`, to ship what is left. |
 
 A write ynm cannot take is not lost and does not stop a step: it waits in ynf's own store, up to
 1000 records (then the oldest are dropped, with a warning), and is sent, oldest first, before the next
@@ -38,6 +45,44 @@ What ynf writes to memory, and why it never decides anything with it, is in
 [`ynf.failure.v1`](../schema/memory/ynf.failure.v1.schema.json) record per occurrence of a failure
 signature, tagged `ynf.failure.v1` and `occurrence`. Each run's model, effort, turns, tokens and cost stay in ynf's
 own store, where `ynf stats` reads them.
+
+## A factory job with the collector on
+
+With `telemetry.collector.enabled`, a factory job starts `ynr serve` on the spool and stops it at
+its end (ADR-011). The commands that count as a factory job are the ones that do factory work for
+as long as they run: `ynf sweep`, `ynf serve`, `ynf handle` and `ynf shadow run`. `ynf start` is a
+person's own, attended command and starts no collector; nor does a command that only reads or
+records.
+
+```yaml
+telemetry:
+  spool: /var/spool/ynf        # a tmpfs or a volume of its own
+  run_quota: 64MiB
+  collector:
+    enabled: true
+    id: gha-linux-pool         # the runner pool, not this job
+    instance: ${CI_RUN_ID}     # written by whatever renders the file
+    upstream: https://otel.example.com
+```
+
+The job runs `ynr serve --spool <spool> --collector-id <id> [--collector-instance <instance>]
+--upstream <endpoint>`. With the collector on, **the spool wins**: ynf writes its own telemetry to
+`factory/` whatever `OTEL_EXPORTER_OTLP_*` says, and every run starts without those variables, so
+the operator's endpoint is honoured at the edge by `ynr serve`'s upstream and no run needs a way
+to reach it. At the job's end ynf stops `ynr serve` with `SIGTERM` and gives it the archive time to
+ship, and then copies any spool file still in `runs/` or `factory/` into the run capture (ADR-010):
+into the step's `spool/` folder for a run's own, and `<work_dir>/spool-capture/<time>/` for the
+rest.
+
+If `ynr` is missing, or does not start, or ends while the job runs, the job logs that plainly and
+carries on: telemetry never fails the factory. `ynf doctor` says the same. A job killed with
+`SIGKILL` leaves its `ynr serve` running; the container a job runs in ends it.
+
+## Detecting ynr
+
+`ynr` is an optional tool, found the way ynh is: `YNF_YNR_BIN` if set, else `ynr` on `PATH`, asked
+with `ynr info --format json`. `ynf doctor` shows what it found. Finding it starts nothing: only
+`telemetry.collector.enabled` starts `ynr serve`, and only for a factory job.
 
 ## The configuration repository
 

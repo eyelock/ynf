@@ -23,6 +23,7 @@ import (
 	"github.com/eyelock/ynf/internal/memory"
 	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/runner"
+	"github.com/eyelock/ynf/internal/spool"
 	"github.com/eyelock/ynf/internal/store"
 	"github.com/eyelock/ynf/internal/telemetry"
 	"github.com/eyelock/ynf/internal/tracker"
@@ -104,6 +105,11 @@ type Engine struct {
 	// MemoryLevel is the ynm level ynf writes at: empty or personal for one person's store,
 	// distributed for a shared one (ADR-008).
 	MemoryLevel string
+	// Spool is the spool root, when one is configured: each run gets a folder and a manifest in
+	// it (ynr ADR-003). SpoolCollector is true when ynf starts ynr serve for the job, so runs
+	// start without the operator's OTEL_EXPORTER_OTLP_*.
+	Spool          *spool.Spool
+	SpoolCollector bool
 	// ProgressEvery is how often a run in progress is logged; default 30s, negative for never.
 	ProgressEvery time.Duration
 

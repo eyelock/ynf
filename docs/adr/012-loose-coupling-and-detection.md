@@ -91,7 +91,13 @@ run:
 |---|---|
 | runner `ynh` | `ynh` is on `PATH` (or `YNF_YNH_BIN`) and `ynh version --format json` is in the supported range |
 | memory `ynm` | `ynm` is on `PATH`, and the repository has `.ynm/` or the user has `~/.ynm/`; or a `YNM_URL` endpoint answers |
+| `ynr` (optional) | `ynr` is on `PATH` (or `YNF_YNR_BIN`) and `ynr info --format json` answers with a version. Detecting it starts nothing: `ynf doctor` shows it, and only the telemetry configuration starts `ynr serve` (ADR-009, ADR-011) |
 | tracker and forge `github` for github.com | always available; any other instance, GitHub Enterprise Server or an `mcp` tracker, is configured, never detected |
+
+Detection decides what ynf may use; configuration decides what runs. ynr is the case that shows
+it: it is detected the way ynh is, and unlike ynh nothing uses it by being found, because a
+collector is a background process, and an unattended factory must not start one because someone
+installed a binary. Without it, every run and every job does what it did.
 
 Precedence is explicit config, then detection, then the built-in fallback (`command` for the
 runner, `none` for memory). A lane that names a provider explicitly and cannot get it is refused
