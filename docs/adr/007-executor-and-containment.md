@@ -144,38 +144,60 @@ what it was. Under `inline`, the run user is handed its own folder for the run a
 else of the spool; the root must let it reach its folder (mode `0711`, so it cannot list its
 neighbours). The manifest naming the run's lane, harness, focus, item and step is written to
 `manifests/<run id>.json`, which the run cannot reach, before the run starts: ynr stamps those
-names from it, so a run cannot claim another factory. When the collector is on, a run starts
+names from it, so a run cannot claim another factory. When the run writes as a user other than the
+folder's owner, the manifest also names that user as `uid`, and ynr reads the files that user owns
+in that run's folder. ynf finds the uid from the executor, never from the run: under `docker` with
+an image that keeps its own user (a harness image built by ynh, or a command lane with
+`run.command.image_user`) from the image's configured user, resolved through the image's
+`/etc/passwd` when it is a name, which ynf copies out of a container it creates and never starts;
+under `inline` from the run user. A run that writes as the folder's owner has no `uid`. When the collector is on, a run starts
 without the operator's `OTEL_EXPORTER_OTLP_*`, whichever executor it uses.
 
 **A run that fills its folder must not stall ynf.** Telemetry is never allowed to fail a step, so
 what a run writes into its folder is bounded, and a spool that cannot be written costs the run its
-telemetry and nothing else: the step goes on, and ynf says so in its log. ynf holds each run's folder
-to `telemetry.run_quota` (64 MiB by default): it measures the folder every quarter of a second
-while the run lasts, and removes the largest files, never following a link, until it is back under.
-This bounds a flood to what a run writes in a quarter of a second above the quota, and it keeps
-that bound whatever the executor. It is not a hard limit, and ynf does not claim it is. A hard
-per-run quota needs a mount or a filesystem quota of the run's own, and `ynr serve` reads only run
-folders on the spool's own device and owned by the folder's owner (ynr ADR-003), so a size-limited
-volume per run would be refused by the reader it is for. The stronger guarantee is therefore the
-spool's, not the run's:
+telemetry and nothing else: the step goes on, and ynf says so in its log. The bound is
+`telemetry.run_quota` (64 MiB by default), and ynf gives it as strongly as the host allows.
+
+Where the host lets ynf make one, each run's folder is a size-limited volume of its own, sized by
+the quota: a tmpfs on Linux when ynf has `CAP_SYS_ADMIN`, a sparse disk image on macOS, which needs
+no privilege. An executor that cannot use one says so, and its runs keep a plain folder. A write past the limit fails inside the run, with no space left, and ynf has nothing
+to remove. ynr reads the folder as it would any other: it checks each file against its own
+folder's device, so a volume of its own is accepted, and it still refuses a file with more than one
+link. Under `docker` only that volume is mounted into the container. The volume goes at the run's
+end, whether the step succeeded or failed, was interrupted or panicked, and only after its files
+are shipped or captured: with `ynr serve` running, ynf waits up to ten seconds for it to ship and
+delete the run's closed files; whatever is left, which includes a file still open, is copied into
+the run's capture (ADR-010); then the volume is unmounted and its folder removed. The job's end
+unmounts any volume whose run never reached its end. A ynf killed outright cannot do that, and
+leaves its volumes mounted for the operator to detach.
+
+Where a volume cannot be made, ynf holds the folder to the quota by measuring it every quarter of a
+second while the run lasts and removing the largest files, never following a link, until it is back
+under. That bounds a flood to what a run writes in a quarter of a second above the quota. It is not
+a hard limit, and ynf says so in its log, once per job, naming why there is no volume. Which a run
+gets:
 
 | Executor and host | Per-run folder | A full spool |
 |---|---|---|
-| `docker` on Linux | its own folder is the only part of the spool the run can write; bounded by the quota watcher | bounded by the filesystem the spool is on: put the root on a tmpfs or a volume of its own and a run that outruns the watcher fills that, never ynf's state |
-| `docker` on Docker Desktop for Mac | the same | the same; there is no tmpfs on the host, so a RAM disk or a volume of its own does it |
-| `inline` in a job container | the run user's folder only; bounded by the quota watcher (the container has no `CAP_SYS_ADMIN`, so no filesystem quota) | the job's spool volume, such as an `emptyDir` with a size limit, or a tmpfs |
-| `process`, on a laptop | none: the run is not contained, and can write wherever the user can; bounded by the quota watcher | the laptop's own disk, unless the root is on a filesystem of its own |
-| a hosted CI runner | as `docker` or `inline`, whichever the job uses | `/dev/shm` or another tmpfs, tolerated filling: the job loses telemetry, not work |
+| `docker` on Docker Desktop for Mac | its own folder, plain: the quota watcher is the bound. A disk image attached at the run's folder is read by `ynr serve` on the host, but Docker Desktop's daemon cannot bind it into a container (`error while creating mount source path ... file exists`), so ynf does not make one | there is no tmpfs on the host, so a RAM disk or a volume of its own for the spool root does it |
+| `docker` on Linux, ynf with `CAP_SYS_ADMIN` (root, or a job with that capability) | a tmpfs of the quota's size at the run's folder: a hard quota | a run cannot outgrow its own volume |
+| `docker` on Linux, ynf unprivileged | its own folder is the only part of the spool the run can write; the quota watcher is the bound | bounded by the filesystem the spool is on: put the root on a tmpfs or a volume of its own and a run that outruns the watcher fills that, never ynf's state |
+| `inline` in a job container | the run user's folder only. The container has no `CAP_SYS_ADMIN`, so no volume: the quota watcher is the bound. A job that does grant it gets a tmpfs | the job's spool volume, such as an `emptyDir` with a size limit, or a tmpfs |
+| `process`, on a laptop | the run is not contained and can write wherever the user can. On macOS, and on Linux with `CAP_SYS_ADMIN`, its spool folder is a volume as above, a hard quota; elsewhere the quota watcher is the bound | the laptop's own disk, unless the root is on a filesystem of its own |
+| a hosted CI runner | as `docker` or `inline`, whichever the job uses; an unprivileged runner gets the quota watcher | `/dev/shm` or another tmpfs, tolerated filling: the job loses telemetry, not work |
 
-None of these gives a hard per-run quota, and ynf says so rather than implying one. What each
-does give is that ynf's state, its store and its work folder are never on the spool's filesystem,
-when the operator follows the advice, and that a full spool never fails a step: ynf's own writer
-drops what it cannot write and counts it, the manifest and the folder are made or skipped with a
-logged warning, and the run starts either way. `ynr serve` stops reading a run folder that exceeds
-its own budget and records a provenance warning, which is the reader's backstop (ynr ADR-003).
+What each gives besides the quota is that ynf's state, its store and its work folder are never on
+the spool's filesystem, when the operator follows the advice, and that a full spool never fails a
+step: ynf's own writer drops what it cannot write and counts it, the manifest and the folder are
+made or skipped with a logged warning, and the run starts either way. `ynr serve` stops reading a
+run folder that exceeds its own budget and records a provenance warning, which is the reader's
+backstop (ynr ADR-003).
+
 A run whose container keeps an image's own user (a harness image built by ynh) writes files that
-user owns, which `ynr serve` refuses in a folder owned by another user, so the run's records stay
-in its folder and are swept into the run capture instead (ADR-010).
+user owns. With its uid in the manifest, `ynr serve` reads them; a uid that could not be found out
+(an image that cannot be inspected, a user missing from its `/etc/passwd`) is logged and left out,
+and ynr then refuses what that user writes, which stays in the folder and is swept into the run
+capture instead (ADR-010).
 
 **No mode opens egress**, shadow mode included. Shadow runs the real agent on real ticket text,
 the input most likely to carry an injected instruction, so it gets the lane's policy like any
@@ -204,10 +226,6 @@ default; the pull request author stays the owner of record.
 
 ## Open questions
 
-- A hard per-run quota, which needs `ynr serve` to read a run's folder on a mount of its own (a
-  size-limited volume under docker, a filesystem quota under inline), or a quota the filesystem
-  gives on the spool's own device, such as an XFS or ext4 project quota. Until one is available the
-  watcher above is the bound.
 - What the job runner can do per job: run more than one container (so `docker` works inside a
   job and `inline` is unnecessary), and restrict a job's egress to a list.
 - Whether separate users inside one container are enough to keep ynf's credentials from the

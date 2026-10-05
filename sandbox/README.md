@@ -93,6 +93,7 @@ in the sandbox cannot read what it is being tested on.
 | `gofmt` | originate | command (`gofmt -w`) | issues labelled `ynf:fmt` | a runner with no model, and deterministic output |
 | `detect` | originate | none named: ynh if detected, else command (`gofmt -w`) | issues labelled `ynf:detect` | detection: `make e2e` hides ynh, so the lane falls back to its command with no model |
 | `spool` | originate | command (a record into the run's spool folder, then `gofmt -w`) | issues labelled `ynf:spool` | the run's own telemetry reaching the collector with run provenance and the manifest's lane |
+| `spool-image` | originate | command in `ynf-sandbox-probe` (uid 10042, kept as the image's own user; a record into the run's spool folder, then `gofmt -w`) | issues labelled `ynf:spool-image` | an image user's records reaching the collector: the manifest names the user |
 | `spool-flood` | originate | command (20 MiB into the run's spool folder, then `gofmt -w`) | issues labelled `ynf:spool-flood` | a run filling its folder: held to the quota, the step unaffected |
 | `reclaim` | originate | command (`gofmt -w`, slowly) | issues labelled `ynf:reclaim` | killing ynf mid-run and a fresh one taking over |
 | `fix-ci` | adopt | ynh, focus `fix-ci` | pull requests labelled `ynf:fix-ci` | adopting someone else's pull request |
@@ -116,7 +117,8 @@ that package, so a run is judged on the debt it was asked to pay down rather tha
 | `fmt-format` | gofmt | a deterministic diff from the command runner |
 | `detect-format` | detect | no runner named, ynh hidden: the command runs, and the run record says `runner_detected` |
 | `spool-probe` | spool | draft pull request; with ynr, the run's own record arrives with run provenance and its manifest's lane |
-| `spool-flood` | spool-flood | draft pull request; the run's folder is held to the run quota and ynf says so |
+| `spool-image` | spool-image | draft pull request; with ynr, an image user's record arrives with run provenance and its manifest's lane |
+| `spool-flood` | spool-flood | draft pull request; the run's folder is held to the run quota, by its own volume where the host gives one, else by ynf taking the excess away |
 | `deps-bump` | deps | ignored |
 | `fix-ci-retry` | fix-ci | an adopted pull request gets a commit, never a force-push |
 | `relaxed-scope` | relaxed | a scope that replaces lint with `true` is refused before any run, with no model spend; it is a ynh lane, so `make e2e` runs it only with `LANES=relaxed,...` and the agent image and ynh available |
@@ -146,8 +148,13 @@ checks that:
 - the `spool` lane's run, which writes a record of its own into its folder claiming another lane and
   provenance, arrived with `ynr.provenance=run`, the lane the manifest names, the run, item and
   step, and as a child of the step's `ynf.run` span;
+- the `spool-image` lane's run, in an image whose user (uid 10042) does not own its folder, had that
+  uid in its manifest, and its record arrived as the `spool` lane's does; e2e builds the image
+  (`images/probe`) from the local Docker;
 - the `spool-flood` lane's run, which writes 20 MiB into its folder against a 1 MiB quota, was held
-  to the quota, ynf said so, and the step still proposed;
+  to the quota and the step still proposed. e2e says which path held it: where the run's folder is a
+  volume of its own (a tmpfs on a Linux host where ynf has `CAP_SYS_ADMIN`), the write failed at the
+  volume's limit; elsewhere, such as Docker Desktop for Mac, ynf took the excess away and said so;
 - nothing was left unshipped in the spool, or what was is in the run capture.
 
 `YNF_YNR_BIN=/path/to/ynr` names a ynr, `YNR_SRC=/path/to/ynr` builds one from a checkout (it only

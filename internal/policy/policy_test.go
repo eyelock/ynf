@@ -38,7 +38,7 @@ func TestSandboxLanesLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(f.Names(), ",")
-	if got != "deps,detect,doc-drift,fix-ci,gofmt,lint-paydown,outage,reclaim,relaxed,spool,spool-flood" {
+	if got != "deps,detect,doc-drift,fix-ci,gofmt,lint-paydown,outage,reclaim,relaxed,spool,spool-flood,spool-image" {
 		t.Fatalf("lanes %s", got)
 	}
 	if d := f.Lanes["deps"]; d.On() || d.Kind != "originate" || len(d.Intake) != 1 {
@@ -46,6 +46,9 @@ func TestSandboxLanesLoad(t *testing.T) {
 	}
 	if d := f.Lanes["detect"]; d.Run.Runner != "" || d.Run.Ynh == nil || d.Run.Command == nil {
 		t.Fatalf("detect names no runner and offers both: %+v", d.Run)
+	}
+	if s := f.Lanes["spool-image"]; s.Run.Command == nil || !s.Run.Command.ImageUser || s.Run.Command.Image == "" || f.Lanes["spool"].Run.Command.ImageUser {
+		t.Fatalf("spool-image keeps its image's user, and spool does not: %+v", s.Run.Command)
 	}
 	g := f.Lanes["gofmt"]
 	if g.Run.Runner != "command" || g.Run.Executor != "docker" || g.Attempts != 3 {

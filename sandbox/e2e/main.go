@@ -228,6 +228,12 @@ func run(root, repo, factory, image string, outage bool, lanes []string, timeout
 				return err
 			}
 			defer rcv.close()
+			// The spool-image lane's image, with a user of its own (uid 10042); cached after the first build.
+			if slices.Contains(lanes, "spool-image") {
+				if o, err := sh(filepath.Join(root, "images", "probe"), "docker", "build", "-q", "-t", "ynf-sandbox-probe:latest", "."); err != nil {
+					return fmt.Errorf("build the spool-image lane's image: %w\n%s", err, o)
+				}
+			}
 			col = &collectorSetup{spool: spool, rcv: rcv, bin: bin}
 			_ = os.Setenv("YNF_YNR_BIN", bin)
 			fmt.Printf("collector on: ynf starts %s as ynr serve for the sweep, shipping to a receiver at %s\n", bin, rcv.url)

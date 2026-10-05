@@ -158,7 +158,11 @@ type Command struct {
 	Argv []string `yaml:"argv" json:"argv"`
 	// Image is the image the command runs in on a container executor. When the lane resolves to
 	// the command runner it wins over run.image; when it resolves to ynh it is ignored.
-	Image      string `yaml:"image" json:"image,omitempty"`
+	Image string `yaml:"image" json:"image,omitempty"`
+	// ImageUser keeps the image's own user and home, as a ynh-built agent image does, instead of
+	// running as ynf's user. It is for an image whose command needs its own user; a docker executor
+	// only.
+	ImageUser  bool   `yaml:"image_user" json:"image_user,omitempty"`
 	ResultFile string `yaml:"result_file" json:"result_file,omitempty"`
 }
 

@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/eyelock/ynf/internal/spool"
 )
 
 // TestMain keeps the tests off the real telemetry: a developer's laptop spool, or an OTEL_*
@@ -20,6 +22,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	_ = os.Setenv("XDG_STATE_HOME", dir)
+	hostVolumes = func() spool.Volumes { return nil } // no test mounts anything on the host
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
