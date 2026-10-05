@@ -35,7 +35,12 @@ import (
 // ynf reads telemetry back.
 
 // collectorQuota is the run quota e2e configures: the spool-flood lane writes far past it.
-const collectorQuota = "1MiB"
+const (
+	collectorQuota      = "1MiB"
+	collectorQuotaBytes = 1 << 20
+	// imageUserUID is the user of images/probe, the spool-image lane's image.
+	imageUserUID = 10042
+)
 
 // ynrBinary says which ynr to use, or why there is none: -ynr, YNF_YNR_BIN, a ynr checkout to build
 // from (-ynr-src, YNR_SRC) or ynr on PATH, in that order. A checkout is built into tmp.
@@ -236,12 +241,13 @@ func (c collectorSetup) config() string {
 
 // manifestFile is what ynf wrote for a run, as ynr reads it.
 type manifestFile struct {
-	Run     string `json:"run"`
-	Lane    string `json:"lane"`
-	Harness string `json:"harness"`
-	Focus   string `json:"focus"`
-	Item    string `json:"item"`
-	Step    string `json:"step"`
+	Run     string  `json:"run"`
+	Lane    string  `json:"lane"`
+	Harness string  `json:"harness"`
+	Focus   string  `json:"focus"`
+	Item    string  `json:"item"`
+	Step    string  `json:"step"`
+	UID     *uint32 `json:"uid"`
 }
 
 // checkCollector proves a factory job with the collector on: ynf's own records arrived from
@@ -251,6 +257,10 @@ type manifestFile struct {
 // does not hold.
 func checkCollector(c collectorSetup, work, logPath string, items []item, lanes []string) error {
 	stopOrphans(c.spool)
+	log, _ := os.ReadFile(logPath)
+	// Where the host gives each run folder a volume of its own, ynf says so and takes the folder
+	// away at the run's end, after what is in it is shipped or captured.
+	volumes := bytes.Contains(log, []byte("spool folder is a volume of its own, with a hard size limit"))
 	d := c.rcv.snapshot()
 	if err := checkTelemetry(d, gofmtKeys(items), "gofmt"); err != nil {
 		return err
@@ -282,7 +292,7 @@ func checkCollector(c collectorSetup, work, logPath string, items []item, lanes 
 	checked := map[string]int{}
 	for id, s := range runs {
 		lane := s.attr("ynf.lane")
-		for _, name := range []string{"gofmt", "spool", "spool-flood"} {
+		for _, name := range []string{"gofmt", "spool", "spool-image", "spool-flood"} {
 			if !strings.HasSuffix(lane, "#"+name) {
 				continue
 			}
@@ -294,8 +304,14 @@ func checkCollector(c collectorSetup, work, logPath string, items []item, lanes 
 			if err := json.Unmarshal(b, &m); err != nil || m.Run != id || m.Lane != lane || !strings.HasPrefix(m.Item, "item/") || m.Step == "" {
 				return fmt.Errorf("collector: run %s's manifest is %s, want its run, lane %s, item and step", id, b, lane)
 			}
-			if fi, err := os.Stat(filepath.Join(c.spool, "runs", id)); err != nil || !fi.IsDir() {
+			if fi, err := os.Stat(filepath.Join(c.spool, "runs", id)); !volumes && (err != nil || !fi.IsDir()) {
 				return fmt.Errorf("collector: run %s has no folder of its own: %v", id, err)
+			}
+			if name == "spool-image" && (m.UID == nil || *m.UID != imageUserUID) {
+				return fmt.Errorf("collector: run %s's manifest names user %v, want the image's %d: %s", id, m.UID, imageUserUID, b)
+			}
+			if name != "spool-image" && m.UID != nil && *m.UID != uint32(os.Getuid()) {
+				return fmt.Errorf("collector: run %s writes as the folder's owner, and its manifest names user %d: %s", id, *m.UID, b)
 			}
 			checked[name]++
 		}
@@ -306,9 +322,15 @@ func checkCollector(c collectorSetup, work, logPath string, items []item, lanes 
 
 	// The spool lane's own record, in ynr's hands.
 	probes := 0
+	images := 0
 	for _, s := range d.spans {
-		if s.Name != "probe.work" {
+		if s.Name != "probe.work" && s.Name != "probe.image" {
 			continue
+		}
+		want := "#spool"
+		if s.Name == "probe.image" {
+			want = "#spool-image"
+			images++
 		}
 		probes++
 		run := s.Res["ynf.run.id"]
@@ -316,7 +338,7 @@ func checkCollector(c collectorSetup, work, logPath string, items []item, lanes 
 		switch {
 		case s.Res["ynr.provenance"] != "run":
 			return fmt.Errorf("collector: the run's own record has provenance %q, want run (it claimed factory)", s.Res["ynr.provenance"])
-		case !ok || !strings.HasSuffix(s.Res["ynf.lane"], "#spool") || s.Res["ynf.lane"] != parent.attr("ynf.lane"):
+		case !ok || !strings.HasSuffix(s.Res["ynf.lane"], want) || s.Res["ynf.lane"] != parent.attr("ynf.lane"):
 			return fmt.Errorf("collector: the run's own record carries lane %q for run %q, want the lane its manifest names (it claimed forged/lane#claimed)", s.Res["ynf.lane"], run)
 		case !strings.HasPrefix(s.Res["ynf.item.key"], "item/") || s.Res["ynf.step.id"] == "":
 			return fmt.Errorf("collector: the run's own record lacks the item and step from its manifest: %v", s.Res)
@@ -326,12 +348,16 @@ func checkCollector(c collectorSetup, work, logPath string, items []item, lanes 
 			return fmt.Errorf("collector: the run's own record is not a child of its ynf.run span (trace %s/%s, parent %s/%s)", s.TraceID, parent.TraceID, s.ParentSpanID, parent.SpanID)
 		}
 	}
-	if slices.Contains(lanes, "spool") && probes == 0 {
+	if slices.Contains(lanes, "spool") && probes-images == 0 {
 		return errors.New("collector: the spool lane's own record never reached the receiver")
 	}
+	if slices.Contains(lanes, "spool-image") && images == 0 {
+		return errors.New("collector: the image user's record never reached the receiver")
+	}
 
-	// The flood: the folder was held to the quota, ynf said so, and the step went on (the fixture's
-	// own expect checks it reached a draft pull request).
+	// The flood: the folder was held to the quota and the step went on (the fixture's own expect
+	// checks it reached a draft pull request). Where the folder was a volume of its own the write
+	// failed at its limit; elsewhere ynf took the excess away and said so. The run prints which.
 	floods := 0
 	for id, s := range runs {
 		if !strings.HasSuffix(s.attr("ynf.lane"), "#spool-flood") {
@@ -342,15 +368,31 @@ func checkCollector(c collectorSetup, work, logPath string, items []item, lanes 
 		if err != nil {
 			return err
 		}
-		if size > 1<<20 {
+		if size > collectorQuotaBytes {
 			return fmt.Errorf("collector: run %s left %d bytes in its spool folder, over the %s quota", id, size, collectorQuota)
 		}
 	}
 	if slices.Contains(lanes, "spool-flood") {
-		log, _ := os.ReadFile(logPath)
-		if floods == 0 || !bytes.Contains(log, []byte("filled its spool folder")) {
-			return fmt.Errorf("collector: the flooded run was not held to its quota (%d flood runs, and the log does not say so)", floods)
+		exit, held, err := floodResult(work)
+		if err != nil {
+			return err
 		}
+		trimmed := bytes.Contains(log, []byte("filled its spool folder"))
+		switch {
+		case floods == 0:
+			return errors.New("collector: no flooded run was found")
+		case held > collectorQuotaBytes:
+			return fmt.Errorf("collector: the flooded folder held %d bytes after the run's wait, over the %s quota", held, collectorQuota)
+		case volumes && (exit == 0 || trimmed):
+			return fmt.Errorf("collector: the folder was a volume of its own, so the write should have failed at its limit (dd exit %d) with nothing for ynf to remove (trimmed: %v)", exit, trimmed)
+		case !volumes && !trimmed:
+			return errors.New("collector: no volume of its own, and ynf did not say it removed the excess")
+		}
+		path := "the fallback: ynf removed the excess"
+		if volumes {
+			path = fmt.Sprintf("a volume of its own: dd failed at the limit (exit %d), the folder held %d bytes", exit, held)
+		}
+		fmt.Printf("collector: the flood was held to %s by %s\n", collectorQuota, path)
 	}
 
 	// Nothing is left unshipped, or what is left is in the run capture.
@@ -375,8 +417,8 @@ func checkCollector(c collectorSetup, work, logPath string, items []item, lanes 
 	if len(missing) > 0 {
 		return fmt.Errorf("collector: %d spool file(s) were left unshipped and are not in the run capture: %v", len(missing), missing)
 	}
-	fmt.Printf("collector: %d ynf.step span(s) from factory/; %d gofmt, %d spool and %d spool-flood run(s) had a manifest and a folder; %d run record(s) arrived with run provenance and the manifest's lane; %d spool file(s) left, all in the run capture\n",
-		steps, checked["gofmt"], checked["spool"], checked["spool-flood"], probes, len(left))
+	fmt.Printf("collector: %d ynf.step span(s) from factory/; %d gofmt, %d spool, %d spool-image and %d spool-flood run(s) had a manifest and a folder; %d run record(s) arrived with run provenance and the manifest's lane; %d spool file(s) left, all in the run capture\n",
+		steps, checked["gofmt"], checked["spool"], checked["spool-image"], checked["spool-flood"], probes, len(left))
 	return nil
 }
 
@@ -403,3 +445,27 @@ func dirSize(dir string) (int64, error) {
 	})
 	return n, err
 }
+
+// floodResult reads what the spool-flood run printed: dd's exit status and the bytes the folder
+// held after the run's wait.
+func floodResult(work string) (exit int, held int64, err error) {
+	files, _ := filepath.Glob(filepath.Join(work, "steps", "*", "*", "run", "stdout"))
+	for _, f := range files {
+		b, _ := os.ReadFile(f)
+		var gotExit, gotHeld bool
+		for _, l := range strings.Split(string(b), "\n") {
+			if v, ok := strings.CutPrefix(strings.TrimSpace(l), "flood-dd-exit="); ok {
+				exit, gotExit = atoi(v), true
+			}
+			if v, ok := strings.CutPrefix(strings.TrimSpace(l), "flood-bytes="); ok {
+				held, gotHeld = int64(atoi(v)), true
+			}
+		}
+		if gotExit && gotHeld {
+			return exit, held, nil
+		}
+	}
+	return 0, 0, errors.New("collector: no spool-flood run printed what its folder held")
+}
+
+func atoi(s string) int { n, _ := strconv.Atoi(strings.TrimSpace(s)); return n }

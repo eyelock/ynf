@@ -568,7 +568,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 			e.log().Warn("telemetry_relay is on, and there is no spool root to relay into: set telemetry.spool", "item", it.Key, "lane", lane.Name)
 		}
 	}
-	spoolRun := s.beginSpool(&job, spool.Manifest{Run: runID, Lane: laneID, Harness: usedHarness, Focus: usedFocus, Item: it.Key, Step: s.id})
+	spoolRun := s.beginSpool(&job, ex, spool.Manifest{Run: runID, Lane: laneID, Harness: usedHarness, Focus: usedFocus, Item: it.Key, Step: s.id})
 
 	log := e.log().With("item", it.Key, "run", runID)
 	log.Info("run started", "lane", lane.Name, "runner", r.Name(), "executor", ex.Name(), "image", job.Image, "base", base, "attempt", it.Attempts)
@@ -628,6 +628,7 @@ func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, ynhH
 	}
 	y, isYnh := r.(runner.YnhRunner)
 	if !isYnh {
+		job.ImageUser = r.Name() == "command" && lane.Run.Command != nil && lane.Run.Command.ImageUser
 		return job, false, nil
 	}
 	// A lane that names ynh never falls back, and never runs without it: where ynh runs on this

@@ -142,7 +142,7 @@
         "run_quota": {
           "type": "string",
           "pattern": "^[1-9][0-9]*(KiB|MiB|GiB)$",
-          "description": "How large a run's folder may grow before ynf removes the largest files from it. Default 64MiB. ADR-007 says what this does and does not guarantee."
+          "description": "How large a run's folder may grow. Where the host allows it the folder is a volume of its own of that size, and a write past it fails; elsewhere ynf removes the largest files from it. Default 64MiB. ADR-007 says which executor and host gets which."
         },
         "collector": {
           "type": "object",

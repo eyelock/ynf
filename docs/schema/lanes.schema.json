@@ -430,6 +430,10 @@
               "minLength": 1,
               "description": "The container image the command runner runs in on a docker, ecs or k8s-job executor, pinned by tag or digest. When the lane resolves to the command runner it wins over run.image; when it resolves to ynh it is ignored, so a lane with both blocks can name each one's image."
             },
+            "image_user": {
+              "type": "boolean",
+              "description": "Keep the image's own user and home on a docker executor, as a ynh-built agent image does, instead of running as ynf's user. Default false. ynf names that user in the run's spool manifest so ynr serve reads what it writes there."
+            },
             "result_file": {
               "type": "string",
               "description": "Where the command writes a ynf RunResult, if it does."

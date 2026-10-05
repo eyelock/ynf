@@ -60,6 +60,11 @@ type Manifest struct {
 	Focus   string `json:"focus"`
 	Item    string `json:"item"`
 	Step    string `json:"step"`
+	// UID is the user the run writes as, when that is not the owner of its folder: a ynh-built
+	// image's own user, or the inline run user. ynr then also accepts the files that user owns in
+	// the run's folder. It comes from the image or the executor's own setting, never from the run,
+	// and is omitted when the run writes as the folder's owner.
+	UID *uint32 `json:"uid,omitempty"`
 }
 
 // Spool is the spool root as ynf uses it.
@@ -75,9 +80,19 @@ type Spool struct {
 	// run's end captures nothing. Nil means it is not.
 	Shipping func() bool
 
+	// Volumes make a run's folder a size-limited filesystem of its own, so the quota is hard. Nil,
+	// or a host that does not allow one, keeps the quota watcher as the bound.
+	Volumes Volumes
+	// Drain is how long a run's end waits for ynr serve to ship the run's files before its volume
+	// is taken away; default DefaultDrain.
+	Drain time.Duration
+
+	volumeNote sync.Once
+
 	mu       sync.Mutex
 	captured map[string]string // run id to its capture folder
 	done     map[string]bool   // files already captured, by path under the root
+	active   map[string]*Run   // runs whose folder is a volume, until it is taken away
 }
 
 // New makes the layout under root: factory/ and manifests/ for ynf alone, runs/ that a run user
@@ -95,7 +110,7 @@ func New(root string, quota int64, log *slog.Logger) (*Spool, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, fmt.Errorf("spool: %w", err)
 	}
-	s := &Spool{Root: root, Quota: quota, Log: log, captured: map[string]string{}, done: map[string]bool{}}
+	s := &Spool{Root: root, Quota: quota, Log: log, captured: map[string]string{}, done: map[string]bool{}, active: map[string]*Run{}}
 	for _, d := range []struct {
 		name string
 		mode os.FileMode
@@ -188,13 +203,15 @@ type Run struct {
 	Dir string
 
 	s    *Spool
+	vol  *mounted // the run's own volume, when the host gave one
 	stop chan struct{}
 	done chan struct{}
 	tr   trimmed
 }
 
-// Begin gives a run its folder and its manifest, before the run starts, and starts holding the
-// folder to its quota. It is all or nothing: without a manifest ynr could not say which factory
+// Begin gives a run its folder and its manifest, before the run starts, and holds the folder to
+// its quota: as a volume of its own with a hard limit where the host allows one, else with the
+// quota watcher. It is all or nothing: without a manifest ynr could not say which factory
 // the run belongs to, so no folder is left behind for it. imageUser is for a run whose container
 // keeps the image's own user, who needs the folder open to them.
 //
@@ -217,11 +234,29 @@ func (s *Spool) Begin(m Manifest, imageUser bool) (*Run, error) {
 		_ = os.Remove(dir)
 		return nil, fmt.Errorf("spool: %w", err)
 	}
+	r := &Run{ID: m.Run, Dir: dir, s: s, stop: make(chan struct{}), done: make(chan struct{})}
+	if r.vol = s.mount(dir); r.vol != nil {
+		// The volume's own root is the folder now, so it takes the mode again.
+		if err := os.Chmod(dir, mode); err != nil {
+			_ = r.vol.release()
+			_ = os.Remove(dir)
+			return nil, fmt.Errorf("spool: %w", err)
+		}
+	}
 	if err := s.WriteManifest(m); err != nil {
+		if r.vol != nil {
+			_ = r.vol.release()
+		}
 		_ = os.Remove(dir)
 		return nil, err
 	}
-	r := &Run{ID: m.Run, Dir: dir, s: s, stop: make(chan struct{}), done: make(chan struct{})}
+	if r.vol != nil {
+		s.mu.Lock()
+		s.active[m.Run] = r
+		s.mu.Unlock()
+		close(r.done) // the volume is the bound: there is nothing to watch
+		return r, nil
+	}
 	go r.watch()
 	return r, nil
 }
@@ -235,14 +270,21 @@ func (s *Spool) Capture(runID, dir string) {
 }
 
 // End stops holding the folder to its quota and, when nothing will ship what is in it, copies
-// those files into dir, the run's capture (ADR-010). It is safe to call on a nil Run.
+// those files into dir, the run's capture (ADR-010). A folder that is a volume is shipped or
+// captured, then taken away. It is safe to call on a nil Run.
 func (r *Run) End(dir string) {
 	if r == nil {
 		return
 	}
-	close(r.stop)
+	if r.vol == nil {
+		close(r.stop)
+	}
 	<-r.done
 	r.s.Capture(r.ID, dir)
+	if r.vol != nil {
+		r.finishVolume(dir)
+		return
+	}
 	if r.s.isShipping() {
 		return // ynr serve ships them, and the sweep at the job's end takes what it did not
 	}

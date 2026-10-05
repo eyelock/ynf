@@ -158,8 +158,45 @@ lanes:
       on_review:   { add: [ynf:in-review], remove: [ynf:proposed] }
       on_escalate: { add: [ynf:needs-human], remove: [ynf:working, ynf:proposed] }
 
+  # The same record from a run that keeps its image's own user (ynf-sandbox-probe, built by `make
+  # e2e`: uid 10042, not the folder's owner), with no model spend. `make e2e` checks the manifest
+  # names that user and that the record reached the receiver with run provenance and the lane the
+  # manifest names (ynr ADR-003, ynf ADR-007, ADR-011).
+  spool-image:
+    kind: originate
+    intake:
+      - github.search: 'repo:eyelock/ynf-sandbox is:issue is:open label:"ynf:spool-image"'
+        every: 5m
+    run:
+      runner: command
+      command:
+        image: ynf-sandbox-probe:latest
+        image_user: true
+        argv:
+          - sh
+          - -c
+          - |
+            tp=${TRACEPARENT#00-}; tid=${tp%%-*}; rest=${tp#*-}; parent=${rest%%-*}
+            echo "image-user-uid=$(id -u)"
+            [ -d "$YNR_SPOOL" ] && printf '{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"sandbox-probe"}},{"key":"ynf.lane","value":{"stringValue":"forged/lane#claimed"}},{"key":"ynr.provenance","value":{"stringValue":"factory"}}]},"scopeSpans":[{"scope":{"name":"probe"},"spans":[{"traceId":"%s","spanId":"00000000000000bb","parentSpanId":"%s","name":"probe.image","kind":1,"startTimeUnixNano":"1000000000","endTimeUnixNano":"2000000000"}]}]}]}\n' "$tid" "$parent" > "$YNR_SPOOL/probe-$$.jsonl"
+            gofmt -w ./{label.pkg}
+      egress:
+        allow: []
+    when:
+      converged: open_pr
+      ci_failed: escalate
+    pr:
+      allowed_paths: ['**/*.go']
+    labels:
+      on_claim:    { add: [ynf:working], remove: [ynf:spool-image] }
+      on_propose:  { add: [ynf:proposed], remove: [ynf:working] }
+      on_review:   { add: [ynf:in-review], remove: [ynf:proposed] }
+      on_escalate: { add: [ynf:needs-human], remove: [ynf:working, ynf:proposed] }
+
   # A run that fills its spool folder: it writes 20 MiB there, far past the run quota, and goes on
-  # to gofmt. `make e2e` checks ynf took the excess away and the run still proposed (ADR-007).
+  # to gofmt. It prints what dd said and how much the folder held after two seconds. `make e2e`
+  # checks the folder was held to the quota and the run still proposed: by the volume's own limit
+  # where the host gives one (dd fails), else by ynf taking the excess away (ADR-007).
   spool-flood:
     kind: originate
     intake:
@@ -174,7 +211,9 @@ lanes:
           - -c
           - |
             [ -d "$YNR_SPOOL" ] && dd if=/dev/zero of="$YNR_SPOOL/flood.bin" bs=1048576 count=20 2>/dev/null
+            echo "flood-dd-exit=$?"
             sleep 2
+            echo "flood-bytes=$(wc -c < "$YNR_SPOOL/flood.bin")"
             gofmt -w ./{label.pkg}
       egress:
         allow: []

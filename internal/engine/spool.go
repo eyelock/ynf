@@ -14,7 +14,7 @@ import (
 // It never fails the step. A spool that cannot be written costs the run its telemetry, and is
 // logged; the run starts as it would have without one. It returns nil then, and when there is no
 // spool configured, which leaves the run's environment as it was.
-func (s *step) beginSpool(job *executor.Job, m spool.Manifest) *spool.Run {
+func (s *step) beginSpool(job *executor.Job, ex executor.Executor, m spool.Manifest) *spool.Run {
 	e := s.e
 	if e.Spool == nil {
 		return nil
@@ -22,6 +22,7 @@ func (s *step) beginSpool(job *executor.Job, m spool.Manifest) *spool.Run {
 	if e.SpoolCollector {
 		job.NoOTLP = true // ynr serve ships to the operator's endpoint; the run does not
 	}
+	m.UID = s.runUser(*job, ex, m.Run)
 	run, err := e.Spool.Begin(m, job.ImageUser)
 	if err != nil {
 		e.log().Warn("this run has no spool folder: its telemetry is not collected, and the run goes on", "run", m.Run, "err", err)
@@ -29,6 +30,26 @@ func (s *step) beginSpool(job *executor.Job, m spool.Manifest) *spool.Run {
 	}
 	job.Spool = run.Dir
 	return run
+}
+
+// runUser is the user the run writes as when that is not the owner of its spool folder, for its
+// manifest: the executor says, from the image's configuration or its own setting, never the run.
+// When it cannot be found out the manifest omits it, and ynr then refuses what that user writes,
+// which stays in the folder and is kept in the run capture instead; that is logged.
+func (s *step) runUser(job executor.Job, ex executor.Executor, run string) *uint32 {
+	ru, ok := ex.(executor.RunUser)
+	if !ok {
+		return nil
+	}
+	uid, other, err := ru.RunUID(s.ctx, job)
+	if err != nil {
+		s.e.log().Warn("the user this run writes as could not be found out, so its manifest does not name one and ynr may refuse its spool files", "run", run, "err", err)
+		return nil
+	}
+	if !other {
+		return nil
+	}
+	return &uid
 }
 
 // endSpool stops holding the run's folder to its quota, and keeps what is left in it in the run's

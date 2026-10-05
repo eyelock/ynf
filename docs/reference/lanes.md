@@ -19,6 +19,7 @@ carried out today.
 | `run.command.image` | The image the command runs in; when the lane resolves to the command runner it wins over `run.image`, and when it resolves to ynh it is ignored, so a lane with both blocks can name each one's image | yes |
 | `run.egress.allow` | Hosts a run may reach | yes: an empty list is no network at all; otherwise an internal network whose only way out is ynf's allow-list proxy. Each denied host is recorded on the run and counted as `sig/egress/denied/<host>` |
 | `run.command.argv` | The command, run without a shell; `{label.<prefix>}`, `{task_file}`, `{run_dir}` are filled in | yes |
+| `run.command.image_user` | `true` keeps the image's own user and home on a docker executor, as a ynh-built agent image does, instead of running as ynf's user. ynf finds that user's id from the image and names it in the run's spool manifest, so `ynr serve` reads what the run writes there. Default `false` | yes |
 | `run.command.result_file` | A file the command writes with `{outcome, detail, model, session}` | yes |
 | `run.env` | Variables passed into the run by name, such as the model key; values never logged | yes |
 | `run.ynh` | `harness`, `vendor`, `base`, `focus`, `profile`, `sandbox`, `model`, `effort` (`low`, `medium` or `high`; needs ynh 0.10.0 or later), `budgets`, `sensor_scope` (each sensor's declared command narrowed: a path word replaced by one beneath it, or paths appended; anything else is refused before the run), `telemetry_relay` | yes; the vendor's API host is allowed through the egress proxy without being listed |

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eyelock/ynf/internal/executor"
 	"github.com/eyelock/ynf/internal/item"
 	"github.com/eyelock/ynf/internal/spool"
 )
@@ -240,6 +242,50 @@ func TestTheVendorRelayReachesAYnhRunsEnvironment(t *testing.T) {
 		}
 		if !strings.Contains(string(b), "YNR_SPOOL="+sp.Root+"/runs/") {
 			t.Errorf("relay %v: ynh was not given its run's folder: %q", on, b)
+		}
+	}
+}
+
+// userExec is the process executor that says it writes as another user, as docker does for an
+// image's own user or inline for the run user.
+type userExec struct {
+	executor.Process
+	uid   uint32
+	other bool
+	err   error
+}
+
+func (u userExec) RunUID(context.Context, executor.Job) (uint32, bool, error) {
+	return u.uid, u.other, u.err
+}
+
+// TestAManifestNamesTheUserAnExecutorSays: the manifest carries uid when the executor says the run
+// writes as another user, and omits it when it writes as the folder's owner or the user cannot be
+// found out (which is logged, and never fails the step).
+func TestAManifestNamesTheUserAnExecutorSays(t *testing.T) {
+	for name, tc := range map[string]struct {
+		ex      userExec
+		wantUID string
+		logged  bool
+	}{
+		"another user": {userExec{uid: 10042, other: true}, `"uid":10042`, false},
+		"the owner":    {userExec{uid: 501}, "", false},
+		"not found":    {userExec{err: errors.New("no such image")}, "", true},
+	} {
+		r := newSpoolRun(t, `true`, false)
+		r.h.e.Executor = func(string) (executor.Executor, error) { return tc.ex, nil }
+		if it := r.sweep(t); it.State != item.Proposed {
+			t.Fatalf("%s: %s %s", name, it.State, it.Reason)
+		}
+		b, err := os.ReadFile(glob1(t, filepath.Join(r.sp.Root, "manifests", "*.json")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if has := strings.Contains(string(b), `"uid"`); has != (tc.wantUID != "") || (tc.wantUID != "" && !strings.Contains(string(b), tc.wantUID)) {
+			t.Errorf("%s: manifest %s, want %q", name, b, tc.wantUID)
+		}
+		if got := strings.Contains(r.logs.String(), "could not be found out"); got != tc.logged {
+			t.Errorf("%s: logged %v:\n%s", name, got, r.logs)
 		}
 	}
 }

@@ -51,6 +51,10 @@ func (a *app) telemetrySettings(cmd string, rest []string) telemetry.Settings {
 	return telemetry.Settings{Root: ts.Root, Collector: a.job && ts.Collector.Enabled}
 }
 
+// hostVolumes is the host's way of making a run's spool folder a size-limited volume of its own;
+// tests replace it, since mounting is the host's, not the test's.
+var hostVolumes = spool.HostVolumes
+
 // startJob is the start of a factory job, once the engine has its logger: it hands the engine the
 // spool, and starts ynr serve when the configuration enables the collector. It never fails the
 // job: ynr missing or not starting is logged, and the job goes on.
@@ -63,6 +67,7 @@ func (a *app) startJob(log *slog.Logger) {
 		return
 	}
 	a.spool.Log = log
+	a.spool.Volumes = hostVolumes() // a hard quota per run where the host allows one
 	a.eng.Spool = a.spool
 	if !a.job || !a.tsettings.Collector.Enabled {
 		return
@@ -76,11 +81,15 @@ func (a *app) startJob(log *slog.Logger) {
 // stopped with SIGTERM and given its archive time to ship what is left, then any spool file still
 // in the spool goes into the run capture (ADR-010).
 func (a *app) endJob() {
-	if a.spool == nil || !a.job || !a.tsettings.Collector.Enabled || a.eng == nil {
+	if a.spool == nil || a.eng == nil {
+		return
+	}
+	dir := filepath.Join(a.cfg.WorkPath(), "spool-capture", time.Now().UTC().Format("20060102T150405Z"))
+	if !a.job || !a.tsettings.Collector.Enabled {
+		a.spool.Close(dir) // no run volume outlives the command
 		return
 	}
 	a.serve.Stop()
-	dir := filepath.Join(a.cfg.WorkPath(), "spool-capture", time.Now().UTC().Format("20060102T150405Z"))
 	a.spool.Sweep(dir)
 }
 

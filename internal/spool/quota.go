@@ -25,11 +25,10 @@ func (t *trimmed) get() int  { t.mu.Lock(); defer t.mu.Unlock(); return t.n }
 
 // watch holds the run's folder to its quota while the run lasts.
 //
-// This is a bound, not a hard limit: the folder is measured every interval, and the largest files
-// are removed until it is back under, so an agent that floods it gets, at most, an interval's worth
-// of writes over the quota before they are taken away. A hard per-run quota needs a mount of its
-// own, and ynr reads only run folders on the spool's own device (ynr ADR-003), so ynf does not
-// give one. ADR-007 says what each executor and host gives.
+// This is the fallback, for a run folder that is not a volume of its own (volume.go), and it is a
+// bound, not a hard limit: the folder is measured every interval, and the largest files are removed
+// until it is back under, so an agent that floods it gets, at most, an interval's worth of writes
+// over the quota before they are taken away. ADR-007 says which executor and host gets which.
 func (r *Run) watch() {
 	defer close(r.done)
 	every := r.s.Interval
@@ -171,6 +170,7 @@ func copyOne(from, to string) error {
 // job's end (ADR-010): a run's into its own capture when it has one, the rest under dir. It is
 // called after ynr serve has had its archive time, so what is left is what was not shipped.
 func (s *Spool) Sweep(dir string) int {
+	s.Close(dir) // a run volume still mounted is kept, then taken away
 	b := &budget{left: JobCaptureLimit}
 	n := copyFiles(s, FactoryDir, filepath.Join(dir, FactoryDir), b)
 	runs, err := os.ReadDir(filepath.Join(s.Root, RunsDir))

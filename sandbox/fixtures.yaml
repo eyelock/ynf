@@ -255,6 +255,21 @@ fixtures:
         - the run has a spool folder and a manifest naming its lane, item and step, and writes a record into the folder in the trace ynf gave it
         - with ynr available, the record reaches e2e's receiver with provenance run and the lane the manifest names, not the one the run claimed; without it this check is skipped, and e2e says why
 
+  - id: spool-image
+    kind: issue
+    title: internal/format is not gofmt-clean, and an image user's run reports in
+    body: fixtures/spool-image.md
+    labels: ["ynf:spool-image", "pkg:internal/format"]
+    lane: spool-image
+    calibrate:
+      command: { deterministic: true }
+    expect:
+      result: in_review
+      labels: { present: [ynf:in-review], absent: [ynf:spool-image, ynf:working, ynf:proposed] }
+      checks:
+        - the run keeps its image's own user (uid 10042, not the folder's owner), and its manifest names that user
+        - with ynr available, the record the run wrote reaches e2e's receiver with provenance run and the lane the manifest names; without it this check is skipped, and e2e says why
+
   - id: spool-flood
     kind: issue
     title: internal/format is not gofmt-clean, and the run fills its spool folder
