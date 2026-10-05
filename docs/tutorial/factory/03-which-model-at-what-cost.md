@@ -142,7 +142,7 @@ cat >> .agents/factory/lanes.yaml <<'EOF'
         auto_approve: edits
         model: sonnet
         sensor_scope:
-          lint: 'GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run ./{label.pkg}/...'
+          lint: 'golangci-lint run ./{label.pkg}/...'
           test: 'go test -count=1 ./{label.pkg}/...'
           docs: 'sh scripts/check-docs.sh {label.pkg}'
     when:

@@ -47,8 +47,20 @@ func ParseManifest(b []byte) (Harness, error) {
 }
 
 // CheckLane holds a lane to its harness (ADR-006): budgets may only tighten the harness's own,
-// and a sensor scope may only name a sensor the harness declares.
+// and a sensor scope may only name a sensor the harness declares and narrow its command. With no
+// item's labels yet, a scope's placeholders stand for a safe path segment, so its shape is still
+// checked; CheckScopes checks it with an item's own.
 func (h Harness) CheckLane(y policy.Ynh) error {
+	return h.check(y, nil)
+}
+
+// CheckScopes holds a lane to its harness as CheckLane does, with the scopes' placeholders filled
+// from the item's labels.
+func (h Harness) CheckScopes(y policy.Ynh, labels []string) error {
+	return h.check(y, labels)
+}
+
+func (h Harness) check(y policy.Ynh, labels []string) error {
 	var problems []string
 	if b := y.Budgets; b != nil {
 		if h.Agent.MaxTurns > 0 && b.MaxTurns > h.Agent.MaxTurns {
@@ -68,12 +80,41 @@ func (h Harness) CheckLane(y policy.Ynh) error {
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(y.SensorScope)) {
-		if _, ok := h.Sensors[name]; !ok {
+		raw, ok := h.Sensors[name]
+		if !ok {
 			problems = append(problems, fmt.Sprintf("sensor_scope names %q, which the harness does not declare", name))
+			continue
+		}
+		scope := policy.ExpandShape(y.SensorScope[name])
+		if labels != nil {
+			var err error
+			if scope, err = policy.Expand(y.SensorScope[name], labels); err != nil {
+				problems = append(problems, fmt.Sprintf("sensor_scope.%s: %v", name, err))
+				continue
+			}
+		}
+		if err := narrowSensor(raw, scope); err != nil {
+			problems = append(problems, fmt.Sprintf("sensor_scope.%s: %v", name, err))
 		}
 	}
 	if len(problems) > 0 {
 		return fmt.Errorf("the lane does not fit its harness: %s", strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+// narrowSensor checks scope against the command a declared sensor runs.
+func narrowSensor(raw json.RawMessage, scope string) error {
+	var s struct {
+		Source struct {
+			Command string `json:"command"`
+		} `json:"source"`
+	}
+	if err := json.Unmarshal(raw, &s); err != nil || s.Source.Command == "" {
+		return fmt.Errorf("%q cannot replace a sensor that declares no command to narrow", scope)
+	}
+	if err := Narrows(s.Source.Command, scope); err != nil {
+		return fmt.Errorf("%q is not %q narrowed: %w", scope, s.Source.Command, err)
 	}
 	return nil
 }

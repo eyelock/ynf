@@ -104,6 +104,14 @@ image when nothing is published (ADR-007). Two rules keep the line sharp:
   `--sensor-overlay` substitutes a command for a declared sensor for one run, and rejects a name
   the harness does not declare. A lane uses it to narrow a sensor to the item's part of the
   repository, so the run is judged on the debt it was asked to pay down rather than everyone's.
+  Because the overlay substitutes, ynf holds the scope to the declared command before the run:
+  both are split into words with shell quoting rules and nothing is evaluated, the scope may hold
+  no shell operator or expansion, and its words must be the declared ones, one for one and in
+  order, except that a path word (`.`, `./...`, a directory) may be replaced by one or more
+  relative paths beneath it, with no `..` and no leading dash. A command with no path word may
+  only have such paths appended. A different program, flag, environment assignment or anything
+  else is refused as `operator_error`, naming the sensor, the declared command, the scope and
+  why; `ynf harness` reports the same, with each placeholder standing for a safe path segment.
   Placeholders come only from structured facts (`{label.<prefix>}` reads the value of a
   `<prefix>:<value>` label) and are validated against `^[A-Za-z0-9._/-]+$` before substitution,
   so ticket text never reaches a shell

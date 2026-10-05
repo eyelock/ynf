@@ -21,7 +21,7 @@ carried out today.
 | `run.command.argv` | The command, run without a shell; `{label.<prefix>}`, `{task_file}`, `{run_dir}` are filled in | yes |
 | `run.command.result_file` | A file the command writes with `{outcome, detail, model, session}` | yes |
 | `run.env` | Variables passed into the run by name, such as the model key; values never logged | yes |
-| `run.ynh` | `harness`, `vendor`, `base`, `focus`, `profile`, `sandbox`, `model`, `effort` (`low`, `medium` or `high`; needs ynh 0.10.0 or later), `budgets`, `sensor_scope` | yes; the vendor's API host is allowed through the egress proxy without being listed |
+| `run.ynh` | `harness`, `vendor`, `base`, `focus`, `profile`, `sandbox`, `model`, `effort` (`low`, `medium` or `high`; needs ynh 0.10.0 or later), `budgets`, `sensor_scope` (each sensor's declared command narrowed: a path word replaced by one beneath it, or paths appended; anything else is refused before the run) | yes; the vendor's API host is allowed through the egress proxy without being listed |
 | `when` | Reactions to `converged`, `ci_failed`, `changes_requested` and `outcome.<name>` | `open_pr` (originate), `push_commit` (adopt), `escalate`, `quarantine`, `comment`, `close`, `retry`/`then`, `resume_with`/`max`; `request_review` escalates |
 | `pr.allowed_paths` | The diff gate refuses changes outside these | yes |
 | `pr.protected_paths` | Refused as well as the built-in protected paths | yes |

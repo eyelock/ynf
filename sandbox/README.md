@@ -71,7 +71,7 @@ repository is disposable.
 | Path | What it is |
 |---|---|
 | `seed/` | The repository's contents, pushed as one commit on `main` |
-| `seed/.agents/factory/lanes.yaml` | The sandbox's factory: seven lanes ([schema](../docs/schema/lanes.schema.json)) |
+| `seed/.agents/factory/lanes.yaml` | The sandbox's factory: eight lanes ([schema](../docs/schema/lanes.schema.json)) |
 | `seed/.agents/harness/plugin.json` | The sandbox's own ynh harness: `tidy`, `docs` and `fix-ci` focuses; `lint`, `test` and `docs` sensors |
 | `fixtures.yaml` | Every issue and pull request, its lane, and what ynf should do with it ([schema](fixtures.schema.json)) |
 | `fixtures/` | Issue and pull request bodies, the files committed on fixture branches (in `<id>/testdata/`, so Go tooling in this repository ignores their planted problems), and each fixture's known fix (`<id>.fix.patch`) |
@@ -94,6 +94,7 @@ in the sandbox cannot read what it is being tested on.
 | `detect` | originate | none named: ynh if detected, else command (`gofmt -w`) | issues labelled `ynf:detect` | detection: `make e2e` hides ynh, so the lane falls back to its command with no model |
 | `reclaim` | originate | command (`gofmt -w`, slowly) | issues labelled `ynf:reclaim` | killing ynf mid-run and a fresh one taking over |
 | `fix-ci` | adopt | ynh, focus `fix-ci` | pull requests labelled `ynf:fix-ci` | adopting someone else's pull request |
+| `relaxed` | originate | ynh, focus `tidy` | issues labelled `ynf:relaxed` (none exist) | a scope that replaces lint with `true` is refused before any run |
 | `deps` | originate, disabled | — | issues labelled `ynf:deps` | a lane switched off: items recorded and ignored |
 
 Every fixture also carries a `pkg:<path>` label. Lanes use it to scope the harness's sensors to
@@ -114,10 +115,13 @@ that package, so a run is judged on the debt it was asked to pay down rather tha
 | `detect-format` | detect | no runner named, ynh hidden: the command runs, and the run record says `runner_detected` |
 | `deps-bump` | deps | ignored |
 | `fix-ci-retry` | fix-ci | an adopted pull request gets a commit, never a force-push |
+| `relaxed-scope` | relaxed | a scope that replaces lint with `true` is refused before any run, with no model spend; it is a ynh lane, so `make e2e` runs it only with `LANES=relaxed,...` and the agent image and ynh available |
 
 The CI gate (`.golangci.ci.yml`) is deliberately stricter than the harness's lint sensor: it also
 rejects errors discarded with `_ =`, and it only checks new code. That gap is what produces the
-"converged in the loop, failed in CI" case.
+"converged in the loop, failed in CI" case. The `fix-ci` lane's sensors are the harness's own, as every
+lane's are (a scope may only narrow them), so on `fix-ci-retry` they start green: the agent works
+from the failing CI check the task quotes.
 
 ## Changing it
 

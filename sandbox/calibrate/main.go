@@ -46,6 +46,7 @@ type calibration struct {
 	Flaky    *flaky                        `yaml:"flaky"`
 	Command  *struct{ Deterministic bool } `yaml:"command"`
 	Disabled bool                          `yaml:"disabled"`
+	Refused  bool                          `yaml:"refused"`
 }
 
 type flaky struct {
@@ -168,6 +169,12 @@ func (v calibrator) fixture(f fixture, l lane) (string, error) {
 			return "", fmt.Errorf("lane %s is enabled; expected it switched off", f.Lane)
 		}
 		return fmt.Sprintf("lane %s is switched off", f.Lane), nil
+	case f.Calibrate.Refused:
+		// ynf refuses the lane's scope before any run (ADR-006); `make e2e` watches it do so.
+		if len(l.Run.Ynh.SensorScope) == 0 {
+			return "", fmt.Errorf("lane %s has no sensor_scope, so there is nothing for ynf to refuse", f.Lane)
+		}
+		return fmt.Sprintf("lane %s is refused before any run; nothing to calibrate", f.Lane), nil
 	case f.Calibrate.Command != nil:
 		return v.command(f, l)
 	default:

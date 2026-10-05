@@ -247,12 +247,31 @@ fixtures:
     pull_request:
       branch: human/retry-helper
       files: fixtures/fix-ci-retry/testdata
+    # The lane's scoped sensors are the harness's own, so they pass on the pull request as it
+    # stands: only CI's stricter lint config fails it. The agent works from the failing check the
+    # task quotes, not from a red sensor.
     calibrate:
-      before: [lint]
+      before: []
       fix: fixtures/fix-ci-retry.fix.patch
       after: []
     expect:
       result: in_review
       checks:
-        - CI lint fails on `_ = fn()` (check-blank), which the harness's own lint config allows
+        - CI lint fails on `_ = fn()` (check-blank), which the harness's own lint config allows, so the lane's sensors start green
         - ynf adopts the pull request, adds a commit, never force-pushes, and leaves the author as owner
+
+  - id: relaxed-scope
+    kind: prompt
+    title: Run the lint lane with a scope that relaxes lint
+    body: fixtures/relaxed-scope.md
+    labels: ["pkg:internal/format"]
+    lane: relaxed
+    calibrate:
+      refused: true
+    expect:
+      result: escalated
+      detail: 'sensor_scope.lint: "true" is not "golangci-lint run ./..." narrowed'
+      checks:
+        - the lane's scope replaces the lint sensor's command with `true`, which is not the declared command narrowed
+        - ynf refuses it before the run, as operator_error, naming the sensor, the declared command, the scope and why
+        - no agent runs, so no model is called and nothing is spent

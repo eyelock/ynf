@@ -41,6 +41,7 @@ type fixture struct {
 	Expect struct {
 		Result     results  `yaml:"result"`
 		Signatures []string `yaml:"signatures"`
+		Detail     string   `yaml:"detail"`
 		Crash      bool     `yaml:"crash"`
 		Runner     *struct {
 			Name     string `yaml:"name"`
@@ -406,6 +407,13 @@ func check(f fixture, numbers map[string]int, items []item, repo, ynf, cfg, trac
 	detail := fmt.Sprintf("%s %s", name, it.State)
 	if len(f.Expect.Result) > 1 {
 		detail += fmt.Sprintf(" (one of %s)", strings.Join(f.Expect.Result, ", "))
+	}
+
+	if want := f.Expect.Detail; want != "" {
+		if it.LastRun == nil || !strings.Contains(it.LastRun.Detail, want) {
+			return "", fmt.Errorf("%s: the last run's detail lacks %q: %+v", name, want, it.LastRun)
+		}
+		detail += ", refused as: " + oneLine(want, 80)
 	}
 
 	if it.PR > 0 {

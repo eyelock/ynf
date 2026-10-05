@@ -137,7 +137,7 @@ ok    config                   /etc/ynf/config.yaml
 ok    store                    sqlite:///work/ynf.db
 ok    factory                  <you>/ynf-sandbox-factory at <sha> (.agents/factory)
 ok    repos                    <you>/ynf-sandbox
-ok    lanes <you>/ynf-sandbox .agents/factory on main at <sha>: deps, doc-drift, fix-ci, gofmt, lint-paydown, reclaim
+ok    lanes <you>/ynf-sandbox .agents/factory on main at <sha>: deps, doc-drift, fix-ci, gofmt, lint-paydown, reclaim, relaxed
 ok    forge default            github.com: reached <you>/ynf-sandbox
 ok    tracker tracker          tracker.ynf-sandbox.invalid: its server has the tools it is configured to call
 ok    git                      git version <version>
