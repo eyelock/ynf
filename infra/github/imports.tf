@@ -37,3 +37,9 @@ import {
   to = github_actions_secret.release_token
   id = "ynf:RELEASE_TOKEN"
 }
+
+# Set by hand with gh, like RELEASE_TOKEN; this adopts it.
+import {
+  to = github_actions_secret.ynr_read_packages
+  id = "ynf:YNR_READ_PACKAGES"
+}

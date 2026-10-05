@@ -9,12 +9,12 @@ lives in [`sandbox/`](../../sandbox/README.md).
 | `repository.tf` | The repository: description, topics, visibility, features, merge options; and the docs site, GitHub Pages from `/docs` on `main` |
 | `branches.tf` | Gitflow: `develop` as the default branch, and protection on `main` and `develop`: a pull request required with `check` green (plus "Verify PR source branch" into `main`, so it takes only `develop`, `release/*` and `hotfix/*`), admins included, no force-push or delete |
 | `labels.tf` | Issue and PR labels, authoritatively: a label not listed is removed |
-| `actions.tf` | Actions permissions, the read-only default `GITHUB_TOKEN`, and that the `RELEASE_TOKEN` secret exists |
+| `actions.tf` | Actions permissions, the read-only default `GITHUB_TOKEN`, and that the `RELEASE_TOKEN` and `YNR_READ_PACKAGES` secrets exist |
 | `security.tf` | Dependabot alerts and security updates |
 | `imports.tf` | Import blocks that adopt the live repository into a fresh state |
 
-Not managed here: anything committed to the repository (`.github/`), and the value of `RELEASE_TOKEN`: GitHub never returns it, so
-Terraform only tracks that the secret exists.
+Not managed here: anything committed to the repository (`.github/`), and the values of `RELEASE_TOKEN` and `YNR_READ_PACKAGES`: GitHub never returns them, so
+Terraform only tracks that the secrets exist.
 
 ## The release token
 
@@ -28,6 +28,16 @@ gh secret set RELEASE_TOKEN -R eyelock/ynf
 ```
 
 `imports.tf` adopts it into state on the next apply.
+
+## The ynr read token
+
+While `eyelock/ynr` is private, builds and tests fetch its Go module (over git) and its packages
+with `YNR_READ_PACKAGES`, a token that can read that repository's contents and packages, and
+nothing else. Set or rotate it the same way:
+
+```bash
+gh secret set YNR_READ_PACKAGES -R eyelock/ynf
+```
 
 ## Use
 

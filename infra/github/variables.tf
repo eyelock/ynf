@@ -31,3 +31,14 @@ variable "release_token" {
   sensitive   = true
   default     = null
 }
+
+variable "ynr_read_packages" {
+  description = <<-EOT
+    YNR_READ_PACKAGES for builds and tests: a token that can read eyelock/ynr, its contents and its
+    packages. Only needed if Terraform creates the secret; normally it is set with `gh secret set`
+    and imported, and an existing value is never read back.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = null
+}
