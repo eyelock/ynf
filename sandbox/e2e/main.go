@@ -115,6 +115,7 @@ func main() {
 	outage := flag.Bool("memory-outage", false, "run with ynm unreachable, then bring it back and check the queued memory writes arrive")
 	hideYnh := flag.Bool("hide-ynh", false, "hide ynh from ynf (no folder on the PATH ynf is given holds one), so a lane with no runner falls back to its command")
 	image := flag.String("image", "", "run ynf inside this factory-flavoured harness image, as a job runner would (ADR-009, shape B)")
+	gateOn := flag.Bool("gate", true, "end by adopting the gate fixture's pull request and proving ynf keeps it proposed while a ruleset-required check has not started (needs a rebuilt sandbox: the pull request takes one commit from ynf, once)")
 	shadowOn := flag.Bool("shadow", true, "with the gofmt lane, end by closing fmt-format with a merged human fix and proving shadow mode on it (merges into the sandbox's main)")
 	flag.Parse()
 	if *forget {
@@ -124,13 +125,13 @@ func main() {
 		}
 		return
 	}
-	if err := run(*root, *repo, *factory, *image, *outage, strings.Split(*lanes, ","), *timeout, *hideYnh, *shadowOn); err != nil {
+	if err := run(*root, *repo, *factory, *image, *outage, strings.Split(*lanes, ","), *timeout, *hideYnh, *shadowOn, *gateOn); err != nil {
 		fmt.Fprintln(os.Stderr, "e2e:", err)
 		os.Exit(1)
 	}
 }
 
-func run(root, repo, factory, image string, outage bool, lanes []string, timeout time.Duration, hideYnh, shadowOn bool) error {
+func run(root, repo, factory, image string, outage bool, lanes []string, timeout time.Duration, hideYnh, shadowOn, gateOn bool) error {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return err
@@ -412,6 +413,11 @@ func run(root, repo, factory, image string, outage bool, lanes []string, timeout
 	if shadowOn && slices.Contains(lanes, "gofmt") {
 		if err := shadowStage(ff.Fixtures, numbers, repo, ynf, cfg); err != nil {
 			return fmt.Errorf("shadow mode: %w", err)
+		}
+	}
+	if gateOn && image == "" {
+		if err := gateStage(ff.Fixtures, repo, ynf, cfg, logPath); err != nil {
+			return fmt.Errorf("required checks: %w", err)
 		}
 	}
 	passed = true
@@ -1035,6 +1041,193 @@ func lastLines(s string, n int) string {
 // shadowStage proves shadow mode on the live sandbox, with the gofmt lane (no model spend): the
 // fmt-format issue is closed by a merged pull request that formats internal/format, which is the
 // human fix, and shadow mode runs the lane on the commit before it.
+// gateStage adopts the gate fixture's pull request, whose base branch has a ruleset requiring a
+// check, gate-never-runs, that no workflow reports. The lane's command pushes one commit; lint,
+// test and docs then pass on it, and the required check never starts. The item must stay proposed
+// with CI pending: never in_review, which is what ynf did when only the checks that had reported
+// counted. Its decisions must show the check as expected and required, read from the ruleset (the
+// base branch has no classic protection), and replay the same. The item never settles, so this is a
+// stage of its own with its own loop, not part of the sweep.
+func gateStage(fixtures []fixture, repo, ynf, cfg, logPath string) error {
+	i := slices.IndexFunc(fixtures, func(f fixture) bool { return f.ID == "gate-required-check" })
+	if i < 0 {
+		return errors.New("no gate-required-check fixture")
+	}
+	const branch = "human/gate-required"
+	out, err := sh("", "gh", "pr", "list", "-R", repo, "--head", branch, "--state", "open", "--json", "number", "-q", ".[0].number")
+	if err != nil || strings.TrimSpace(out) == "" {
+		return fmt.Errorf("no open pull request from %s in %s (this stage needs a rebuilt sandbox): %v", branch, repo, err)
+	}
+	// An adopted pull request's item key says pulls, not issues, so it is named by key, not as repo#n.
+	ref := fmt.Sprintf("item/github.com/%s/pulls/%s", repo, strings.TrimSpace(out))
+	fmt.Printf("\nrequired checks: adopting %s, whose base branch requires a check nothing reports\n", ref)
+
+	type snapshot struct {
+		State  string `json:"state"`
+		Reason string `json:"reason"`
+		PRHead string `json:"pr_head"`
+	}
+	read := func() (snapshot, error) {
+		var it snapshot
+		o, err := sh("", ynf, "--config", cfg, "--format", "json", "items", "show", ref)
+		if err != nil {
+			return it, fmt.Errorf("items show: %w\n%s", err, o)
+		}
+		return it, json.Unmarshal([]byte(o), &it)
+	}
+	// reported says whether lint, test and docs have all concluded on sha, and how.
+	reported := func(sha string) (bool, error) {
+		o, err := sh("", "gh", "api", fmt.Sprintf("repos/%s/commits/%s/check-runs", repo, sha), "-q", `[.check_runs[] | select(.name=="lint" or .name=="test" or .name=="docs") | .status+"/"+(.conclusion // "")] | sort | join(",")`)
+		if err != nil {
+			return false, err
+		}
+		got := strings.TrimSpace(o)
+		if got == "completed/success,completed/success,completed/success" {
+			return true, nil
+		}
+		if strings.Contains(got, "completed/failure") {
+			return false, fmt.Errorf("a check that should pass failed on %.7s: %s", sha, got)
+		}
+		return false, nil
+	}
+	sweep := func() error {
+		o, err := sh("", ynf, "--config", cfg, "--log-file", logPath, "sweep", "--lane", "gate")
+		if err != nil {
+			return fmt.Errorf("ynf sweep --lane gate: %w\n%s", err, o)
+		}
+		return nil
+	}
+
+	deadline := time.Now().Add(12 * time.Minute)
+	for settled := 0; settled < 2; {
+		if time.Now().After(deadline) {
+			it, _ := read()
+			return fmt.Errorf("%s did not reach proposed with every reported check passing in time: %+v", ref, it)
+		}
+		if err := sweep(); err != nil {
+			return err
+		}
+		it, err := read()
+		if err != nil {
+			return err
+		}
+		switch it.State {
+		case "proposed", "ready", "running", "intake":
+		default:
+			return fmt.Errorf("%s is %s (%s); it should stay proposed while a required check has not started", ref, it.State, it.Reason)
+		}
+		// Count a poll only once ynf has pushed and CI has finished on its commit: from then on every
+		// check that reports is green, and only the missing one holds the item.
+		if it.State == "proposed" && it.PRHead != "" {
+			ok, err := reported(it.PRHead)
+			if err != nil {
+				return err
+			}
+			if ok {
+				settled++
+				continue
+			}
+		}
+		time.Sleep(15 * time.Second)
+	}
+	// CI has finished; let ynf probe again after that (its CI poll is 15s), so its last decision
+	// is made on facts where only the missing check is outstanding.
+	time.Sleep(20 * time.Second)
+	if err := sweep(); err != nil {
+		return err
+	}
+	it, err := read()
+	if err != nil {
+		return err
+	}
+	if it.State != "proposed" {
+		return fmt.Errorf("%s: %s (%s), want proposed", ref, it.State, it.Reason)
+	}
+
+	// What ynf saw, from the decision it recorded last.
+	o, err := sh("", ynf, "--config", cfg, "--format", "json", "items", "log", ref)
+	if err != nil {
+		return fmt.Errorf("items log: %w", err)
+	}
+	var entries []struct {
+		Kind string          `json:"kind"`
+		Body json.RawMessage `json:"body"`
+	}
+	if err := json.Unmarshal([]byte(o), &entries); err != nil {
+		return err
+	}
+	type check struct {
+		Name       string `json:"name"`
+		Status     string `json:"status"`
+		Conclusion string `json:"conclusion"`
+		Required   bool   `json:"required"`
+	}
+	var last []check
+	lastReason := ""
+	for _, en := range entries {
+		var d struct {
+			Input struct {
+				Facts struct {
+					PR *struct {
+						Checks          []check `json:"checks"`
+						RequiredUnknown bool    `json:"required_unknown"`
+					} `json:"pr"`
+				} `json:"facts"`
+			} `json:"input"`
+			Decision struct {
+				Item struct {
+					State string `json:"state"`
+				} `json:"item"`
+				Reason string `json:"reason"`
+			} `json:"decision"`
+		}
+		if en.Kind != "decision" || json.Unmarshal(en.Body, &d) != nil {
+			continue
+		}
+		lastReason = d.Decision.Reason
+		if d.Decision.Item.State == "in_review" {
+			return fmt.Errorf("%s was moved to in_review while a required check had not started", ref)
+		}
+		if pr := d.Input.Facts.PR; pr != nil {
+			if pr.RequiredUnknown {
+				return fmt.Errorf("%s: ynf could not read the required checks, so it could not have read the ruleset", ref)
+			}
+			last = pr.Checks
+		}
+	}
+	if !strings.Contains(lastReason, "CI pending") {
+		return fmt.Errorf("%s: its last decision was %q, want CI pending", ref, lastReason)
+	}
+	byName := map[string]check{}
+	for _, c := range last {
+		byName[c.Name] = c
+	}
+	if g := byName["gate-never-runs"]; g.Status != "expected" || !g.Required || g.Conclusion != "" {
+		return fmt.Errorf("%s: the ruleset's required check should be expected and required in the facts, got %+v from %+v", ref, g, last)
+	}
+	for _, n := range []string{"lint", "test", "docs"} {
+		if c := byName[n]; c.Status != "completed" || c.Conclusion != "success" || c.Required {
+			return fmt.Errorf("%s: %s should have passed and not be required (only the ruleset's check is), got %+v", ref, n, c)
+		}
+	}
+	rp, err := sh("", ynf, "--config", cfg, "--format", "json", "replay", ref)
+	if err != nil {
+		return fmt.Errorf("replay: %w\n%s", err, rp)
+	}
+	var r struct {
+		Decisions []json.RawMessage `json:"decisions"`
+		Differ    int               `json:"differ"`
+	}
+	if err := json.Unmarshal([]byte(rp), &r); err != nil {
+		return err
+	}
+	if r.Differ != 0 {
+		return fmt.Errorf("%s: %d of %d decisions do not replay the same", ref, r.Differ, len(r.Decisions))
+	}
+	fmt.Printf("ok    required checks         %s: lint, test and docs passed, gate-never-runs (a ruleset requirement) is expected, and the item stays proposed, never in_review; %d decisions replay the same\n", ref, len(r.Decisions))
+	return nil
+}
+
 func shadowStage(fixtures []fixture, numbers map[string]int, repo, ynf, cfg string) error {
 	i := slices.IndexFunc(fixtures, func(f fixture) bool { return f.ID == "fmt-format" })
 	if i < 0 {

@@ -31,28 +31,42 @@ type Ticket struct {
 
 // PR is a pull request's structured state.
 type PR struct {
-	Number           int     `json:"number"`
-	State            string  `json:"state"` // open, closed
-	Merged           bool    `json:"merged"`
-	Draft            bool    `json:"draft"`
-	Fork             bool    `json:"fork"`
-	HeadSHA          string  `json:"head_sha"`
-	HeadRef          string  `json:"head_ref"`
-	Checks           []Check `json:"checks"`
-	ChangesRequested bool    `json:"changes_requested"`
-	Approved         bool    `json:"approved"`
+	Number  int     `json:"number"`
+	State   string  `json:"state"` // open, closed
+	Merged  bool    `json:"merged"`
+	Draft   bool    `json:"draft"`
+	Fork    bool    `json:"fork"`
+	HeadSHA string  `json:"head_sha"`
+	HeadRef string  `json:"head_ref"`
+	Checks  []Check `json:"checks"`
+	// RequiredUnknown is true when neither branch protection nor the rulesets could be read, so
+	// no check is marked required and every check gates (CIState).
+	RequiredUnknown  bool `json:"required_unknown,omitempty"`
+	ChangesRequested bool `json:"changes_requested"`
+	Approved         bool `json:"approved"`
 }
 
-// Check is one check run or commit status on the pull request's head.
+// StatusExpected is the status of a required check that has not reported: no check run or commit
+// status of its name (and App, if it is bound to one) exists on the head yet.
+const StatusExpected = "expected"
+
+// Check is one check run or commit status on the pull request's head, or a required check that has
+// not reported yet.
 type Check struct {
 	Name       string `json:"name"`
-	Status     string `json:"status"`     // queued, in_progress, completed
+	Status     string `json:"status"`     // expected, queued, in_progress, completed
 	Conclusion string `json:"conclusion"` // success, failure, neutral, cancelled, skipped, timed_out, action_required, ""
 	Required   bool   `json:"required"`
+	// App is the slug of the GitHub App that reported a check run, and AppID its id. Both are
+	// empty for a commit status, which has no App. On an expected check AppID is the App the
+	// requirement is bound to, if it is bound to one, and App is empty.
+	App   string `json:"app,omitempty"`
+	AppID int64  `json:"app_id,omitempty"`
 }
 
 // CIState summarises the checks that gate the pull request: required ones if any are marked,
-// otherwise all of them.
+// otherwise all of them. It is pending until every gating check has concluded, which includes a
+// required check that has not started.
 func (p PR) CIState() string {
 	gating := make([]Check, 0, len(p.Checks))
 	for _, c := range p.Checks {
@@ -99,11 +113,11 @@ func (f Facts) CEL() map[string]any {
 	if p := f.PR; p != nil {
 		checks := make([]any, len(p.Checks))
 		for i, c := range p.Checks {
-			checks[i] = map[string]any{"name": c.Name, "status": c.Status, "conclusion": c.Conclusion, "required": c.Required}
+			checks[i] = map[string]any{"name": c.Name, "status": c.Status, "conclusion": c.Conclusion, "required": c.Required, "app": c.App, "app_id": c.AppID}
 		}
 		m["pr"] = map[string]any{
 			"number": p.Number, "state": p.State, "merged": p.Merged, "draft": p.Draft, "fork": p.Fork,
-			"checks": checks, "changes_requested": p.ChangesRequested, "approved": p.Approved, "ci": p.CIState(),
+			"checks": checks, "changes_requested": p.ChangesRequested, "approved": p.Approved, "ci": p.CIState(), "required_unknown": p.RequiredUnknown,
 		}
 	}
 	if l := f.Lane; l != nil {

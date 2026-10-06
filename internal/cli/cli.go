@@ -356,6 +356,7 @@ func (a *app) engine() (*engine.Engine, error) {
 		_ = st.Close()
 		return nil, withCode(ExitUsage, err)
 	}
+	fg.Log = logger
 	var mu sync.Mutex
 	entropy := ulid.Monotonic(cryptoReader{}, 0)
 	mem, ns, level, err := memoryFor(c)

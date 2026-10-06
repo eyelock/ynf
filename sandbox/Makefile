@@ -16,7 +16,11 @@
 #   make e2e-only  the same, without the rebuild. Without a reset it leaves out shadow mode, whose
 #                   stage merges a human fix for fmt-format into the sandbox main and so cannot
 #                   run twice; SHADOW=true adds it. make e2e (and e2e-factory) reset first, so
-#                   they run it with the gofmt lane; SHADOW=false skips it there
+#                   they run it with the gofmt lane; SHADOW=false skips it there. The same goes for
+#                   the required-checks stage (the gate lane adopts a pull request whose base
+#                   branch has a ruleset requiring a check nothing reports, and ynf may push to
+#                   it once): GATE=true adds it to e2e-only, GATE=false skips it after a reset.
+#                   e2e-factory never runs it
 #   make e2e-memory-outage  e2e-only with ynm unreachable for the whole run, then brought back: the
 #                   memory writes must queue in ynf's store, show in `ynf doctor`, and arrive
 #                   after (ADR-008); it costs no more than e2e
@@ -90,14 +94,16 @@ calibrate: settings
 LANES ?= gofmt,deps,reclaim,detect,spool,spool-image,spool-flood
 HIDE_YNH ?= true
 SHADOW ?= false
+GATE ?= false
 # make e2e and e2e-factory reset first, so they run shadow mode unless told not to.
 SHADOW_AFTER_RESET = $(if $(filter command line,$(origin SHADOW)),$(SHADOW),true)
+GATE_AFTER_RESET = $(if $(filter command line,$(origin GATE)),$(GATE),true)
 
 e2e: reset
-	$(MAKE) e2e-only SHADOW=$(SHADOW_AFTER_RESET)
+	$(MAKE) e2e-only SHADOW=$(SHADOW_AFTER_RESET) GATE=$(GATE_AFTER_RESET)
 
 e2e-only: settings
-	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(LANES) -hide-ynh=$(HIDE_YNH) -shadow=$(SHADOW)
+	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(LANES) -hide-ynh=$(HIDE_YNH) -shadow=$(SHADOW) -gate=$(GATE)
 
 YNH_BASE ?= ghcr.io/eyelock/ynh:0.10.0
 YNH_SRC ?=
@@ -125,7 +131,7 @@ FACTORY_LANES   ?= gofmt,deps
 OUTAGE_LANES ?= outage
 
 e2e-memory-outage: reset settings
-	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(OUTAGE_LANES) -memory-outage -shadow=false
+	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(OUTAGE_LANES) -memory-outage -shadow=false -gate=false
 
 e2e-factory: reset
 	@set -e; ctx=$$(mktemp -d); trap 'rm -rf "$$ctx"' EXIT; \
@@ -133,4 +139,4 @@ e2e-factory: reset
 	docker build -q --build-arg YNH_BASE=$(FACTORY_BASE) -t ynf-sandbox-agent:factory "$$ctx" >/dev/null; \
 	ynh image ynf-sandbox --from seed --base ynf-sandbox-agent:factory --entrypoint agent --tag $(FACTORY_HARNESS) >/dev/null; \
 	echo "built $(FACTORY_HARNESS) on $(FACTORY_BASE)"
-	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(FACTORY_LANES) -shadow=$(SHADOW_AFTER_RESET) -image $(FACTORY_HARNESS)
+	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(FACTORY_LANES) -shadow=$(SHADOW_AFTER_RESET) -gate=false -image $(FACTORY_HARNESS)

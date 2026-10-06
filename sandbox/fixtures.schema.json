@@ -87,9 +87,14 @@
               "type": "string",
               "pattern": "^[A-Za-z0-9._/-]+$"
             },
+            "base": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._/-]+$",
+              "description": "The branch the pull request targets, cut from main by Terraform; main when omitted. A fixture that needs rules of its own gives it a base of its own, so they cannot hold the merges into main."
+            },
             "files": {
               "type": "string",
-              "description": "Directory, relative to sandbox/, whose tree is committed on top of main on the branch."
+              "description": "Directory, relative to sandbox/, whose tree is committed on top of the base branch on the pull request's branch."
             }
           }
         },
@@ -341,6 +346,7 @@
     },
     "state": {
       "enum": [
+        "proposed",
         "in_review",
         "escalated",
         "quarantined",

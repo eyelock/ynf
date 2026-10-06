@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"slices"
@@ -45,6 +46,7 @@ func (a *app) doctor(ctx context.Context) error {
 		Detail string `json:"detail"`
 	}
 	var checks []check
+	unreadable := map[string]bool{}
 	add := func(name string, ok bool, detail string) { checks = append(checks, check{name, ok, detail}) }
 	// Docker is needed only when a lane runs in it; inside the factory image every run is inline.
 	// Until the lanes are read, assume it is.
@@ -96,6 +98,22 @@ func (a *app) doctor(ctx context.Context) error {
 				}
 				add("lanes "+r, true, detail)
 			}
+			// Which checks gate a pull request comes from branch protection and the rulesets. When
+			// neither can be read, every check gates instead; ynf still works, so it is not a failure.
+			if reps, err := a.eng.RequiredChecks(ctx); err != nil {
+				add("required checks", false, err.Error())
+			} else {
+				for _, rp := range reps {
+					name := "required checks " + rp.Repo
+					switch {
+					case rp.Known:
+						add(name, true, fmt.Sprintf("%s: %s", rp.Branch, strings.Join(rp.Checks, ", ")))
+					default:
+						add(name, false, fmt.Sprintf("not readable on %s, so every check gates a pull request: %s", rp.Branch, rp.Detail))
+						unreadable[name] = true
+					}
+				}
+			}
 			if conns, err := a.eng.Connections(ctx); err != nil {
 				add("connections", false, err.Error())
 			} else {
@@ -109,6 +127,7 @@ func (a *app) doctor(ctx context.Context) error {
 		}
 	}
 	optional := map[string]bool{"ynh": true, "ynm": true, "ynr": true, "memory queue": true} // ADR-012
+	maps.Copy(optional, unreadable)
 	if a.eng != nil {
 		// Writes ynm could not take wait in ynf's store: worth saying, not a failure.
 		if n, since, err := a.eng.MemoryQueued(ctx); err == nil && n > 0 {

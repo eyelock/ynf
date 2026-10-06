@@ -126,3 +126,8 @@ func ParseIssueKey(key string) (repo string, number int, err error) {
 	}
 	return "", 0, fmt.Errorf("%q is not an issue key (owner/name#number)", key)
 }
+
+// RequiredReader is what a forge offers that can say which checks a branch requires.
+type RequiredReader interface {
+	RequiredChecks(ctx context.Context, repo, branch string) Required
+}

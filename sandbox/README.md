@@ -71,14 +71,14 @@ repository is disposable.
 | Path | What it is |
 |---|---|
 | `seed/` | The repository's contents, pushed as one commit on `main` |
-| `seed/.agents/factory/lanes.yaml` | The sandbox's factory: eleven lanes ([schema](../docs/schema/lanes.schema.json)) |
+| `seed/.agents/factory/lanes.yaml` | The sandbox's factory: twelve lanes ([schema](../docs/schema/lanes.schema.json)) |
 | `seed/.agents/harness/plugin.json` | The sandbox's own ynh harness: `tidy`, `docs` and `fix-ci` focuses; `lint`, `test` and `docs` sensors |
 | `fixtures.yaml` | Every issue and pull request, its lane, and what ynf should do with it ([schema](fixtures.schema.json)) |
 | `fixtures/` | Issue and pull request bodies, the files committed on fixture branches (in `<id>/testdata/`, so Go tooling in this repository ignores their planted problems), and each fixture's known fix (`<id>.fix.patch`) |
 | `images/agent/` | The agent base image the ynh lanes build on: ynh's image plus Go and golangci-lint (`make agent-image`) |
 | `calibrate/` | `make calibrate`: a small Go program that proves each fixture still fails before its known fix and passes after |
 | `sandbox.env.example` | Your settings: the owner, the names, and where Terraform keeps its state |
-| `terraform/` | The repository, labels, issues, fixture pull request and branch protection |
+| `terraform/` | The repository, labels, issues, fixture pull requests, branch protection on `main`, and the ruleset on the gate fixture's own base branch |
 | `scripts/` | The two git steps Terraform calls: the seed commit, written with your names, and the fixture branch |
 
 Expected outcomes live in `fixtures.yaml`, in ynf, and never in the sandbox, so an agent working
@@ -97,6 +97,7 @@ in the sandbox cannot read what it is being tested on.
 | `spool-flood` | originate | command (20 MiB into the run's spool folder, then `gofmt -w`) | issues labelled `ynf:spool-flood` | a run filling its folder: held to the quota, the step unaffected |
 | `reclaim` | originate | command (`gofmt -w`, slowly) | issues labelled `ynf:reclaim` | killing ynf mid-run and a fresh one taking over |
 | `fix-ci` | adopt | ynh, focus `fix-ci` | pull requests labelled `ynf:fix-ci` | adopting someone else's pull request |
+| `gate` | adopt | command (adds a comment line) | pull requests labelled `ynf:gate` | a required check that has not started, from a ruleset: the item stays proposed |
 | `relaxed` | originate | ynh, focus `tidy` | issues labelled `ynf:relaxed` (none exist) | a scope that replaces lint with `true` is refused before any run |
 | `deps` | originate, disabled | — | issues labelled `ynf:deps` | a lane switched off: items recorded and ignored |
 
@@ -121,6 +122,7 @@ that package, so a run is judged on the debt it was asked to pay down rather tha
 | `spool-flood` | spool-flood | draft pull request; the run's folder is held to the run quota, by its own volume where the host gives one, else by ynf taking the excess away |
 | `deps-bump` | deps | ignored |
 | `fix-ci-retry` | fix-ci | an adopted pull request gets a commit, never a force-push |
+| `gate-required-check` | gate | a pull request into `gate/required-checks`, whose ruleset requires `gate-never-runs`, a check no workflow reports. lint, test and docs pass on ynf's commit, and ynf still keeps the item proposed with CI pending, listing the required check as `expected`, read from the ruleset. Never `in_review`. Checked by the required-checks stage of `make e2e`, not by the sweep, because the item never settles |
 | `relaxed-scope` | relaxed | a scope that replaces lint with `true` is refused before any run, with no model spend; it is a ynh lane, so `make e2e` runs it only with `LANES=relaxed,...` and the agent image and ynh available |
 
 The CI gate (`.golangci.ci.yml`) is deliberately stricter than the harness's lint sensor: it also

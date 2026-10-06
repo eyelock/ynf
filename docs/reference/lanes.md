@@ -33,6 +33,54 @@ carried out today.
 | `attempts` | Runs that never finish before the item is quarantined | yes (default 3) |
 | `id` | The lane's own id in telemetry, which stays fixed if the repository that defines it moves. Without one, a lane's id is where it is defined, host first, then its name: `github.com/acme/factory-config#lint-paydown` for a lane in the configuration repository (wherever a repository overrides it), `github.com/eyelock/ynh#docs-refresh` for one the repository defines itself (ADR-006). Letters, digits and `. _ ~ : @ / # -` | yes |
 
+## What guards see of a pull request
+
+`guards.eligible` reads `facts.pr`, read fresh before every decision. Its fields:
+
+| Field | Meaning |
+|---|---|
+| `number`, `state`, `merged`, `draft`, `fork` | The pull request's own state |
+| `changes_requested`, `approved` | From the latest review by each reviewer |
+| `ci` | `pending`, `success` or `failure`, summed over the checks that gate (below) |
+| `required_unknown` | `true` when neither branch protection nor the repository's rulesets could be read, so no check is marked required |
+| `checks` | Every check run and commit status on the head commit, and every required check that has not reported |
+
+Each entry of `checks` has:
+
+| Field | Meaning |
+|---|---|
+| `name` | The check run's name, or the commit status's context |
+| `status` | `expected`, `queued`, `in_progress` or `completed`. A commit status is `completed` unless it is `pending`, which is `in_progress` |
+| `conclusion` | `success`, `failure`, `neutral`, `cancelled`, `skipped`, `timed_out`, `action_required`, or empty until the check concludes. A commit status of `error` is `failure` |
+| `required` | `true` when the base branch requires it |
+| `app`, `app_id` | The GitHub App that reported a check run: its slug and id. Both are empty for a commit status, which has no App |
+
+**Required checks** are the union of the base branch's classic branch protection and the
+repository rulesets that apply to it (rules of type `required_status_checks`). A required check
+bound to a GitHub App is marked `required` only on a run from that App: a check of the same name
+from another App is listed, and is not required. A commit status never meets a requirement bound to
+an App.
+
+**A required check that has not started** appears in `checks` with `status: "expected"`, an empty
+`conclusion` and `required: true`. If the requirement is bound to an App, `app_id` is that App's id
+and `app` is empty. ynf does not say how long a check has been expected: GitHub does not record
+when a check was due, and the head commit's date is not when it was pushed. A guard can see that a
+check has not started, not for how long.
+
+**`ci`** gates on the required checks when any are marked, and on every check otherwise. It is
+`pending` until every gating check has concluded, which includes an `expected` one, and `failure`
+as soon as one has failed. An item whose pull request is `pending` stays proposed, and does not
+move to `in_review`.
+
+When neither source can be read (a token without the right to read branch protection, and a
+repository whose rulesets are unavailable), `required_unknown` is `true`, nothing is marked
+required, and every check gates, as it did before ynf read rulesets. ynf logs it once for each
+repository for the life of the process, and `ynf doctor` reports it on a `required checks
+<repository>` line for each enrolled repository. Give the token read access to the repository's
+administration, or to its rulesets, to clear it.
+
+Checks, check runs and statuses are read to the last page.
+
 ## The built-in protected paths
 
 Refused in every lane, whatever `allowed_paths` says: `.github/workflows/**`, `.github/actions/**`,
