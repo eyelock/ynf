@@ -35,7 +35,7 @@ func (d Detection) String() string {
 	return s
 }
 
-// Detect asks bin (YnrBin) for `info --format json`. It is detected when that answers with a
+// Detect asks bin (Ynr) for `info --format json`. It is detected when that answers with a
 // version.
 func Detect(ctx context.Context, bin string) Detection {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)

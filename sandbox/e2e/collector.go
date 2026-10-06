@@ -42,35 +42,13 @@ const (
 	imageUserUID = 10042
 )
 
-// ynrBinary says which ynr to use, or why there is none: -ynr, YNF_YNR_BIN, a ynr checkout to build
-// from (-ynr-src, YNR_SRC) or ynr on PATH, in that order. A checkout is built into tmp.
-func ynrBinary(flagBin, flagSrc, tmp string) (bin, why string) {
-	if flagBin == "off" {
-		return "", "-ynr=off"
+// ynrBinary is the ynr on PATH, which is where ynf finds it too, or why there is none.
+func ynrBinary() (bin, why string) {
+	p, err := exec.LookPath("ynr")
+	if err != nil {
+		return "", "no ynr on PATH"
 	}
-	for _, p := range []string{flagBin, os.Getenv("YNF_YNR_BIN")} {
-		if p != "" {
-			if _, err := exec.LookPath(p); err != nil {
-				return "", fmt.Sprintf("%s is not runnable: %v", p, err)
-			}
-			return p, ""
-		}
-	}
-	src := flagSrc
-	if src == "" {
-		src = os.Getenv("YNR_SRC")
-	}
-	if src != "" {
-		out := filepath.Join(tmp, "ynr")
-		if o, err := sh(src, "go", "build", "-o", out, "./cmd/ynr"); err != nil {
-			return "", fmt.Sprintf("building ynr from %s: %v\n%s", src, err, o)
-		}
-		return out, ""
-	}
-	if p, err := exec.LookPath("ynr"); err == nil {
-		return p, ""
-	}
-	return "", "no ynr: set YNF_YNR_BIN (or -ynr), YNR_SRC to a ynr checkout to build from (or -ynr-src), or put ynr on PATH"
+	return p, ""
 }
 
 // receiver is a tiny OTLP/HTTP endpoint: ynr serve's upstream. It keeps what it is sent.

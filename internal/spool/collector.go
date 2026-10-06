@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -34,13 +33,9 @@ type Collector struct {
 	Archive time.Duration
 }
 
-// YnrBin is the ynr binary ynf starts and asks: YNF_YNR_BIN when set, else ynr on PATH.
-func YnrBin() string {
-	if b := os.Getenv("YNF_YNR_BIN"); b != "" {
-		return b
-	}
-	return "ynr"
-}
+// Ynr is the ynr ynf starts and asks: whatever `ynr` resolves to on the PATH ynf was given, as
+// a shell would find it. There is no other lookup; without ynr on PATH, ynf carries on.
+const Ynr = "ynr"
 
 // UpstreamFromEnv is the endpoint the operator set for OpenTelemetry, which ynr serve ships to
 // when the collector is on (ynr ADR-004): OTEL_EXPORTER_OTLP_ENDPOINT, else a signal's own
@@ -85,7 +80,7 @@ type Serve struct {
 
 // StartServe starts ynr serve on the spool root for the length of a job. It never fails the job:
 // when ynr is missing or does not start, it says so in the log and returns nil, and the job runs
-// on without a collector. bin is the ynr to start (YnrBin); environ is the environment it gets.
+// on without a collector. bin is the ynr to start (Ynr); environ is the environment it gets.
 func StartServe(c Collector, bin, root string, environ []string, log *slog.Logger) *Serve {
 	path, err := exec.LookPath(bin)
 	if err != nil {

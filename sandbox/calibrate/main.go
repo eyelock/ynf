@@ -77,11 +77,10 @@ var safeValue = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 func main() {
 	root := flag.String("root", ".", "the sandbox/ directory")
 	repo := flag.String("repo", "eyelock/ynf-sandbox", "the sandbox repository")
-	ynh := flag.String("ynh", envOr("YNH", "ynh"), "the ynh binary (needs .agents/harness support)")
 	only := flag.String("only", "", "calibrate only this fixture id")
 	flag.Parse()
 
-	if err := run(*root, *repo, *ynh, *only); err != nil {
+	if err := run(*root, *repo, "ynh", *only); err != nil {
 		fmt.Fprintln(os.Stderr, "calibrate:", err)
 		os.Exit(1)
 	}
@@ -148,12 +147,12 @@ func run(root, repo, ynh, only string) error {
 // preflight fails early, and legibly, when ynh cannot read the sandbox's harness.
 func preflight(ynh, dir string) error {
 	if _, err := exec.LookPath(ynh); err != nil {
-		return fmt.Errorf("ynh not found (%s); set YNH=/path/to/ynh", ynh)
+		return fmt.Errorf("ynh is not on PATH (%s)", ynh)
 	}
 	_, err := cmd(dir, ynh, "check", dir, "--cwd", dir, "--no-baseline", "--only", "docs", "--format", "json")
 	var exit *exec.ExitError
 	if err != nil && (!errors.As(err, &exit) || exit.ExitCode() == 2) {
-		return fmt.Errorf("%s cannot run the sandbox harness at .agents/harness/; it needs ynh from develop 027dc19 or later (set YNH=...): %w", ynh, err)
+		return fmt.Errorf("%s cannot run the sandbox harness at .agents/harness/; it needs ynh from develop 027dc19 or later, first on PATH: %w", ynh, err)
 	}
 	return nil
 }
@@ -362,11 +361,4 @@ func readYAML(path string, v any) error {
 		return fmt.Errorf("%s: %w", path, err)
 	}
 	return nil
-}
-
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
 }

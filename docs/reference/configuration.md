@@ -80,8 +80,8 @@ carries on: telemetry never fails the factory. `ynf doctor` says the same. A job
 
 ## Detecting ynr
 
-`ynr` is an optional tool, found the way ynh is: `YNF_YNR_BIN` if set, else `ynr` on `PATH`, asked
-with `ynr info --format json`. `ynf doctor` shows what it found. Finding it starts nothing: only
+`ynr` is an optional tool, found the way ynh is: `ynr` on the `PATH` ynf is given, and nowhere
+else, asked with `ynr info --format json`. `ynf doctor` shows what it found. Finding it starts nothing: only
 `telemetry.collector.enabled` starts `ynr serve`, and only for a factory job.
 
 ## The configuration repository
@@ -123,8 +123,8 @@ source of every value, `config@<sha>` or `repo@<sha>`.
 A lane that omits `run.runner` runs as ynh when it has a `ynh` block and ynh is detected on the
 host, else as its `command` block (ADR-012); with neither it is refused with `operator_error`. ynh
 is detected when `ynh version --format json` answers with capabilities 0.9.0 or later, using
-`YNF_YNH_BIN` if set, else `ynh` on `PATH`. It is checked once per process, always on the host,
-including for a lane whose run is in a published `run.image`. A lane that names `runner: ynh`
+`ynh` on the `PATH` ynf is given, and nowhere else. It is checked once per process, always on the
+host, including for a lane whose run is in a published `run.image`. A lane that names `runner: ynh`
 never falls back: where ynh runs on the host and is missing, the run is refused. Each run record
 says `runner_detected` and the ynh version, and `ynf harness` and `ynf lanes show` say what an
 unnamed runner resolves to here.

@@ -25,13 +25,26 @@ while :; do sleep 0.02; done
 `
 
 // withTelemetry rewrites the test's config with a telemetry block, and points ynr at the fake.
-func fakeYnr(t *testing.T) string {
+// fakeYnr puts a fake ynr first on PATH, which is the only place ynf looks for it.
+func fakeYnr(t *testing.T) {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), "ynr")
-	if err := os.WriteFile(p, []byte(fakeYnrScript), 0o755); err != nil {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ynr"), []byte(fakeYnrScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	return p
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// noYnr takes every folder holding a ynr off PATH, so ynf finds none.
+func noYnr(t *testing.T) {
+	t.Helper()
+	var keep []string
+	for _, d := range filepath.SplitList(os.Getenv("PATH")) {
+		if _, err := os.Stat(filepath.Join(d, "ynr")); err != nil {
+			keep = append(keep, d)
+		}
+	}
+	t.Setenv("PATH", strings.Join(keep, string(os.PathListSeparator)))
 }
 
 func (e env) withTelemetry(block string) (spool string) {
@@ -41,7 +54,7 @@ func (e env) withTelemetry(block string) (spool string) {
 	if err := os.WriteFile(e.cfg, []byte(body), 0o644); err != nil {
 		e.t.Fatal(err)
 	}
-	e.t.Setenv("YNF_YNR_BIN", fakeYnr(e.t))
+	fakeYnr(e.t)
 	return spool
 }
 
@@ -139,7 +152,7 @@ func TestFindingYnrStartsNothing(t *testing.T) {
 	}
 	// And with no telemetry block at all.
 	e2 := setup(t)
-	t.Setenv("YNF_YNR_BIN", fakeYnr(t))
+	fakeYnr(t)
 	if code, _, stderr := e2.run("sweep"); code != 0 {
 		t.Fatalf("%d %s", code, stderr)
 	}
@@ -153,7 +166,7 @@ func TestFindingYnrStartsNothing(t *testing.T) {
 func TestAMissingOrFailingYnrNeverFailsTheJob(t *testing.T) {
 	e := setup(t)
 	spool := e.withTelemetry(collectorOn)
-	t.Setenv("YNF_YNR_BIN", filepath.Join(e.dir, "no-such-ynr"))
+	noYnr(t)
 	code, _, stderr := e.run("sweep")
 	if code != 0 {
 		t.Fatalf("a missing ynr failed the job: %d %s", code, stderr)
@@ -257,7 +270,7 @@ func TestDoctorSaysWhatItFoundOfYnr(t *testing.T) {
 
 	e = setup(t)
 	e.withTelemetry(collectorOn)
-	t.Setenv("YNF_YNR_BIN", filepath.Join(e.dir, "no-such-ynr"))
+	noYnr(t)
 	code, out, _ := e.run("doctor")
 	if !strings.Contains(out, "runs on without a collector") {
 		t.Errorf("missing, collector on:\n%s", out)

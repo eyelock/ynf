@@ -36,7 +36,7 @@ reset the sandbox. Only S3 needs AWS. eyelock's own sandbox keeps its state in
 ## Calibrating the fixtures
 
 ```bash
-make calibrate                  # or: YNH=/path/to/ynh make calibrate
+make calibrate                  # with ynh on PATH
 ```
 
 This tests the test rig, not the factory. There is no agent and no ynf run in it. It proves each
@@ -157,9 +157,7 @@ checks that:
   volume's limit; elsewhere, such as Docker Desktop for Mac, ynf took the excess away and said so;
 - nothing was left unshipped in the spool, or what was is in the run capture.
 
-`YNF_YNR_BIN=/path/to/ynr` names a ynr, `YNR_SRC=/path/to/ynr` builds one from a checkout (it only
-builds it, into e2e's temporary folder), and ynr on `PATH` is used otherwise. With none, those
-checks are skipped and e2e says why. The ynr binary and the receiver are host-side, so
+e2e uses the ynr on `PATH`, as ynf does. Without one, those checks are skipped and e2e says why. The ynr binary and the receiver are host-side, so
 `make e2e-factory`, where ynf runs in an image, does not run them.
 
 ## Changing it
