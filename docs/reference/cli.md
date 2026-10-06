@@ -15,10 +15,14 @@ ynf [global flags] <command> [flags]
 | `--log-format text\|json` | `text` | `text` is logfmt for people; `json` is one object per line for tools. `YNF_LOG_FORMAT` is the fallback. |
 | `-v` | off | Debug logging to stderr. |
 
-An item is named by its reference: `host/owner/name#number` for a GitHub issue
-(`github.com/eyelock/ynh#77`), or `owner/name#number` for one on the configured forge. It can also
-be named by its key, `item/<host>/<owner>/<name>/issues/<number>`. The host is the forge's own, so
-an issue on GitHub Enterprise Server is `item/github.acme.internal/…`.
+An item is named by its reference: `host/owner/name#number` for a GitHub issue or an adopted pull
+request (`github.com/eyelock/ynh#77`), or `owner/name#number` for one on the configured forge. GitHub
+numbers issues and pull requests from one sequence per repository, so the number names whichever
+item exists. The `items` commands and `replay` find it either way. Commands that read a ticket
+(`start`, `ticket`, `shadow run --ticket`) take the number as an issue. An item can also be named
+by its key, `item/<host>/<owner>/<name>/issues/<number>`, or `…/pulls/<number>` for an adopted pull
+request. The host is the forge's own, so an issue on GitHub Enterprise Server is
+`item/github.acme.internal/…`.
 
 ## Commands
 
@@ -38,7 +42,7 @@ an issue on GitHub Enterprise Server is `item/github.acme.internal/…`.
 | `ynf serve [--listen <addr>] [--webhook-secret-env <var>] [--start-token-env <var>] [--lane <name>]...` | `sweep` every minute, until interrupted. With `--listen`, also receives GitHub webhooks at `POST /webhook/github` (and `GET /healthz`): each is verified against the secret in `--webhook-secret-env` (default `YNF_WEBHOOK_SECRET`; serve refuses to listen without one), de-duplicated by delivery id, and handled in order. A webhook is a hint: facts are probed fresh. When the variable named by `--start-token-env` (default `YNF_START_TOKEN`) is set, `POST /start` takes the same instruction as `ynf start --detach`, as JSON (`{"ref": …}` or `{"prompt": …, "repo": …, "labels": […]}`, with an optional `"lane"`), from callers presenting that token as a bearer token: `202` with the item, `422` when refused. Without the variable the endpoint does not exist. |
 | `ynf handle --github-event <file> --github-event-name <name> [--lane <name>]...` | The CI-native host: handle one GitHub event, as a workflow's trigger gives it (`GITHUB_EVENT_PATH`, `GITHUB_EVENT_NAME`). A `schedule` or `workflow_dispatch` event runs the reconciliation sweep. `--lane`, repeatable, limits it as it does `sweep`: the sweep and its due items act on those lanes only, and an issue or pull request event steps only its items in those lanes. A workflow can run one lane on its own schedule. |
 | `ynf items ls` | Every tracked item: lane, state, pull request, reason. |
-| `ynf items show <item>` | The item document. |
+| `ynf items show <item>` | The item document. Its `reason` is the latest decision's, including one that kept the item where it was, such as `proposed` with "CI pending". A settled item keeps the reason it was settled for. |
 | `ynf items log <item>` | Every decision, run, action and note, in order. |
 | `ynf items retry <item>` | Puts an escalated or quarantined item back to ready, clearing its counters. Refused for an item in any other state, and while another instance holds it. |
 | `ynf items release <item>` | Clears the item's lease, for one left by an instance that died, and makes the item due now so its work restarts at once. A settled item is only unleased. |

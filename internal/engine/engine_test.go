@@ -933,7 +933,7 @@ func TestQueueDivergenceHoldsNewWork(t *testing.T) {
 	if err := h.e.Sweep(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if it := h.item(t, 2); it.State != item.Ready || !strings.Contains(it.Reason, "eligible") {
+	if it := h.item(t, 2); it.State != item.Ready || !strings.Contains(it.Reason, "1 proposals awaiting review (max 1)") {
 		t.Fatalf("the second item should wait while one proposal is open: %s %s", it.State, it.Reason)
 	}
 	log, _ := h.e.Store.Log(ctx, item.IssueKey("github.com", "o/r", 2))
@@ -2252,5 +2252,65 @@ func TestStatsGroupByTheEffortAskedForWhenNoneIsReported(t *testing.T) {
 	i := slices.IndexFunc(stats, func(s engine.Stats) bool { return s.Lane == "agent" })
 	if i < 0 || !slices.ContainsFunc(stats[i].Models, func(m engine.ModelStats) bool { return m.Model == "claude/sonnet" && m.Effort == "low" }) {
 		t.Fatalf("%+v", stats[i].Models)
+	}
+}
+
+// putCounter counts the writes the engine makes to the store.
+type putCounter struct {
+	store.Store
+	puts atomic.Int64
+}
+
+func (c *putCounter) Put(ctx context.Context, key string, doc []byte, v string) (string, error) {
+	c.puts.Add(1)
+	return c.Store.Put(ctx, key, doc, v)
+}
+
+// TestWaitingDecisionUpdatesReason: a decision that keeps an item in its state (CI pending on a
+// timer) still sets the reason items show, and costs no more writes than before: the item is
+// already saved once per decision, under the lease's version.
+func TestWaitingDecisionUpdatesReason(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:fmt", "pkg:internal/format"}
+	pc := &putCounter{Store: h.e.Store}
+	h.e.Store = pc
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	before := h.item(t, 1)
+	if before.State != item.Proposed || strings.Contains(before.Reason, "CI pending") {
+		t.Fatalf("after sweep: %s (%s)", before.State, before.Reason)
+	}
+
+	var writes []int64
+	for range 2 {
+		h.advance(time.Minute)
+		base := pc.puts.Load()
+		if n, err := h.e.RunDue(ctx); err != nil || n != 1 {
+			t.Fatalf("pending tick: %d stepped, %v", n, err)
+		}
+		writes = append(writes, pc.puts.Load()-base)
+		if it := h.item(t, 1); it.State != item.Proposed || it.Reason != "#101: CI pending" {
+			t.Fatalf("pending tick: %s (%q)", it.State, it.Reason)
+		}
+	}
+	if writes[0] != writes[1] {
+		t.Errorf("a tick with an unchanged reason wrote %d times, the one that changed it %d", writes[1], writes[0])
+	}
+
+	// The same decisions still replay exactly.
+	log, err := h.e.Store.Log(ctx, item.IssueKey("github.com", "o/r", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs, err := engine.Replay(log, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rs {
+		if !r.Same {
+			t.Errorf("decision %s differs on replay", r.EntryID)
+		}
 	}
 }

@@ -6,6 +6,9 @@
 // the fixture's known fix only those in `after` may. A fixture that cannot produce that
 // reproducible negative cannot tell a good agent run from a bad one, which is what an end-to-end
 // test of the factory relies on. The idea is ynh's `ynh check --calibrate`, applied to fixtures.
+//
+// Every fixture is calibrated from the sandbox's seed commit, not from whatever main has become,
+// so a sandbox that e2e has merged into (its shadow stage does) calibrates as it did when new.
 package main
 
 import (
@@ -115,6 +118,15 @@ func run(root, repo, ynh, only string) error {
 	if _, err := cmd(origin, "git", "fetch", "-q", "origin", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
 		return err
 	}
+	// The fixtures' unfixed state is the seed: the one commit scripts/seed.sh pushed to main. What
+	// has been merged since (e2e's shadow stage merges a human fix) is not the fixtures' to depend on.
+	seed, err := seedCommit(origin)
+	if err != nil {
+		return err
+	}
+	if _, err := cmd(origin, "git", "checkout", "-q", "--detach", seed); err != nil {
+		return err
+	}
 	if err := preflight(ynh, origin); err != nil {
 		return err
 	}
@@ -129,7 +141,7 @@ func run(root, repo, ynh, only string) error {
 		if only != "" && f.ID != only {
 			continue
 		}
-		v := calibrator{root: root, origin: origin, tmp: tmp, ynh: ynh}
+		v := calibrator{root: root, origin: origin, tmp: tmp, ynh: ynh, seed: seed}
 		detail, err := v.fixture(f, lf.Lanes[f.Lane])
 		mark := "ok  "
 		if err != nil {
@@ -158,7 +170,20 @@ func preflight(ynh, dir string) error {
 }
 
 type calibrator struct {
-	root, origin, tmp, ynh string
+	root, origin, tmp, ynh, seed string
+}
+
+// seedCommit is the commit that seeded the sandbox's main: its only root.
+func seedCommit(origin string) (string, error) {
+	out, err := cmd(origin, "git", "rev-list", "--max-parents=0", "origin/main")
+	if err != nil {
+		return "", err
+	}
+	roots := strings.Fields(out)
+	if len(roots) != 1 {
+		return "", fmt.Errorf("origin/main has %d root commits, expected the one seed commit; run make reset", len(roots))
+	}
+	return roots[0], nil
 }
 
 func (v calibrator) fixture(f fixture, l lane) (string, error) {
@@ -281,7 +306,7 @@ func (v calibrator) command(f fixture, l lane) (string, error) {
 }
 
 func (v calibrator) worktree(f fixture, suffix string) (string, error) {
-	ref := "origin/main"
+	ref := v.seed
 	if f.Kind == "pull_request" && f.PullRequest != nil {
 		ref = "origin/" + f.PullRequest.Branch
 	}
