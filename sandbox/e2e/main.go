@@ -1058,8 +1058,8 @@ func gateStage(fixtures []fixture, repo, ynf, cfg, logPath string) error {
 	if err != nil || strings.TrimSpace(out) == "" {
 		return fmt.Errorf("no open pull request from %s in %s (this stage needs a rebuilt sandbox): %v", branch, repo, err)
 	}
-	// An adopted pull request's item key says pulls, not issues, so it is named by key, not as repo#n.
-	ref := fmt.Sprintf("item/github.com/%s/pulls/%s", repo, strings.TrimSpace(out))
+	// The short reference finds an adopted pull request's item, whose key says pulls, not issues.
+	ref := fmt.Sprintf("%s#%s", repo, strings.TrimSpace(out))
 	fmt.Printf("\nrequired checks: adopting %s, whose base branch requires a check nothing reports\n", ref)
 
 	type snapshot struct {
@@ -1144,7 +1144,7 @@ func gateStage(fixtures []fixture, repo, ynf, cfg, logPath string) error {
 		return fmt.Errorf("%s: %s (%s), want proposed", ref, it.State, it.Reason)
 	}
 
-	// What ynf saw, from the decision it recorded last.
+	// What ynf saw, from the decisions it recorded; the reason it shows is checked on the item.
 	o, err := sh("", ynf, "--config", cfg, "--format", "json", "items", "log", ref)
 	if err != nil {
 		return fmt.Errorf("items log: %w", err)
@@ -1163,7 +1163,6 @@ func gateStage(fixtures []fixture, repo, ynf, cfg, logPath string) error {
 		Required   bool   `json:"required"`
 	}
 	var last []check
-	lastReason := ""
 	for _, en := range entries {
 		var d struct {
 			Input struct {
@@ -1178,13 +1177,11 @@ func gateStage(fixtures []fixture, repo, ynf, cfg, logPath string) error {
 				Item struct {
 					State string `json:"state"`
 				} `json:"item"`
-				Reason string `json:"reason"`
 			} `json:"decision"`
 		}
 		if en.Kind != "decision" || json.Unmarshal(en.Body, &d) != nil {
 			continue
 		}
-		lastReason = d.Decision.Reason
 		if d.Decision.Item.State == "in_review" {
 			return fmt.Errorf("%s was moved to in_review while a required check had not started", ref)
 		}
@@ -1195,8 +1192,9 @@ func gateStage(fixtures []fixture, repo, ynf, cfg, logPath string) error {
 			last = pr.Checks
 		}
 	}
-	if !strings.Contains(lastReason, "CI pending") {
-		return fmt.Errorf("%s: its last decision was %q, want CI pending", ref, lastReason)
+	// A decision that keeps the item waiting still sets the reason items show.
+	if !strings.Contains(it.Reason, "CI pending") {
+		return fmt.Errorf("%s: items show gives the reason %q, want CI pending", ref, it.Reason)
 	}
 	byName := map[string]check{}
 	for _, c := range last {

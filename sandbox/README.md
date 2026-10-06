@@ -43,14 +43,19 @@ This tests the test rig, not the factory. There is no agent and no ynf run in it
 fixture can tell a fixed state from an unfixed one, which an end-to-end test of the factory
 relies on: when a factory run fails, calibration rules out "the fixture was broken".
 
-It clones the live sandbox and, for every fixture, runs the lane's scoped sensors through
-`ynh check` with the same `--sensor-overlay` the lane would use. Each fixture's `calibrate` block
+It clones the live sandbox and works from its seed commit, the one commit `scripts/seed.sh` pushed to
+`main`, not from `main` as it is now. `make e2e` merges a human fix into `main` (its shadow stage), and
+a fixture whose unfixed state is `main` would otherwise calibrate against the fixed code. A fixture
+that starts from a pull request uses that pull request's branch. So `make calibrate` gives the same
+answer after `make e2e` as before it, and needs no `make reset` between them.
+
+For every fixture it runs the lane's scoped sensors through `ynh check` with the same `--sensor-overlay` the lane would use. Each fixture's `calibrate` block
 in `fixtures.yaml` says which sensors must fail before its known fix
 (`fixtures/<id>.fix.patch`, written by hand) and which may still fail after. It also checks that
 the flaky test is still flaky, that the command runner's diff is the same twice, and that the
 disabled lane is still off. The idea is ynh's `ynh check --calibrate`, applied to fixtures.
 
-Run it after every change to `seed/`, the lanes or the fixtures, following `make reset`. It needs
+Run it after every change to `seed/`, the lanes or the fixtures, following `make reset`. If `main` no longer has a single root commit, it stops and says to run `make reset`. It needs
 a ynh that reads `.agents/harness/` (ynh `develop` from `027dc19` on) and stops with a clear
 message when the one on `PATH` does not.
 

@@ -271,6 +271,7 @@ func (s *step) decideAndAct(ev event.Event) (*event.Event, error) {
 		return nil, err
 	}
 	d.Item.Trace = itemTrace(it.Trace, s.span) // after the record, which replay compares
+	d.Item.Reason = latestReason(it, d)        // likewise: the record is the decider's own output
 	if err := s.h.Save(ctx, d.Item); err != nil {
 		endDecide(telemetry.OutcomeFailed)
 		return nil, err
@@ -306,6 +307,17 @@ func (s *step) decideAndAct(ev event.Event) (*event.Event, error) {
 		return &ev, nil
 	}
 	return nil, nil
+}
+
+// latestReason is the reason the item shows after a decision. A decision that moves the item sets
+// its reason itself; one that keeps it waiting (CI pending, a paused lane) only reports one, so
+// the item takes it. This rides the save every decision already makes, so it costs no write. A
+// settled item that is only being told something keeps the reason it was settled for.
+func latestReason(it item.Item, d decide.Decision) string {
+	if d.Reason == "" || d.Item.State == it.State && it.State.Settled() && it.State != item.InReview {
+		return d.Item.Reason
+	}
+	return d.Reason
 }
 
 // actOutcome is how an action ended: failed when it errored, or when the action it asked of the

@@ -403,6 +403,28 @@ func key(s, defaultHost string, resolve func(name string) (string, error)) (stri
 	return item.Key(ref), nil
 }
 
+// itemKey is key for a command that acts on a stored item. A GitHub number may be an issue or an
+// adopted pull request, and the forge numbers both from one sequence, so at most one is stored:
+// the short form finds the pull request's item when there is no issue's.
+func itemKey(ctx context.Context, st store.Store, s, defaultHost string, resolve func(name string) (string, error)) (string, error) {
+	k, err := key(s, defaultHost, resolve)
+	if err != nil {
+		return "", err
+	}
+	base, n, ok := strings.Cut(k, "/issues/")
+	if !ok || strings.Contains(n, "/") || strings.HasPrefix(s, "item/") {
+		return k, nil
+	}
+	if _, _, err := st.Get(ctx, k); !errors.Is(err, store.ErrNotFound) {
+		return k, nil
+	}
+	pr := base + "/pulls/" + n
+	if _, _, err := st.Get(ctx, pr); err == nil {
+		return pr, nil
+	}
+	return k, nil
+}
+
 // parseRef resolves a reference to a tracker host and the tracker's own key.
 func parseRef(s, defaultHost string, resolve func(name string) (string, error)) (tracker.Ref, error) {
 	if repoPart, num, ok := strings.Cut(s, "#"); ok {
@@ -446,7 +468,7 @@ func (a *app) items(ctx context.Context, args []string) error {
 	if len(args) < 2 {
 		return withCode(ExitUsage, fmt.Errorf("items %s needs an item", args[0]))
 	}
-	k, err := key(args[1], e.ForgeHost, trackerNames(ctx, e))
+	k, err := itemKey(ctx, e.Store, args[1], e.ForgeHost, trackerNames(ctx, e))
 	if err != nil {
 		return err
 	}
@@ -590,7 +612,7 @@ func (a *app) replay(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	k, err := key(args[0], e.ForgeHost, trackerNames(ctx, e))
+	k, err := itemKey(ctx, e.Store, args[0], e.ForgeHost, trackerNames(ctx, e))
 	if err != nil {
 		return err
 	}
