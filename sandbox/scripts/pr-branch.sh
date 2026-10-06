@@ -1,12 +1,14 @@
 #!/bin/sh
-# Cut BRANCH from main and commit FILES_DIR on top. Called by Terraform; needs REPO, BRANCH,
-# FILES_DIR, TITLE, BODY_FILE and LABELS (comma-separated).
+# Cut BRANCH from BASE (main unless it is set) and commit FILES_DIR on top, then open a pull request
+# into BASE. Called by Terraform; needs REPO, BRANCH, FILES_DIR, TITLE, BODY_FILE and LABELS
+# (comma-separated).
 set -eu
+BASE=${BASE:-main}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 url="https://github.com/$REPO.git"
 git -c credential.helper= -c 'credential.helper=!gh auth git-credential' \
-  clone -q --depth 1 --branch main "$url" "$work"
+  clone -q --depth 1 --branch "$BASE" "$url" "$work"
 cd "$work"
 git checkout -q -b "$BRANCH"
 cp -R "$FILES_DIR"/. .
@@ -19,4 +21,4 @@ set --
 old_ifs=$IFS; IFS=,
 for l in $LABELS; do set -- "$@" --label "$l"; done
 IFS=$old_ifs
-gh pr create --repo "$REPO" --base main --head "$BRANCH" --title "$TITLE" --body-file "$BODY_FILE" "$@" >/dev/null
+gh pr create --repo "$REPO" --base "$BASE" --head "$BRANCH" --title "$TITLE" --body-file "$BODY_FILE" "$@" >/dev/null

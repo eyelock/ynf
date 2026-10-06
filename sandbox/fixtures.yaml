@@ -320,6 +320,31 @@ fixtures:
         - CI lint fails on `_ = fn()` (check-blank), which the harness's own lint config allows, so the lane's sensors start green
         - ynf adopts the pull request, adds a commit, never force-pushes, and leaves the author as owner
 
+  - id: gate-required-check
+    kind: pull_request
+    title: Add a release gate helper
+    body: fixtures/gate-required-check.md
+    labels: ["ynf:gate", "pkg:internal/gate"]
+    lane: gate
+    pull_request:
+      branch: human/gate-required
+      # Its base is a branch of its own, cut from main, whose ruleset requires a check no
+      # workflow reports. The ruleset is scoped to that branch alone, so the merges e2e makes into
+      # main (shadow mode's human fix) are never held by it.
+      base: gate/required-checks
+      files: fixtures/gate-required-check/testdata
+    calibrate:
+      command: { deterministic: true }
+    expect:
+      # ynf waits here for a check that never starts, so the item never settles: the gate stage
+      # of e2e checks it, and the sweep does not include this lane.
+      result: proposed
+      checks:
+        - the ruleset on the base branch requires gate-never-runs, which nothing reports; classic branch protection requires nothing there
+        - lint, test and docs all pass on the head commit ynf pushes
+        - ynf lists gate-never-runs in the pull request's checks as expected and required (status "expected"), read from the ruleset, and keeps the item proposed with CI pending
+        - the item is never moved to in_review, and its decisions replay the same
+
   - id: relaxed-scope
     kind: prompt
     title: Run the lint lane with a scope that relaxes lint

@@ -203,6 +203,37 @@ func TestSweepUntilSettledAndDoctor(t *testing.T) {
 	}
 }
 
+// TestDoctorSaysWhenRequiredChecksCannotBeRead: the fake GitHub serves neither branch protection nor
+// rulesets, so doctor names the repository and says every check gates. It is a warning, as ynf works.
+func TestDoctorSaysWhenRequiredChecksCannotBeRead(t *testing.T) {
+	e := setup(t)
+	code, out, _ := e.run("--format", "json", "doctor")
+	var rep struct {
+		Checks []struct {
+			Name, Detail string
+			OK           bool
+		}
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatal(err, out)
+	}
+	found := false
+	for _, c := range rep.Checks {
+		if c.Name == "required checks o/r" {
+			found = true
+			if c.OK || !strings.Contains(c.Detail, "every check gates") || !strings.Contains(c.Detail, "main") {
+				t.Errorf("%+v", c)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("doctor %d did not report o/r's required checks: %s", code, out)
+	}
+	if _, human, _ := e.run("doctor"); !strings.Contains(human, "--    required checks o/r") {
+		t.Errorf("unreadable required checks are a warning, not a failure: %s", human)
+	}
+}
+
 // TestDoctorReportsQueuedMemoryWrites: nothing is said when the queue is empty; when writes wait
 // for ynm, doctor says how many and since when, as a warning, not a failure.
 func TestDoctorReportsQueuedMemoryWrites(t *testing.T) {

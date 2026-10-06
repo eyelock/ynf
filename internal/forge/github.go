@@ -1,20 +1,29 @@
 package forge
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/eyelock/ynf/internal/facts"
 	"github.com/google/go-github/v84/github"
 )
 
 // GitHub is the GitHub provider.
-type GitHub struct{ c *github.Client }
+type GitHub struct {
+	c *github.Client
+	// Log receives the warning that a repository's required checks could not be read; the default
+	// logger when nil.
+	Log    *slog.Logger
+	warned sync.Map // repositories already warned about
+}
 
 // NewGitHub returns a GitHub forge authenticated with token. baseURL is for tests; "" is api.github.com.
 func NewGitHub(token, baseURL string) (*GitHub, error) {
@@ -102,8 +111,10 @@ func (g *GitHub) Ticket(ctx context.Context, repo string, number int) (facts.Tic
 		Text{Title: is.GetTitle(), Body: is.GetBody(), URL: is.GetHTMLURL()}, nil
 }
 
-// PullRequest implements Forge: state, checks on the head (check runs and commit statuses, with
-// the base branch's required checks marked), and the latest review per reviewer.
+// PullRequest implements Forge: state, checks on the head (check runs and commit statuses, every
+// page of each), the base branch's required checks marked, and the latest review per reviewer.
+// A required check that has not reported is listed too, with status "expected", so the pull
+// request cannot read as green while it is missing.
 func (g *GitHub) PullRequest(ctx context.Context, repo string, number int) (*facts.PR, error) {
 	o, r := split(repo)
 	pr, _, err := g.c.PullRequests.Get(ctx, o, r, number)
@@ -115,30 +126,69 @@ func (g *GitHub) PullRequest(ctx context.Context, repo string, number int) (*fac
 		Fork:    pr.GetHead().GetRepo().GetFullName() != pr.GetBase().GetRepo().GetFullName(),
 		HeadSHA: pr.GetHead().GetSHA(), HeadRef: pr.GetHead().GetRef(),
 	}
-	required := g.required(ctx, o, r, pr.GetBase().GetRef())
-
-	runs, _, err := g.c.Checks.ListCheckRunsForRef(ctx, o, r, p.HeadSHA, &github.ListCheckRunsOptions{ListOptions: github.ListOptions{PerPage: 100}})
-	if err != nil {
-		return nil, fmt.Errorf("check runs: %w", err)
+	req := g.RequiredChecks(ctx, repo, pr.GetBase().GetRef())
+	if !req.Known {
+		p.RequiredUnknown = true
+		g.warnUnknown(repo, pr.GetBase().GetRef(), req.Detail)
 	}
-	for _, cr := range runs.CheckRuns {
-		p.Checks = append(p.Checks, facts.Check{Name: cr.GetName(), Status: cr.GetStatus(), Conclusion: cr.GetConclusion(), Required: required[cr.GetName()]})
-	}
-	st, _, err := g.c.Repositories.GetCombinedStatus(ctx, o, r, p.HeadSHA, nil)
-	if err != nil {
-		return nil, fmt.Errorf("statuses: %w", err)
-	}
-	for _, s := range st.Statuses {
-		c := facts.Check{Name: s.GetContext(), Status: "completed", Conclusion: s.GetState(), Required: required[s.GetContext()]}
-		switch s.GetState() {
-		case "pending":
-			c.Status, c.Conclusion = "in_progress", ""
-		case "error":
-			c.Conclusion = "failure"
+	met := make([]bool, len(req.Checks))
+	// mark sets a check's Required if a requirement names it. A requirement bound to an App is met
+	// only by a check run from that App; a commit status has no App.
+	mark := func(c *facts.Check, isRun bool) {
+		for i, rq := range req.Checks {
+			bound := rq.AppID > 0
+			if rq.Context == c.Name && (!bound || isRun && rq.AppID == c.AppID) {
+				c.Required, met[i] = true, true
+			}
 		}
-		p.Checks = append(p.Checks, c)
 	}
-	slices.SortFunc(p.Checks, func(a, b facts.Check) int { return strings.Compare(a.Name, b.Name) })
+
+	runOpt := &github.ListCheckRunsOptions{ListOptions: github.ListOptions{PerPage: 100}}
+	for {
+		runs, resp, err := g.c.Checks.ListCheckRunsForRef(ctx, o, r, p.HeadSHA, runOpt)
+		if err != nil {
+			return nil, fmt.Errorf("check runs: %w", err)
+		}
+		for _, cr := range runs.CheckRuns {
+			c := facts.Check{Name: cr.GetName(), Status: cr.GetStatus(), Conclusion: cr.GetConclusion(), App: cr.GetApp().GetSlug(), AppID: cr.GetApp().GetID()}
+			mark(&c, true)
+			p.Checks = append(p.Checks, c)
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		runOpt.Page = resp.NextPage
+	}
+	stOpt := &github.ListOptions{PerPage: 100}
+	for {
+		st, resp, err := g.c.Repositories.GetCombinedStatus(ctx, o, r, p.HeadSHA, stOpt)
+		if err != nil {
+			return nil, fmt.Errorf("statuses: %w", err)
+		}
+		for _, s := range st.Statuses {
+			c := facts.Check{Name: s.GetContext(), Status: "completed", Conclusion: s.GetState()}
+			switch s.GetState() {
+			case "pending":
+				c.Status, c.Conclusion = "in_progress", ""
+			case "error":
+				c.Conclusion = "failure"
+			}
+			mark(&c, false)
+			p.Checks = append(p.Checks, c)
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		stOpt.Page = resp.NextPage
+	}
+	for i, rq := range req.Checks {
+		if !met[i] {
+			p.Checks = append(p.Checks, facts.Check{Name: rq.Context, Status: facts.StatusExpected, Required: true, AppID: rq.AppID})
+		}
+	}
+	slices.SortStableFunc(p.Checks, func(a, b facts.Check) int {
+		return cmp.Or(strings.Compare(a.Name, b.Name), strings.Compare(a.App, b.App), cmp.Compare(a.AppID, b.AppID))
+	})
 
 	reviews, _, err := g.c.PullRequests.ListReviews(ctx, o, r, number, &github.ListOptions{PerPage: 100})
 	if err != nil {
@@ -157,21 +207,110 @@ func (g *GitHub) PullRequest(ctx context.Context, repo string, number int) (*fac
 	return p, nil
 }
 
-// required returns the base branch's required checks, or none if it is unprotected or the token
-// cannot read its protection.
-func (g *GitHub) required(ctx context.Context, o, r, branch string) map[string]bool {
-	out := map[string]bool{}
-	rs, _, err := g.c.Repositories.GetRequiredStatusChecks(ctx, o, r, branch)
-	if err != nil {
+// RequiredCheck is a check a branch requires: its name, and the GitHub App it must come from, or 0
+// for any source.
+type RequiredCheck struct {
+	Context string
+	AppID   int64
+}
+
+// Required is what a branch requires before it merges, from classic branch protection and from the
+// repository rulesets that apply to it, together.
+type Required struct {
+	Checks []RequiredCheck
+	// Known is false when neither source could be read. Checks is then empty, which says nothing
+	// about what the branch requires.
+	Known bool
+	// Detail says how it was read, or why it could not be.
+	Detail string
+}
+
+// RequiredChecks reads the checks branch requires: the union of classic branch protection and the
+// rulesets that apply to it. An unprotected branch is known to require none. Only when both
+// sources fail to be read is the answer unknown.
+func (g *GitHub) RequiredChecks(ctx context.Context, repo, branch string) Required {
+	o, r := split(repo)
+	var out Required
+	seen := map[RequiredCheck]bool{}
+	add := func(context string, appID *int64) {
+		rc := RequiredCheck{Context: context}
+		if appID != nil && *appID > 0 {
+			rc.AppID = *appID
+		}
+		if !seen[rc] {
+			seen[rc] = true
+			out.Checks = append(out.Checks, rc)
+		}
+	}
+
+	var problems []string
+	rs, resp, err := g.c.Repositories.GetRequiredStatusChecks(ctx, o, r, branch)
+	switch {
+	case err == nil:
+		out.Known = true
+		// contexts lists every name, whatever its App; checks says which App each is bound to.
+		bound := map[string]bool{}
+		for _, c := range rs.GetChecks() {
+			bound[c.Context] = true
+			add(c.Context, c.AppID)
+		}
+		for _, c := range rs.GetContexts() {
+			if !bound[c] {
+				add(c, nil)
+			}
+		}
+	case resp != nil && resp.StatusCode == http.StatusNotFound && strings.Contains(err.Error(), "not protected"):
+		out.Known = true // readable, and the branch has no classic protection
+	default:
+		problems = append(problems, "branch protection: "+err.Error())
+	}
+
+	opt := &github.ListOptions{PerPage: 100}
+	rulesRead := true
+	for {
+		br, resp, err := g.c.Repositories.GetRulesForBranch(ctx, o, r, branch, opt)
+		if err != nil {
+			rulesRead = false
+			problems = append(problems, "rulesets: "+err.Error())
+			break
+		}
+		for _, rule := range br.RequiredStatusChecks {
+			for _, c := range rule.Parameters.RequiredStatusChecks {
+				add(c.Context, c.IntegrationID)
+			}
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opt.Page = resp.NextPage
+	}
+	out.Known = out.Known || rulesRead
+	if !out.Known {
+		out.Checks = nil
+		out.Detail = strings.Join(problems, "; ")
 		return out
 	}
-	for _, c := range rs.GetContexts() {
-		out[c] = true
-	}
-	for _, c := range rs.GetChecks() {
-		out[c.Context] = true
+	slices.SortFunc(out.Checks, func(a, b RequiredCheck) int {
+		return cmp.Or(strings.Compare(a.Context, b.Context), cmp.Compare(a.AppID, b.AppID))
+	})
+	out.Detail = fmt.Sprintf("%d required checks on %s", len(out.Checks), branch)
+	if len(problems) > 0 {
+		out.Detail += " (" + strings.Join(problems, "; ") + ")"
 	}
 	return out
+}
+
+// warnUnknown logs once per repository, for the life of the process, that its required checks
+// could not be read and every check gates instead.
+func (g *GitHub) warnUnknown(repo, branch, detail string) {
+	if _, dup := g.warned.LoadOrStore(repo, true); dup {
+		return
+	}
+	log := g.Log
+	if log == nil {
+		log = slog.Default()
+	}
+	log.Warn("required checks unreadable; gating on every check", "repo", repo, "branch", branch, "detail", detail)
 }
 
 // FindPR implements Forge.

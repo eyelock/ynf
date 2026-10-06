@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/eyelock/ynf/internal/facts"
+	"github.com/eyelock/ynf/internal/forge"
 	"github.com/eyelock/ynf/internal/runner"
 	"github.com/eyelock/ynf/internal/tracker"
 )
@@ -194,6 +195,52 @@ func (e *Engine) LaneRuns(ctx context.Context, repo string) ([]LaneRun, error) {
 			}
 		}
 		out = append(out, lr)
+	}
+	return out, nil
+}
+
+// RequiredReport is how an enrolled repository's required checks were read: what its default
+// branch requires, or that neither branch protection nor the rulesets could be read, in which case
+// every check on a pull request gates.
+type RequiredReport struct {
+	Repo   string   `json:"repo"`
+	Branch string   `json:"branch"`
+	Known  bool     `json:"known"`
+	Checks []string `json:"checks,omitempty"`
+	Detail string   `json:"detail"`
+}
+
+// RequiredChecks reads each enrolled repository's required checks on its default branch, for
+// ynf doctor. A forge that cannot read them is left out.
+func (e *Engine) RequiredChecks(ctx context.Context) ([]RequiredReport, error) {
+	enrolled, err := e.Enrolled(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []RequiredReport
+	for _, r := range enrolled {
+		host, name := e.splitRepo(r)
+		fg := e.Forge
+		if host != e.forgeHost() {
+			e.mu.Lock()
+			fg = e.Forges[host].Forge
+			e.mu.Unlock()
+		}
+		rr, ok := fg.(forge.RequiredReader)
+		if !ok {
+			continue
+		}
+		branch, err := fg.DefaultBranch(ctx, name)
+		if err != nil {
+			out = append(out, RequiredReport{Repo: r, Detail: err.Error()})
+			continue
+		}
+		req := rr.RequiredChecks(ctx, name, branch)
+		rep := RequiredReport{Repo: r, Branch: branch, Known: req.Known, Detail: req.Detail}
+		for _, c := range req.Checks {
+			rep.Checks = append(rep.Checks, c.Context)
+		}
+		out = append(out, rep)
 	}
 	return out, nil
 }

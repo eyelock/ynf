@@ -24,6 +24,9 @@ func TestCIState(t *testing.T) {
 		{"one red", []facts.Check{check("a", "completed", "failure", false), check("b", "in_progress", "", false)}, "failure", []string{"a"}},
 		{"only required gate", []facts.Check{check("req", "completed", "success", true), check("extra", "completed", "failure", false)}, "success", []string{"extra"}},
 		{"required red", []facts.Check{check("req", "completed", "timed_out", true)}, "failure", []string{"req"}},
+		{"required not started", []facts.Check{check("lint", "completed", "success", true), check("gate", facts.StatusExpected, "", true)}, "pending", nil},
+		{"required not started, another red", []facts.Check{check("lint", "completed", "failure", true), check("gate", facts.StatusExpected, "", true)}, "failure", []string{"lint"}},
+		{"every required concluded", []facts.Check{check("lint", "completed", "success", true), check("gate", "completed", "neutral", true), check("extra", "in_progress", "", false)}, "success", nil},
 	}
 	for _, c := range cases {
 		p := facts.PR{Checks: c.checks}
@@ -57,5 +60,21 @@ func TestCELHasNoFreeText(t *testing.T) {
 	}
 	if len((facts.Facts{}).CEL()) != 0 {
 		t.Fatal("empty facts should be empty")
+	}
+}
+
+func TestCELShowsAppsAndUnknownRequirements(t *testing.T) {
+	f := facts.Facts{PR: &facts.PR{Number: 2, RequiredUnknown: true, Checks: []facts.Check{
+		{Name: "scan", Status: "completed", Conclusion: "success", App: "scanner", AppID: 42},
+		{Name: "gate", Status: facts.StatusExpected, Required: true},
+	}}}
+	pr := f.CEL()["pr"].(map[string]any)
+	if pr["required_unknown"] != true || pr["ci"] != "pending" {
+		t.Fatalf("pr %v", pr)
+	}
+	checks := pr["checks"].([]any)
+	scan, gate := checks[0].(map[string]any), checks[1].(map[string]any)
+	if scan["app"] != "scanner" || scan["app_id"] != int64(42) || gate["status"] != "expected" || gate["app"] != "" {
+		t.Fatalf("checks %v", checks)
 	}
 }

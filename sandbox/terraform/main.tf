@@ -7,6 +7,10 @@ locals {
 
   labels = toset(flatten([for f in local.fixtures : f.labels]))
 
+  # A pull request may target a branch of its own, cut from main, when its fixture needs rules that
+  # main must not have. The rules below are scoped to those branches alone.
+  bases = toset([for f in local.prs : f.pull_request.base if try(f.pull_request.base, "main") != "main"])
+
   # The seeds name eyelock's sandbox; each is pushed with these names instead. scripts/seed.sh makes
   # the same three replacements, in this order: the factory's name contains the sandbox's.
   sandbox_repo = "${var.owner}/${var.name}"
@@ -79,6 +83,16 @@ resource "github_issue" "fixture" {
   depends_on = [terraform_data.seed, github_issue_label.label]
 }
 
+# A base branch for a fixture pull request that needs rules of its own, cut from the seeded main.
+resource "github_branch" "base" {
+  for_each      = local.bases
+  repository    = github_repository.sandbox.name
+  branch        = each.value
+  source_branch = "main"
+
+  depends_on = [terraform_data.seed]
+}
+
 # The branch, its commit and the pull request, opened by the local user so the fixture is a
 # pull request ynf did not originate.
 resource "terraform_data" "pr" {
@@ -90,6 +104,7 @@ resource "terraform_data" "pr" {
     environment = {
       REPO      = github_repository.sandbox.full_name
       BRANCH    = each.value.pull_request.branch
+      BASE      = try(each.value.pull_request.base, "main")
       FILES_DIR = "${local.root}/${each.value.pull_request.files}"
       TITLE     = each.value.title
       BODY_FILE = "${local.root}/${each.value.body}"
@@ -97,7 +112,7 @@ resource "terraform_data" "pr" {
     }
   }
 
-  depends_on = [github_issue_label.label]
+  depends_on = [github_issue_label.label, github_branch.base]
 }
 
 data "github_repository_pull_requests" "fixture" {
@@ -128,6 +143,37 @@ resource "github_branch_protection" "main" {
   }
 
   depends_on = [terraform_data.seed, terraform_data.pr]
+}
+
+# A ruleset, not branch protection, requires a check on the gate fixture's base branch, so ynf's
+# reading of rulesets is what the fixture proves. No workflow reports gate-never-runs: a required
+# check that never starts. The ruleset names that one branch, so it cannot hold the merges e2e makes
+# into main (shadow mode merges a human fix there). It is applied after the pull request is open:
+# while it is in force the branch takes no direct push, which nothing needs once the fixture is cut.
+resource "github_repository_ruleset" "gate" {
+  for_each    = local.bases
+  repository  = github_repository.sandbox.name
+  name        = "required-checks ${each.value}"
+  target      = "branch"
+  enforcement = "active"
+
+  conditions {
+    ref_name {
+      include = ["refs/heads/${each.value}"]
+      exclude = []
+    }
+  }
+
+  rules {
+    required_status_checks {
+      strict_required_status_checks_policy = false
+      required_check {
+        context = "gate-never-runs"
+      }
+    }
+  }
+
+  depends_on = [terraform_data.pr]
 }
 
 # The factory's configuration repository (ADR-006): enrols the sandbox and gives it default lanes.
