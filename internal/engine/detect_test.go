@@ -99,7 +99,7 @@ func TestLaneRunsSayWhatAnUnnamedRunnerResolvesTo(t *testing.T) {
 		want string
 	}{
 		{runner.Detection{Found: true, Version: "0.10.0"}, "ynh (detected 0.10.0)"},
-		{runner.Detection{}, "command (ynh was not found)"},
+		{runner.Detection{}, "command (ynh not found)"},
 	} {
 		h.e.DetectYnh = func(context.Context) runner.Detection { return c.det }
 		runs, err := h.e.LaneRuns(context.Background(), "o/r")

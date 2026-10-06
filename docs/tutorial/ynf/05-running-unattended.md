@@ -199,7 +199,7 @@ jobs:
   handle:
     runs-on: ubuntu-latest
     steps:
-      # Install ynf: brew install eyelock/tap/ynf once it is released.
+      # Install ynf first: a release binary from the repository's releases, or run the job in the factory image.
       - run: ynf --config .ynf/config.yaml handle
         env:
           GITHUB_TOKEN: ${{ secrets.YNF_TOKEN }}

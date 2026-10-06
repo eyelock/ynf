@@ -27,8 +27,10 @@ func TestResolve(t *testing.T) {
 		err      string
 	}{
 		{both, found, "ynh", true, "ynh (detected 0.10.0)", ""},
-		{both, missing, "command", true, "command (ynh was not found)", ""},
-		{both, runner.Detection{Detail: "capabilities 0.8.0"}, "command", true, "ynh was not detected (capabilities 0.8.0)", ""},
+		{both, missing, "command", true, "command (ynh not found)", ""},
+		{both, runner.Detection{Version: "0.8.0", Capabilities: "0.8.0", Detail: "ynh has capabilities 0.8.0; ynf needs 0.9.0"}, "command", true, "command (ynh 0.8.0 is too old: capabilities 0.8.0, needs 0.9.0)", ""},
+		{both, runner.Detection{Detail: "ynh version --format json gave no capabilities"}, "command", true, "command (ynh gave no capabilities)", ""},
+		{both, runner.Detection{Detail: "ynh: exec: \"ynh\": executable file not found in $PATH"}, "command", true, "command (ynh not found)", ""},
 		{cmdOnly, found, "command", true, "no ynh block", ""},
 		{ynhOnly, found, "ynh", true, "detected", ""},
 		{ynhOnly, missing, "", false, "", "no command block to fall back to"},

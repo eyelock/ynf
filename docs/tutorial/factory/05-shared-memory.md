@@ -146,6 +146,13 @@ Expected: `token:static`. A static token names no one, so every write made with 
 same way. ynm files a write under the caller only when it names no namespace, and ynf always names
 one, so the token does not move the record.
 
+## When the server is down
+
+A hosted store can be unreachable when a failure happens. ynf neither stops nor loses the record: a
+write ynm can't take is queued in ynf's own store, and sent, oldest first, before the next write once
+the server answers. Until then, `ynf doctor` carries a `memory queue` line, `<n> memory writes queued
+since <time>`, marked `--` as a warning, not a failure. With nothing waiting, it says nothing.
+
 ## In production: a machine token
 
 A static token is one shared secret: everyone who has it is the same writer. A real shared server

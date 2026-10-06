@@ -63,6 +63,35 @@ Read it top to bottom:
 The top of the file has `defaults` that every lane gets unless it says otherwise: the `docker`
 executor, three attempts, thirty days' retention, and three hosts Go needs to download modules.
 
+The file holds the rest of the sandbox's lanes too, twelve in all once the configuration
+repository's is counted. Besides `gofmt`, this track uses `reclaim` (lesson 6). The agent lanes
+(`lint-paydown`, `doc-drift`, `fix-ci`) are for the factory track, and `relaxed` is wrong on
+purpose and never runs. `detect` names no runner, and is the next section. The other four,
+`outage`, `spool`, `spool-image` and `spool-flood`, are command lanes that exist for `make e2e`,
+the sandbox's acceptance test: one always fails, and three write telemetry of their own. Their
+comments in the file say what each is for.
+
+## A lane with no runner
+
+Most lanes say which runner they use. `detect` doesn't: it has a `ynh` block and a `command` block,
+and ynf chooses between them where it runs (ADR-012). Ask what it chose:
+
+```bash
+ynf lanes show --repo <you>/ynf-sandbox detect
+```
+
+Expected, near the end of the output, when ynh isn't installed:
+
+```yaml
+resolves:
+  detect: command (ynh not found)
+```
+
+With ynh on your `PATH`, that line reads `ynh (detected <version>)`, and the lane would run an agent
+instead of `gofmt`. When ynh is there but too old for the lane, the line says so, as `command (ynh
+0.8.0 is too old: capabilities 0.8.0, needs 0.9.0)`. A lane that names its runner never falls back.
+`ynf harness` shows the same answer beside each lane.
+
 ## Guards
 
 `gofmt` takes every ticket its search finds. A lane can be choosier with a guard, a condition in
@@ -180,7 +209,7 @@ ynf lanes validate --repo <you>/ynf-sandbox --file ~/ynf-tutorial/lanes.yaml
 Expected:
 
 ```text
-/Users/you/ynf-tutorial/lanes.yaml: valid, 1 lanes (deps)
+/Users/you/ynf-tutorial/lanes.yaml: valid, 12 lanes (deps, detect, doc-drift, fix-ci, gofmt, lint-paydown, outage, reclaim, relaxed, spool, spool-flood, spool-image)
 merged over config@998570c of <you>/ynf-sandbox-factory
 ```
 

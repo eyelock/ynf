@@ -127,6 +127,8 @@ Expected:
 <you>/ynf-sandbox
   ok    deps (off): originate lane, ynh on docker
         harness ., carried in the repository at ., read when a run checks it out
+  ok    detect: originate lane, ynh (detected <version>) on docker
+        harness ., carried in the repository at ., read when a run checks it out
   ok    doc-drift: originate lane, ynh on docker
         harness ., carried in the repository at ., read when a run checks it out
   ok    fix-ci: adopt lane, ynh on docker
@@ -135,11 +137,24 @@ Expected:
         a command, not a harness
   ok    lint-paydown: originate lane, ynh on docker
         harness ., carried in the repository at ., read when a run checks it out
+  ok    outage: originate lane, command on docker
+        a command, not a harness
   ok    reclaim: originate lane, command on docker
         a command, not a harness
   ok    relaxed: originate lane, ynh on docker
         harness ., carried in the repository at ., read when a run checks it out
+  ok    spool: originate lane, command on docker
+        a command, not a harness
+  ok    spool-flood: originate lane, command on docker
+        a command, not a harness
+  ok    spool-image: originate lane, command on docker
+        a command, not a harness
 ```
+
+`detect` names no runner, so ynf says what it resolves to here. With your ynh detected it is
+`ynh (detected <version>)`, as above; on a machine with no ynh it reads `command (ynh not found)`,
+and the lane runs its `gofmt` command. The fixture lanes (`outage`, `spool`, `spool-image` and
+`spool-flood`) are command lanes for the sandbox's acceptance test, and nothing here starts them.
 
 ## The agent image
 
@@ -151,7 +166,8 @@ the tools its sensors run. Build it once:
 make -C "$YNF_SRC/sandbox" agent-image
 ```
 
-Expected: the image's ynh answering its version as the last line, `0.9.0` or later. The image is
+Expected: the image's ynh answering its version as the last line, `0.10.0` for the ynh release the
+base image is built on (the `--auto-approve` the lanes use needs 0.9.0 or later). The image is
 `ynf-sandbox-agent:latest`, which is the lint lane's `base`.
 
 ## Loosen a budget, and be refused
