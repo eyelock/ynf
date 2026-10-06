@@ -78,7 +78,7 @@ func (a *app) startJob(log *slog.Logger) {
 		return
 	}
 	a.eng.SpoolCollector = true
-	a.serve = spool.StartServe(a.tsettings.Collector, spool.YnrBin(), a.tsettings.Root, os.Environ(), log)
+	a.serve = spool.StartServe(a.tsettings.Collector, spool.Ynr, a.tsettings.Root, os.Environ(), log)
 	a.spool.Shipping = a.serve.Running
 }
 
@@ -128,7 +128,7 @@ func (a *app) spoolCheck() (ok bool, detail string) {
 // ynrCheck is doctor's line for ynr: an optional tool, which presence starts nothing for. With the
 // collector enabled and ynr missing, it says what will happen: the job runs on without it.
 func ynrCheck(ctx context.Context, cfg *config.Config) (ok bool, detail string) {
-	d := spool.Detect(ctx, spool.YnrBin())
+	d := spool.Detect(ctx, spool.Ynr)
 	enabled := false
 	if cfg != nil {
 		if ts, err := cfg.TelemetrySettings(os.Getenv); err == nil {

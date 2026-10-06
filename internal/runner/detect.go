@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -20,13 +19,9 @@ import (
 // the one with `--auto-approve`, which the lanes ynf ships use (ADR-012).
 const MinYnhCapabilities = "0.9.0"
 
-// YnhBin is the ynh binary ynf asks: YNF_YNH_BIN when set, else ynh on PATH.
-func YnhBin() string {
-	if b := os.Getenv("YNF_YNH_BIN"); b != "" {
-		return b
-	}
-	return "ynh"
-}
+// Ynh is the ynh ynf asks and runs: whatever `ynh` resolves to on the PATH ynf was given, as a
+// shell would find it. There is no other lookup (ADR-012).
+const Ynh = "ynh"
 
 // Detection is what detecting ynh on this host found (ADR-012).
 type Detection struct {
@@ -47,7 +42,7 @@ func (d Detection) String() string {
 // DetectYnh asks the host's ynh for its version. It is detected when the binary answers
 // `version --format json` and its capabilities version is one ynf supports.
 func DetectYnh(ctx context.Context) Detection {
-	bin := YnhBin()
+	bin := Ynh
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	var out, errb bytes.Buffer

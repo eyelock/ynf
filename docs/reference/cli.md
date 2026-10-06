@@ -72,13 +72,12 @@ With `--format json`, an error is `{"error": {"code": <exit code>, "message": ".
 
 ## Environment
 
-ynf writes OpenTelemetry where [See ynf in OpenTelemetry](../how-to/see-ynf-in-opentelemetry.md) says; the variables it reads for that are `OTEL_EXPORTER_OTLP_*`, `YNR_SPOOL`, `XDG_STATE_HOME`, `OTEL_RESOURCE_ATTRIBUTES`, `TRACEPARENT` and `TRACESTATE`, listed there. `YNF_YNR_BIN` names the `ynr` that `doctor` asks and a factory job with `telemetry.collector` on starts, else `ynr` on `PATH`. A factory job is `sweep`, `serve`, `handle` and `shadow run`; [Configuration](configuration.md#a-factory-job-with-the-collector-on) says what it does when the collector is on.
+ynf writes OpenTelemetry where [See ynf in OpenTelemetry](../how-to/see-ynf-in-opentelemetry.md) says; the variables it reads for that are `OTEL_EXPORTER_OTLP_*`, `YNR_SPOOL`, `XDG_STATE_HOME`, `OTEL_RESOURCE_ATTRIBUTES`, `TRACEPARENT` and `TRACESTATE`, listed there. The `ynr` that `doctor` asks and a factory job with `telemetry.collector` on starts is the one on `PATH`; ynf finds ynh and ynm the same way, and nowhere else. A factory job is `sweep`, `serve`, `handle` and `shadow run`; [Configuration](configuration.md#a-factory-job-with-the-collector-on) says what it does when the collector is on.
 
 | Variable | Used for |
 |---|---|
 | `GITHUB_TOKEN` (or `github.token_env`) | The forge and git pushes. Falls back to `gh auth token`. |
 | `YNF_CONFIG`, `YNF_FORMAT` | Fallbacks for `--config` and `--format`. |
-| `YNF_YNH_BIN` | The ynh binary ynf detects and runs `ynh image` and `ynh version` with, instead of `ynh` on `PATH`. A lane with no `run.runner` uses ynh only when this one is found and supported (ADR-012). |
 | `YNF_GITHUB_API` | Another GitHub API base URL (tests, GitHub Enterprise). |
 | `YNF_WEBHOOK_SECRET` | The secret `serve --listen` verifies GitHub webhooks against (`--webhook-secret-env` names another variable). |
 | `YNF_START_TOKEN` | The bearer token `POST /start` requires (`--start-token-env` names another variable). Unset, the endpoint does not exist. |

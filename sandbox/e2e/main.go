@@ -105,9 +105,6 @@ type item struct {
 	Branch   string         `json:"branch"`
 }
 
-// ynrFlag and ynrSrc say which ynr the collector checks use (collector.go).
-var ynrFlag, ynrSrc string
-
 func main() {
 	root := flag.String("root", ".", "the sandbox/ directory")
 	repo := flag.String("repo", "eyelock/ynf-sandbox", "the sandbox repository")
@@ -116,10 +113,8 @@ func main() {
 	timeout := flag.Duration("timeout", 15*time.Minute, "how long to wait for items to settle")
 	forget := flag.Bool("forget-memory", false, "empty the sandbox's ynm namespace and exit")
 	outage := flag.Bool("memory-outage", false, "run with ynm unreachable, then bring it back and check the queued memory writes arrive")
-	hideYnh := flag.Bool("hide-ynh", false, "hide ynh from ynf (YNF_YNH_BIN names nothing), so a lane with no runner falls back to its command")
+	hideYnh := flag.Bool("hide-ynh", false, "hide ynh from ynf (no folder on the PATH ynf is given holds one), so a lane with no runner falls back to its command")
 	image := flag.String("image", "", "run ynf inside this factory-flavoured harness image, as a job runner would (ADR-009, shape B)")
-	flag.StringVar(&ynrFlag, "ynr", "", "the ynr to use for the collector checks (default: YNF_YNR_BIN, a build of -ynr-src, or ynr on PATH); off skips them")
-	flag.StringVar(&ynrSrc, "ynr-src", "", "a ynr checkout to build the collector checks' ynr from (default: YNR_SRC); it is only built, never changed")
 	shadowOn := flag.Bool("shadow", true, "with the gofmt lane, end by closing fmt-format with a merged human fix and proving shadow mode on it (merges into the sandbox's main)")
 	flag.Parse()
 	if *forget {
@@ -218,7 +213,7 @@ func run(root, repo, factory, image string, outage bool, lanes []string, timeout
 		if err := os.MkdirAll(spool, 0o755); err != nil {
 			return err
 		}
-		bin, why := ynrBinary(ynrFlag, ynrSrc, tmp)
+		bin, why := ynrBinary()
 		if bin == "" {
 			fmt.Printf("collector, manifest and quota checks skipped: %s\n  ynf writes to a spool of this run's own, and only the step and intake checks run\n", why)
 			_ = os.Setenv("YNR_SPOOL", spool)
@@ -235,14 +230,22 @@ func run(root, repo, factory, image string, outage bool, lanes []string, timeout
 				}
 			}
 			col = &collectorSetup{spool: spool, rcv: rcv, bin: bin}
-			_ = os.Setenv("YNF_YNR_BIN", bin)
 			fmt.Printf("collector on: ynf starts %s as ynr serve for the sweep, shipping to a receiver at %s\n", bin, rcv.url)
 		}
 	}
 	if hideYnh {
-		// ynf detects ynh by asking this binary (ADR-012): nothing is there, so a lane with no
-		// runner runs its command, as it would on a machine without ynh.
-		_ = os.Setenv("YNF_YNH_BIN", filepath.Join(tmp, "no-ynh"))
+		// ynf finds ynh only on PATH (ADR-012). A folder put first on the PATH ynf is given holds a
+		// ynh that answers as a shell does for a missing command, so a lane with no runner runs its
+		// command, as it would on a machine without ynh. Taking ynh's folder off PATH instead would
+		// also take whatever else lives there, such as Homebrew's.
+		hide := filepath.Join(tmp, "hide-ynh")
+		if err := os.MkdirAll(hide, 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(hide, "ynh"), []byte("#!/bin/sh\necho 'ynh: command not found' >&2\nexit 127\n"), 0o755); err != nil {
+			return err
+		}
+		_ = os.Setenv("PATH", hide+string(os.PathListSeparator)+os.Getenv("PATH"))
 		fmt.Println("ynh hidden from ynf: a lane with no runner falls back to its command")
 	}
 

@@ -50,56 +50,58 @@ func TestResolve(t *testing.T) {
 	}
 }
 
-func fakeYnhBin(t *testing.T, out string) string {
+// fakeYnh puts a ynh that prints out first on PATH, the only place ynf looks for it.
+func fakeYnh(t *testing.T, out string) {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), "ynh")
-	if err := os.WriteFile(p, []byte("#!/bin/sh\necho '"+out+"'\n"), 0o755); err != nil {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ynh"), []byte("#!/bin/sh\necho '"+out+"'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	return p
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// noYnh takes every folder holding a ynh off PATH.
+func noYnh(t *testing.T) {
+	t.Helper()
+	var keep []string
+	for _, d := range filepath.SplitList(os.Getenv("PATH")) {
+		if _, err := os.Stat(filepath.Join(d, "ynh")); err != nil {
+			keep = append(keep, d)
+		}
+	}
+	t.Setenv("PATH", strings.Join(keep, string(os.PathListSeparator)))
 }
 
 func TestDetectYnh(t *testing.T) {
 	ctx := context.Background()
-	t.Setenv("YNF_YNH_BIN", fakeYnhBin(t, `{"version":"0.10.0","capabilities":"0.10.0"}`))
+	fakeYnh(t, `{"version":"0.10.0","capabilities":"0.10.0"}`)
 	if d := runner.DetectYnh(ctx); !d.Found || d.Version != "0.10.0" || d.String() != "ynh 0.10.0" {
 		t.Fatalf("%+v", d)
 	}
-	t.Setenv("YNF_YNH_BIN", fakeYnhBin(t, `{"capabilities":"0.9.0"}`))
+	fakeYnh(t, `{"capabilities":"0.9.0"}`)
 	if d := runner.DetectYnh(ctx); !d.Found || d.Version != "0.9.0" {
 		t.Fatalf("a ynh that reports only capabilities: %+v", d)
 	}
-	t.Setenv("YNF_YNH_BIN", fakeYnhBin(t, `{"version":"0.8.0","capabilities":"0.8.0"}`))
+	fakeYnh(t, `{"version":"0.8.0","capabilities":"0.8.0"}`)
 	if d := runner.DetectYnh(ctx); d.Found || !strings.Contains(d.Detail, "needs 0.9.0") {
 		t.Fatalf("too old: %+v", d)
 	}
-	t.Setenv("YNF_YNH_BIN", fakeYnhBin(t, `not json`))
+	fakeYnh(t, `not json`)
 	if d := runner.DetectYnh(ctx); d.Found || d.Detail == "" {
 		t.Fatalf("garbage: %+v", d)
 	}
-	t.Setenv("YNF_YNH_BIN", filepath.Join(t.TempDir(), "missing"))
+	noYnh(t)
 	if d := runner.DetectYnh(ctx); d.Found || d.String() != "ynh not found" || d.Detail == "" {
 		t.Fatalf("missing: %+v", d)
 	}
 }
 
 func TestDetectedYnhAsksOnce(t *testing.T) {
-	t.Setenv("YNF_YNH_BIN", fakeYnhBin(t, `{"version":"1.0.0","capabilities":"1.0.0"}`))
+	fakeYnh(t, `{"version":"1.0.0","capabilities":"1.0.0"}`)
 	first := runner.DetectedYnh(context.Background())
-	t.Setenv("YNF_YNH_BIN", filepath.Join(t.TempDir(), "missing"))
+	noYnh(t)
 	if again := runner.DetectedYnh(context.Background()); again != first {
 		t.Fatalf("asked twice: %+v then %+v", first, again)
-	}
-}
-
-func TestYnhBin(t *testing.T) {
-	t.Setenv("YNF_YNH_BIN", "")
-	if runner.YnhBin() != "ynh" {
-		t.Fatal(runner.YnhBin())
-	}
-	t.Setenv("YNF_YNH_BIN", "/x/ynh")
-	if runner.YnhBin() != "/x/ynh" {
-		t.Fatal(runner.YnhBin())
 	}
 }
 

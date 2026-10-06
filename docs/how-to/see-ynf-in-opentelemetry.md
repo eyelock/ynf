@@ -126,8 +126,7 @@ telemetry left in the spool.
 A run that fills its folder has the largest files removed, within a quarter of a second, and
 ynf says so in its log; the step goes on. [ADR-007](../adr/007-executor-and-containment.md) says what
 that does and does not guarantee on each executor and host. `make -C sandbox e2e` proves all of
-this against the sandbox when `ynr` is available (`YNF_YNR_BIN`, or `YNR_SRC` pointing at a ynr
-checkout it builds): it runs the sweep with the collector on, with a receiver of its own as the
+this against the sandbox when `ynr` is on `PATH`: it runs the sweep with the collector on, with a receiver of its own as the
 upstream, and checks each run's manifest and folder, that the run's own records arrived with
 `ynr.provenance=run` and the lane the manifest names, and that a flooded folder was held to its
 quota.

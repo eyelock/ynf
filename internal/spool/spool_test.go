@@ -625,14 +625,6 @@ func TestDetect(t *testing.T) {
 	if d := Detect(context.Background(), filepath.Join(t.TempDir(), "nope")); d.Found || d.Detail == "" {
 		t.Errorf("missing: %+v", d)
 	}
-	t.Setenv("YNF_YNR_BIN", "/x/ynr")
-	if YnrBin() != "/x/ynr" {
-		t.Errorf("YnrBin: %s", YnrBin())
-	}
-	t.Setenv("YNF_YNR_BIN", "")
-	if YnrBin() != "ynr" {
-		t.Errorf("YnrBin: %s", YnrBin())
-	}
 }
 
 func TestRunsAreIsolatedFromEachOther(t *testing.T) {

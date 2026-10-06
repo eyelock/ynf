@@ -85,13 +85,16 @@ run:
   #   result_file: "{run_dir}/result.json"
 ```
 
-**Zero config: detect, then record what was detected.** With no explicit setting, ynf detects:
+**Zero config: detect, then record what was detected.** With no explicit setting, ynf detects.
+It finds another tool only as a shell would: the first `ynh`, `ynm` or `ynr` on the `PATH` it is
+given. No variable or flag names a binary, and ynf never builds one; where a tool lives is the
+environment's business, and a second way to say it is a second thing to get wrong.
 
 | Provider | Detected when |
 |---|---|
-| runner `ynh` | `ynh` is on `PATH` (or `YNF_YNH_BIN`) and `ynh version --format json` is in the supported range |
+| runner `ynh` | `ynh` is on `PATH` and `ynh version --format json` is in the supported range |
 | memory `ynm` | `ynm` is on `PATH`, and the repository has `.ynm/` or the user has `~/.ynm/`; or a `YNM_URL` endpoint answers |
-| `ynr` (optional) | `ynr` is on `PATH` (or `YNF_YNR_BIN`) and `ynr info --format json` answers with a version. Detecting it starts nothing: `ynf doctor` shows it, and only the telemetry configuration starts `ynr serve` (ADR-009, ADR-011) |
+| `ynr` (optional) | `ynr` is on `PATH` and `ynr info --format json` answers with a version. Detecting it starts nothing: `ynf doctor` shows it, and only the telemetry configuration starts `ynr serve` (ADR-009, ADR-011) |
 | tracker and forge `github` for github.com | always available; any other instance, GitHub Enterprise Server or an `mcp` tracker, is configured, never detected |
 
 Detection decides what ynf may use; configuration decides what runs. ynr is the case that shows
