@@ -161,7 +161,7 @@ fixtures:
       checks:
         - the lane names no runner and has a ynh block and a command; e2e hides ynh from ynf, so detection finds none and the lane runs its command, with no model
         - the run record says runner command and runner_detected, so `ynf items log` shows it
-        - "`ynf harness` says what the lane resolves to here: command (ynh was not found)"
+        - "`ynf harness` says what the lane resolves to here: command (ynh not found)"
 
   - id: reclaim-crash
     kind: issue

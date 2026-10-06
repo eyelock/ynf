@@ -137,10 +137,13 @@ func Resolve(lane policy.Lane, ynh Detection) (Resolved, error) {
 	return Resolved{}, fmt.Errorf("lane %s names no runner: %s, and it has no command block to fall back to", lane.Name, ynhMissing(ynh))
 }
 
-// ynhMissing says why ynh is not what runs: not found, or found and not supported.
+// ynhMissing says why ynh is not what runs, shortly: not found, or found and not supported.
 func ynhMissing(d Detection) string {
-	if d.Detail != "" {
-		return "ynh was not detected (" + d.Detail + ")"
+	switch {
+	case d.Capabilities != "":
+		return fmt.Sprintf("ynh %s is too old: capabilities %s, needs %s", d.Version, d.Capabilities, MinYnhCapabilities)
+	case strings.Contains(d.Detail, "no capabilities"):
+		return "ynh gave no capabilities"
 	}
-	return "ynh was not found"
+	return "ynh not found"
 }
