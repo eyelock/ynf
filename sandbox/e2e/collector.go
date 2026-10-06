@@ -116,7 +116,7 @@ func attrs(kvs []*commonpb.KeyValue) []otlpAttr {
 		case *commonpb.AnyValue_StringValue:
 			a.Value.StringValue = v.StringValue
 		case *commonpb.AnyValue_IntValue:
-			a.Value.IntValue = strconv.FormatInt(v.IntValue, 10)
+			a.Value.IntValue = otlpInt(strconv.FormatInt(v.IntValue, 10))
 		case *commonpb.AnyValue_BoolValue:
 			a.Value.StringValue = strconv.FormatBool(v.BoolValue)
 		}
@@ -128,7 +128,7 @@ func attrs(kvs []*commonpb.KeyValue) []otlpAttr {
 func resourceOf(kvs []*commonpb.KeyValue) map[string]string {
 	m := map[string]string{}
 	for _, a := range attrs(kvs) {
-		m[a.Key] = a.Value.StringValue + a.Value.IntValue
+		m[a.Key] = a.Value.StringValue + string(a.Value.IntValue)
 	}
 	return m
 }
@@ -185,7 +185,7 @@ func (r *receiver) keep(m proto.Message) {
 func attrOf(as []otlpAttr, k string) string {
 	for _, a := range as {
 		if a.Key == k {
-			return a.Value.StringValue + a.Value.IntValue
+			return a.Value.StringValue + string(a.Value.IntValue)
 		}
 	}
 	return ""

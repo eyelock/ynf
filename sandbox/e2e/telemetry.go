@@ -20,9 +20,28 @@ import (
 type otlpAttr struct {
 	Key   string `json:"key"`
 	Value struct {
-		StringValue string `json:"stringValue"`
-		IntValue    string `json:"intValue"`
+		StringValue string  `json:"stringValue"`
+		IntValue    otlpInt `json:"intValue"`
 	} `json:"value"`
+}
+
+// otlpInt is an OTLP JSON integer. The specification writes it as a decimal string, but a writer
+// that sends a number is read too, as ynr reads it: another tool sharing the spool (ynm's records
+// do) must not fail the proof.
+type otlpInt string
+
+func (i *otlpInt) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		*i = otlpInt(s)
+		return nil
+	}
+	var n json.Number
+	if err := json.Unmarshal(b, &n); err != nil {
+		return err
+	}
+	*i = otlpInt(n.String())
+	return nil
 }
 
 type spoolSpan struct {
@@ -45,7 +64,7 @@ func (s spoolSpan) attr(k string) string {
 			if a.Value.StringValue != "" {
 				return a.Value.StringValue
 			}
-			return a.Value.IntValue
+			return string(a.Value.IntValue)
 		}
 	}
 	return ""
@@ -99,7 +118,7 @@ func readSpool(dir string) (spoolData, error) {
 			for _, rs := range req.ResourceSpans {
 				res := map[string]string{}
 				for _, a := range rs.Resource.Attributes {
-					res[a.Key] = a.Value.StringValue + a.Value.IntValue
+					res[a.Key] = a.Value.StringValue + string(a.Value.IntValue)
 				}
 				for _, ss := range rs.ScopeSpans {
 					for _, s := range ss.Spans {
