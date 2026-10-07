@@ -20,8 +20,6 @@ DEV_VERSION := dev-$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null | tr '/' 
 VERSION     ?= $(shell git diff --quiet 2>/dev/null && git describe --tags --exact-match 2>/dev/null || echo "$(DEV_VERSION)")
 LDFLAGS     := -s -w -X github.com/eyelock/ynf.Version=$(VERSION)
 INSTALL_DIR ?= $(HOME)/.ynf/bin
-# ynf builds on ynr's spool exporter, a Go module in a private repository while ynr is private.
-export GOPRIVATE ?= github.com/eyelock/ynr
 COVERAGE    ?= 80
 DOCS_PORT   ?= 3100
 CONFORMANCE_FORMAT ?= text

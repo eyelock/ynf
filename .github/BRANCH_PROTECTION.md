@@ -21,7 +21,7 @@ and passes only when the source is `develop`, `release/*` or `hotfix/*`.
 
 - Changes arrive through a pull request, with no approving review required
 - All review conversations must be resolved
-- The branch must be up to date with its base before merging
+- The branch need not be up to date with its base before merging (the required checks are not strict)
 - Force pushes blocked
 - Branch deletion blocked
 - Repository admins can bypass in emergencies

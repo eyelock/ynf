@@ -9,8 +9,6 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 env:
-  # ynr's spool exporter is a Go module in a private repository while ynr is private.
-  GOPRIVATE: github.com/eyelock/ynr
   # The ynr release that `conformance` runs, without the leading v. The one place it is pinned.
   YNR_VERSION: 0.2.0
 jobs:
@@ -18,10 +16,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: read access to ynr
-        env:
-          YNR_READ_REPO: ${{ secrets.YNR_READ_REPO }}
-        run: git config --global url."https://x-access-token:${YNR_READ_REPO}@github.com/eyelock/ynr".insteadOf "https://github.com/eyelock/ynr"
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -49,21 +43,16 @@ jobs:
 
   conformance:
     # ynr conformance (ynr ADR-008): ynf's own scenarios, offline, against a pinned ynr release.
-    # ynr's releases need a token while ynr is private. ynf finds tools only on PATH, so both
-    # binaries are put there; ynr is never built from source or installed from a package manager.
+    # ynf finds tools only on PATH, so both binaries are put there; ynr is never built from source or installed from a package manager.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: read access to ynr
-        env:
-          YNR_READ_REPO: ${{ secrets.YNR_READ_REPO }}
-        run: git config --global url."https://x-access-token:${YNR_READ_REPO}@github.com/eyelock/ynr".insteadOf "https://github.com/eyelock/ynr"
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
       - name: ynr and its stub vendor, checked against the release's checksums
         env:
-          GH_TOKEN: ${{ secrets.YNR_READ_REPO }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           dl="$RUNNER_TEMP/ynr-download"

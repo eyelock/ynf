@@ -9,12 +9,6 @@ make install   # into ~/.ynf/bin
 make help      # every target
 ```
 
-ynf builds on ynr's spool exporter, a Go module in ynr's repository, which is private while ynr is.
-Building ynf from source needs read access to `github.com/eyelock/ynr`: the Makefile sets
-`GOPRIVATE=github.com/eyelock/ynr`, and git must be able to fetch it (a signed-in `gh`, an SSH key
-or a token in a `url.<base>.insteadOf` setting). CI uses the `YNR_READ_REPO` secret for the
-same. Released binaries are unaffected.
-
 `make check` is what CI runs on every pull request, in its `check` job. The same workflow's
 `registry` job runs Weaver over the telemetry registry, and its `conformance` job runs `ynr
 conformance` against a pinned ynr release: `make conformance`, with `ynr` on your `PATH` (see

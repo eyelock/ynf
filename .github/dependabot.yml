@@ -8,9 +8,7 @@ updates:
     commit-message:
       prefix: "ci"
 
-  # Keep Go modules up to date: the root module and each module under sandbox/. The root module
-  # needs ynr's private repository while ynr is private, which Dependabot cannot read, so its
-  # updates may fail until ynr is public.
+  # Keep Go modules up to date: the root module and each module under sandbox/.
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
