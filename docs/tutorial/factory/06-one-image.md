@@ -37,7 +37,7 @@ Expected, after a few minutes the first time:
 ```text
 built ynf-factory:dev:
   ynf <version>
-  ynh 0.10.0
+  ynh 0.11.0
   ynm <version>
 ```
 
@@ -142,7 +142,7 @@ ok    forge default            github.com: reached <you>/ynf-sandbox
 ok    tracker tracker          tracker.ynf-sandbox.invalid: its server has the tools it is configured to call
 ok    git                      git version <version>
 --    docker                   not needed: no lane runs in docker here
-ok    ynh                      0.10.0, capabilities 0.9.0: detected, used by a lane with no runner and a ynh block
+ok    ynh                      0.11.0, capabilities 0.9.0: detected, used by a lane with no runner and a ynh block
 ok    ynm                      @ynm/cli/<version> linux-<arch> node-<version>
 --    ynr                      not found or not working (ynr: exec: "ynr": executable file not found in $PATH)
 ```
@@ -165,7 +165,7 @@ Expected, for each ynh lane:
         focuses: docs, fix-ci, tidy
 ```
 
-`detect`, which names no runner, reads `ynh (detected 0.10.0) on inline` here, since the image's
+`detect`, which names no runner, reads `ynh (detected 0.11.0) on inline` here, since the image's
 ynh answers. `relaxed` is the exception: it is wrong on purpose, so its entry ends in a `FAIL` and a
 `problem:` line saying its `sensor_scope.lint` of `"true"` is not the harness's `golangci-lint run
 ./...` narrowed, and `ynf harness` exits 30. That refusal is what the sandbox's acceptance test

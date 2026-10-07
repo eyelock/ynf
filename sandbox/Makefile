@@ -105,7 +105,7 @@ e2e: reset
 e2e-only: settings
 	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(LANES) -hide-ynh=$(HIDE_YNH) -shadow=$(SHADOW) -gate=$(GATE)
 
-YNH_BASE ?= ghcr.io/eyelock/ynh:0.10.0
+YNH_BASE ?= ghcr.io/eyelock/ynh:0.11.0
 YNH_SRC ?=
 AGENT_IMAGE ?= ynf-sandbox-agent:latest
 
