@@ -181,7 +181,7 @@ starts nothing because `ynr` is on `PATH`. A kill mid-step leaves the started ev
 
 The same job runs the full-chain check (`.ynr/fullchain`, `make fullchain`) against a pinned ynh
 release as well: a ynf step runs a lane whose runner is ynh with the relay on, on a local
-repository and the same offline forge, with a stand-in vendor that runs ynr's stub vendor for each
+repository and the same offline forge, with ynr's stub vendor as the vendor CLI, answering each
 turn. It passes when what `ynr serve` ships, read at a receiver of the check's own, is one trace
 (`ynf.step`, then `ynh.run`, then the vendor's spans), every record the run wrote carries
 `ynr.provenance=run` and the lane, harness and focus from the run's manifest, and ynf's own records

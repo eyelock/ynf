@@ -153,13 +153,15 @@ make conformance CONFORMANCE_FORMAT=json  # the same, as JSON
 ```
 
 Download ynr's archive for your machine and `checksums.txt`, check the checksum, and unpack the `ynr` binary into a folder
-of its own, put on the `PATH` for that shell only:
+of its own, put on the `PATH` for that shell only. The full-chain check below also needs
+`ynr-stub-vendor`, from the same release:
 
 ```bash
-gh release download v0.2.0 -R eyelock/ynr \
-  -p 'ynr_0.2.0_darwin_arm64.tar.gz' -p checksums.txt
+gh release download v0.2.1 -R eyelock/ynr \
+  -p 'ynr_0.2.1_darwin_arm64.tar.gz' -p 'ynr-stub-vendor_0.2.1_darwin_arm64.tar.gz' -p checksums.txt
 shasum -a 256 --check --ignore-missing checksums.txt
-mkdir ynr-bin && tar -xzf ynr_0.2.0_darwin_arm64.tar.gz -C ynr-bin ynr
+mkdir ynr-bin && tar -xzf ynr_0.2.1_darwin_arm64.tar.gz -C ynr-bin ynr
+tar -xzf ynr-stub-vendor_0.2.1_darwin_arm64.tar.gz -C ynr-bin ynr-stub-vendor
 PATH="$PWD/ynr-bin:$PATH" make conformance
 ```
 
@@ -191,14 +193,9 @@ the one the repository carries in `.agents/harness/`. `ynh agent run` takes only
 ynf installs the folder into a ynh home of the run's own (never yours) and runs it by the id ynh
 gives it; the focus is read from the checkout. `ynf.lane.harness` holds what the lane names, `.`.
 
-Two things in it are there because of the releases it runs against, and each goes when the release
-changes:
-
-- `.ynr/fakeclaude` is the `claude` on `PATH`. ynh drives Claude Code as a stream-json session and
-  ynr's stub vendor (0.2.0) is a one-shot command, so the adapter speaks the session and runs
-  `ynr-stub-vendor` for each turn. The vendor's records, in the relay's trace, are the stub's.
-- `YNR_STORE` is empty in the job's environment. `ynr serve` 0.2.0 does not start with a store and
-  an upstream together, and without a store it ships to the upstream only.
+The vendor on `PATH` is `claude`, a link to ynr's stub vendor (`ynr-stub-vendor`). It answers the
+stream-json session ynh drives, one turn for every user message until stdin closes, and writes its
+records to the relay in the trace `TRACEPARENT` names. The vendor's records in the trace are the stub's.
 
 ## The names
 

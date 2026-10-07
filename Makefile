@@ -94,13 +94,12 @@ conformance:
 	@go build -trimpath -o bin/fakeforge ./.ynr/fakeforge
 	@PATH="$(CURDIR)/bin:$$PATH" ynr conformance --file .ynr/conformance.yaml --format $(CONFORMANCE_FORMAT)
 
-# The full-chain check runs bin/ynf, ynr, ynh and a stand-in vendor on a local repository and an
+# The full-chain check runs bin/ynf, ynr, ynh and ynr's stub vendor on a local repository and an
 # offline forge, in a temporary directory with its own HOME: no network, no model, no docker.
 fullchain:
 	@for t in ynr ynh; do command -v $$t >/dev/null 2>&1 || { echo "$$t is not on your PATH: see docs/how-to/see-ynf-in-opentelemetry.md"; exit 1; }; done
 	@go build -trimpath -ldflags "$(LDFLAGS)" -o bin/ynf ./cmd/ynf
 	@go build -trimpath -o bin/fakeforge ./.ynr/fakeforge
-	@go build -trimpath -o bin/fakeclaude ./.ynr/fakeclaude
 	@go build -trimpath -o bin/fullchain ./.ynr/fullchain
 	@PATH="$(CURDIR)/bin:$$PATH" fullchain
 

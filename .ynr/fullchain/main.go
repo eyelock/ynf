@@ -236,7 +236,7 @@ lanes:
 `
 
 func run() error {
-	tools, err := lookPath("ynf", "ynh", "ynr", "ynr-stub-vendor", "fakeforge", "fakeclaude", "git")
+	tools, err := lookPath("ynf", "ynh", "ynr", "ynr-stub-vendor", "fakeforge", "git")
 	if err != nil {
 		return err
 	}
@@ -255,8 +255,8 @@ func run() error {
 			return err
 		}
 	}
-	// The vendor CLI, first on PATH under its own name: fakeclaude speaks the session ynh drives and runs ynr-stub-vendor for each turn.
-	if err := os.Symlink(tools["fakeclaude"], filepath.Join(bin, "claude")); err != nil {
+	// The vendor CLI, first on PATH under its own name: ynr's stub vendor answers the stream-json session ynh drives.
+	if err := os.Symlink(tools["ynr-stub-vendor"], filepath.Join(bin, "claude")); err != nil {
 		return err
 	}
 
@@ -312,9 +312,6 @@ func run() error {
 		"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"HOME="+filepath.Join(t, "home"), "XDG_STATE_HOME="+filepath.Join(t, "state"), "YNH_HOME="+filepath.Join(t, "ynh"),
 		"GIT_CONFIG_GLOBAL="+gitconfig, "GIT_CONFIG_NOSYSTEM=1",
-		// ynr serve 0.2.0 refuses to start with a store and an upstream both, so it ships only to
-		// the receiver.
-		"YNR_STORE=",
 		"GIT_AUTHOR_NAME=chain", "GIT_AUTHOR_EMAIL=chain@example.com", "GIT_COMMITTER_NAME=chain", "GIT_COMMITTER_EMAIL=chain@example.com")
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
