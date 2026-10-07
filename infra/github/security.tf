@@ -1,6 +1,6 @@
-# Dependabot alerts and automatic security fixes, and private vulnerability reporting, are on. Secret
+# Dependabot alerts and automatic security fixes are on. Private vulnerability reporting, secret
 # scanning and push protection are on once the repository is public (repository.tf): they are not
-# available on a private repository without GitHub Advanced Security.
+# available on a private repository (secret scanning needs GitHub Advanced Security there).
 resource "github_repository_vulnerability_alerts" "ynf" {
   repository = github_repository.ynf.name
   enabled    = true
@@ -15,9 +15,12 @@ resource "github_repository_dependabot_security_updates" "ynf" {
 }
 
 # Private vulnerability reporting is how SECURITY.md asks for reports. The github provider has no
-# resource for it, so this calls the API with gh, which reads GITHUB_TOKEN. The call is idempotent;
-# it runs on the first apply and again only if the owner or repository name changes.
+# resource for it, so this calls the API with gh, which reads GITHUB_TOKEN. GitHub refuses the call
+# (HTTP 404) on a private repository, so it waits for visibility to be public. The call is
+# idempotent; it runs once then, and again only if the owner or repository name changes.
 resource "terraform_data" "private_vulnerability_reporting" {
+  count = var.visibility == "public" ? 1 : 0
+
   triggers_replace = [var.owner, var.repository]
 
   provisioner "local-exec" {

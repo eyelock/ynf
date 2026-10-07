@@ -10,10 +10,10 @@ lives in [`sandbox/`](../../sandbox/README.md).
 | `branches.tf` | Gitflow: `develop` as the default branch, and one ruleset on each of `develop` ("Develop Branch Protection") and `main` ("Main Branch Protection"): a pull request required with conversations resolved, "All Clear" green and the branch up to date (plus "Verify PR source branch" into `main`, so it takes only `develop`, `release/*` and `hotfix/*`), no force-push or delete, and repository admins able to bypass. [`.github/BRANCH_PROTECTION.md`](../../.github/BRANCH_PROTECTION.md) describes them |
 | `labels.tf` | Issue and PR labels, authoritatively: a label not listed is removed |
 | `actions.tf` | Actions permissions, the read-only default `GITHUB_TOKEN`, and that the `RELEASE_TOKEN` secret exists |
-| `security.tf` | Dependabot alerts and security updates, and private vulnerability reporting (set with `gh api`, as the provider has no resource for it) |
+| `security.tf` | Dependabot alerts and security updates, and, once `visibility` is `public`, private vulnerability reporting (set with `gh api`, as the provider has no resource for it) |
 | `imports.tf` | Import blocks that adopt the live repository into a fresh state |
 
-Secret scanning and push protection are not on yet: they need a public repository, and switch on when `visibility` is set to `public`.
+Private vulnerability reporting, secret scanning and push protection are not on yet: they need a public repository, and switch on when `visibility` is set to `public`.
 
 Not managed here: anything committed to the repository (`.github/`), and the value of `RELEASE_TOKEN`: GitHub never returns it, so
 Terraform only tracks that the secret exists.
