@@ -11,6 +11,8 @@ concurrency:
 env:
   # The ynr release that `conformance` runs, without the leading v. The one place it is pinned.
   YNR_VERSION: 0.2.0
+  # The ynh release the full-chain check runs, without the leading v.
+  YNH_VERSION: 0.11.0
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -73,6 +75,27 @@ jobs:
           set -euo pipefail
           ynr version
           make conformance CONFORMANCE_FORMAT=json | tee "$RUNNER_TEMP/conformance.json"
+      - name: ynh, checked against the release's checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          dl="$RUNNER_TEMP/ynh-download"
+          bin="$RUNNER_TEMP/ynh-bin"
+          mkdir -p "$dl" "$bin"
+          ynh="ynh_${YNH_VERSION}_linux_amd64.tar.gz"
+          gh release download "v${YNH_VERSION}" -R eyelock/ynh -D "$dl" -p "$ynh" -p checksums.txt
+          cd "$dl"
+          grep -E " ${ynh}\$" checksums.txt > wanted.txt
+          [ "$(wc -l < wanted.txt)" -eq 1 ]
+          sha256sum --check --strict wanted.txt
+          tar -xzf "$ynh" -C "$bin" ynh
+          echo "$bin" >> "$GITHUB_PATH"
+      - name: full chain, a ynf step through ynh and the relay into one trace
+        run: |
+          set -euo pipefail
+          ynh version
+          make fullchain
 
   all-clear:
     # The one check the rulesets require (infra/github/branches.tf). It runs even when a job it needs

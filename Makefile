@@ -8,6 +8,9 @@
 #   make docs     serve the documentation at http://localhost:$(DOCS_PORT) (ctrl-c to stop)
 #   make conformance  ynr conformance (ynr ADR-008) against ynf's own scenarios, offline; ynr must
 #                 be on your PATH, at the version CI pins (YNR_VERSION in .github/workflows/ci.yml)
+#   make fullchain  the full-chain check (.ynr/fullchain): a ynf step runs a ynh lane with the relay
+#                 on, and what ynr serve ships is one trace with the run's records stamped; ynr and
+#                 ynh must be on your PATH, at the versions CI pins (YNR_VERSION, YNH_VERSION)
 #   make e2e      the factory acceptance test against the live sandbox (sandbox/Makefile)
 #   make factory-image  ynf's factory image (ADR-009): ynh's image with ynf and ynm, at the
 #                 versions in images/factory/versions.env, and this checkout's ynf. To try dev
@@ -29,7 +32,7 @@ FACTORY_IMAGE ?= ynf-factory:dev
 YNH_SRC       ?=
 YNM_SRC       ?=
 
-.PHONY: help deps docs check build install test cover lint vet fmt fmt-check conformance e2e calibrate clean factory-image
+.PHONY: help deps docs check build install test cover lint vet fmt fmt-check conformance fullchain e2e calibrate clean factory-image
 
 check: fmt-check vet lint cover
 
@@ -90,6 +93,16 @@ conformance:
 	@go build -trimpath -ldflags "$(LDFLAGS)" -o bin/ynf ./cmd/ynf
 	@go build -trimpath -o bin/fakeforge ./.ynr/fakeforge
 	@PATH="$(CURDIR)/bin:$$PATH" ynr conformance --file .ynr/conformance.yaml --format $(CONFORMANCE_FORMAT)
+
+# The full-chain check runs bin/ynf, ynr, ynh and a stand-in vendor on a local repository and an
+# offline forge, in a temporary directory with its own HOME: no network, no model, no docker.
+fullchain:
+	@for t in ynr ynh; do command -v $$t >/dev/null 2>&1 || { echo "$$t is not on your PATH: see docs/how-to/see-ynf-in-opentelemetry.md"; exit 1; }; done
+	@go build -trimpath -ldflags "$(LDFLAGS)" -o bin/ynf ./cmd/ynf
+	@go build -trimpath -o bin/fakeforge ./.ynr/fakeforge
+	@go build -trimpath -o bin/fakeclaude ./.ynr/fakeclaude
+	@go build -trimpath -o bin/fullchain ./.ynr/fullchain
+	@PATH="$(CURDIR)/bin:$$PATH" fullchain
 
 e2e:
 	$(MAKE) -C sandbox e2e

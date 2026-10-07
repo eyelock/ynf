@@ -48,14 +48,25 @@ func run() int {
 	title := fs.String("ticket-title", "a ticket", "the issue's title")
 	body := fs.String("ticket-body", "", "the issue's body")
 	token := fs.String("token", "token", "GITHUB_TOKEN for the command")
+	lanesFile := fs.String("lanes", "", "a lanes.yaml to serve instead of the built-in one, whose only lane is switched off")
+	extra := fs.String("config-extra", "", "a file of YAML added to ynf's config.yaml, such as a telemetry block")
 	failIssue := fs.Bool("fail-issue", false, "answer the issue with a server error")
 	if err := fs.Parse(os.Args[1:]); err != nil || fs.NArg() == 0 {
 		fmt.Fprintln(os.Stderr, "usage: fakeforge [--ticket-title t] [--ticket-body b] [--token t] -- command [args...]")
 		return 2
 	}
+	laneDoc := lanes
+	if *lanesFile != "" {
+		b, err := os.ReadFile(*lanesFile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+		laneDoc = string(b)
+	}
 	delay, _ := time.ParseDuration(os.Getenv("YNR_STUB_TURN_DELAY"))
 
-	srv := httptest.NewServer(handler(*title, *body, delay, *failIssue))
+	srv := httptest.NewServer(handler(*title, *body, laneDoc, delay, *failIssue))
 	defer srv.Close()
 	dir, err := os.MkdirTemp("", "fakeforge-")
 	if err != nil {
@@ -64,7 +75,16 @@ func run() int {
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 	cfg := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(cfg, []byte("version: 1\nrepos: [o/r]\n"), 0o600); err != nil {
+	conf := "version: 1\nrepos: [o/r]\n"
+	if *extra != "" {
+		b, err := os.ReadFile(*extra)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+		conf += string(b)
+	}
+	if err := os.WriteFile(cfg, []byte(conf), 0o600); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
@@ -95,9 +115,14 @@ func run() int {
 	return 1
 }
 
-func handler(title, body string, delay time.Duration, failIssue bool) http.Handler {
+func handler(title, body, laneDoc string, delay time.Duration, failIssue bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reply := func(v any) { _ = json.NewEncoder(w).Encode(v) }
+		// A comment, a label or a state change is taken and forgotten.
+		if r.Method != http.MethodGet {
+			reply(map[string]any{})
+			return
+		}
 		file := func(s string) {
 			reply(map[string]any{"type": "file", "encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte(s))})
 		}
@@ -110,13 +135,15 @@ func handler(title, body string, delay time.Duration, failIssue bool) http.Handl
 		case "/repos/o/r/contents/.agents/factory/factory.yaml":
 			file("version: 1\nrepos: [o/r]\n")
 		case "/repos/o/r/contents/.agents/factory/lanes.yaml":
-			file(lanes)
+			file(laneDoc)
 		case "/search/issues":
 			if strings.Contains(r.URL.Query().Get("q"), "ynf:fmt") {
 				reply(map[string]any{"items": []any{map[string]any{"number": 5, "repository_url": base + "repos/o/r"}}})
 				return
 			}
 			reply(map[string]any{"items": []any{}})
+		case "/repos/o/r/issues/5/comments":
+			reply([]any{})
 		case "/repos/o/r/issues/5":
 			time.Sleep(delay)
 			if failIssue {

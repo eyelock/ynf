@@ -11,7 +11,8 @@ make help      # every target
 
 `make check` is what CI runs on every pull request, in its `check` job. The same workflow's
 `registry` job runs Weaver over the telemetry registry, and its `conformance` job runs `ynr
-conformance` against a pinned ynr release: `make conformance`, with `ynr` on your `PATH` (see
+conformance` against a pinned ynr release (`make conformance`) and then the full-chain check
+against a pinned ynh release as well (`make fullchain`), each with the tool on your `PATH` (see
 [See ynf in OpenTelemetry](docs/how-to/see-ynf-in-opentelemetry.md#check-ynf-against-ynrs-contract)).
 `make e2e` runs the factory against a live
 sandbox of your own ([Test against the sandbox](docs/how-to/test-against-the-sandbox.md)).
