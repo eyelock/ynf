@@ -69,8 +69,8 @@ The job runs `ynr serve --spool <spool> --collector-id <id> [--collector-instanc
 --upstream <endpoint>`. With the collector on, **the spool wins**: ynf writes its own telemetry to
 `factory/` whatever `OTEL_EXPORTER_OTLP_*` says, and every run starts without those variables, so
 the operator's endpoint is honoured at the edge by `ynr serve`'s upstream and no run needs a way
-to reach it. At the job's end ynf stops `ynr serve` with `SIGTERM` and gives it the archive time to
-ship, and then copies any spool file still in `runs/` or `factory/` into the run capture (ADR-010):
+to reach it. At the job's end ynf waits for `ynr serve` to ship and delete the closed files left in
+the spool, stops it with `SIGTERM`, gives it the rest of the archive time to ship, and then copies any spool file still in `runs/` or `factory/` into the run capture (ADR-010):
 into the step's `spool/` folder for a run's own, and `<work_dir>/spool-capture/<time>/` for the
 rest.
 

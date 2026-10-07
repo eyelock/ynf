@@ -114,8 +114,9 @@ telemetry is relayed into the run's folder.
 With the collector on, ynf and the runs write to the spool and not to the operator's endpoint, and
 `ynr serve` ships to the endpoint instead: set `OTEL_EXPORTER_OTLP_ENDPOINT` as usual, or
 `telemetry.collector.upstream`. `ynr serve` needs one of them until it has an object store, and
-the config does not load without. At the end of the job ynf stops `ynr serve` with `SIGTERM`, gives
-it `collector.archive` (30 seconds) to ship, and copies any `*.jsonl` or `*.open.jsonl` still in
+the config does not load without. At the end of the job ynf waits for `ynr serve` to ship and delete
+the closed files left in `runs/` and `factory/`, stops it with `SIGTERM`, gives it the rest of
+`collector.archive` (30 seconds, and at least 5) to ship, and copies any `*.jsonl` or `*.open.jsonl` still in
 `runs/` or `factory/` into the run capture: a run's own into `<work_dir>/steps/<item>/<run>/spool/`,
 the rest into `<work_dir>/spool-capture/<time>/`.
 
@@ -166,8 +167,37 @@ ynf runs no vendor CLI (ynh does), so its scenarios name no stub vendor. A scena
 leave a step running, as conformance's kill run does, needs the forge to be slow: `.ynr/fakeforge`
 delays the ticket by `YNR_STUB_TURN_DELAY`.
 
-Conformance checks ynf alone. The check through the whole chain, a ynf step into `ynh agent run` with
-the relay on and the stub vendor, waits for a ynh release with relay support.
+### The full chain
+
+Conformance checks ynf alone. `make fullchain` checks the chain: a ynf step runs a lane whose runner
+is ynh, with `run.ynh.telemetry_relay` on, and `ynr serve` ships what the step, `ynh agent run` and
+the vendor wrote. The check passes when:
+
+- there is one trace, and `ynh.run` is beneath `ynf.step` and the vendor's spans are beneath
+  `ynh.run`;
+- every record the run wrote (ynh's and the vendor's, spans, logs and metrics) has
+  `ynr.provenance=run` and the lane, harness and focus ynf's manifest names, as `ynf.lane`,
+  `ynf.lane.harness` and `ynf.lane.focus`;
+- every record ynf wrote itself has `ynr.provenance=factory`.
+
+It needs `ynr` and `ynh` on your `PATH`, at the versions CI pins (`YNR_VERSION` and `YNH_VERSION`),
+installed the way ynr is above (ynh's releases are public, so they need no token). It builds the
+rest: a local repository carrying the harness, `.ynr/fakeforge` for the forge, a ynf config with
+the collector on, and a receiver of its own as `ynr serve`'s upstream. HOME, `XDG_STATE_HOME` and
+`YNH_HOME` are its own. It uses no model, no network and no docker.
+
+Three things in it are there because of the releases it runs against, and each goes when the release
+changes:
+
+- The lane runs on the `process` executor, which ynf allows with `--interactive`. ynh runs a harness
+  by its id, so the harness is installed first (`ynh install`) and the repository carries it at
+  `local/chain`, which is where ynf reads the lane's focus. A harness folder named with
+  `harness: .` is for the docker executor, which builds an image from it.
+- `.ynr/fakeclaude` is the `claude` on `PATH`. ynh drives Claude Code as a stream-json session and
+  ynr's stub vendor (0.2.0) is a one-shot command, so the adapter speaks the session and runs
+  `ynr-stub-vendor` for each turn. The vendor's records, in the relay's trace, are the stub's.
+- `YNR_STORE` is empty in the job's environment. `ynr serve` 0.2.0 does not start with a store and
+  an upstream together, and without a store it ships to the upstream only.
 
 ## The names
 

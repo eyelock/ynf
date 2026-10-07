@@ -148,8 +148,10 @@ ADR-007 says how a run is kept to its folder. A lane with `run.ynh.telemetry_rel
 that folder (ynr ADR-004); command lanes refuse the setting, since they have no vendor. When the
 configuration enables the collector, and only then, a factory job (`sweep`, `serve`, `handle` and
 `shadow run`) starts `ynr serve --spool <root> --collector-id <id>`, with the instance and the
-upstream when there are any, and stops it at the job's end with `SIGTERM`, giving it the archive time
-to ship before what is left goes into the run capture (ADR-010). `ynf start`, a person's own
+upstream when there are any. At the job's end it waits for `ynr serve` to ship and delete the closed
+files left in the spool, which includes the last records ynf wrote, then stops it with `SIGTERM`,
+giving it the rest of the archive time to ship before what is left goes into the run capture
+(ADR-010). `ynf start`, a person's own
 command, and commands that only read or record start nothing. If `ynr` is missing or fails, the job
 says so in its log and in `ynf doctor` and runs on: telemetry never fails the factory. A job killed
 without a chance to stop `ynr serve` leaves it running until its container ends. The spool and the
@@ -176,8 +178,16 @@ joins, a started event for each step, outcomes and statuses that agree, its name
 registry, that planted ticket text, file contents, a prompt and a token never reach a record, that a
 full spool or an endpoint that never answers changes neither its exit code nor its time, and that it
 starts nothing because `ynr` is on `PATH`. A kill mid-step leaves the started event in the spool.
-The check through the whole chain, a ynf step into `ynh agent run` with the relay on and ynr's stub
-vendor, belongs to the factory image's CI and waits for a ynh release with relay support.
+
+The same job runs the full-chain check (`.ynr/fullchain`, `make fullchain`) against a pinned ynh
+release as well: a ynf step runs a lane whose runner is ynh with the relay on, on a local
+repository and the same offline forge, with a stand-in vendor that runs ynr's stub vendor for each
+turn. It passes when what `ynr serve` ships, read at a receiver of the check's own, is one trace
+(`ynf.step`, then `ynh.run`, then the vendor's spans), every record the run wrote carries
+`ynr.provenance=run` and the lane, harness and focus from the run's manifest, and ynf's own records
+carry `factory`. The lane runs on the `process` executor, as the check is not about containment. The
+scheduled run of the same chain with the real Claude Code and Codex CLIs (ynr ADR-008) is not part
+of this job.
 
 *People and content.* An actor appears only as a host-qualified handle, such as
 `github.com/octocat`, never a name or email. ynf's forge and tracker ports return structure and no

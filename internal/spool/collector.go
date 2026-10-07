@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -68,6 +70,7 @@ func (c Collector) Args(root string) []string {
 // Serve is a ynr serve that ynf started for a job.
 type Serve struct {
 	cfg  Collector
+	root string // the spool root ynr serve reads
 	log  *slog.Logger
 	cmd  *exec.Cmd
 	done chan struct{}
@@ -102,7 +105,7 @@ func StartServe(c Collector, bin, root string, environ []string, log *slog.Logge
 		log.Warn("the collector did not start: this job runs without it", "ynr", path, "err", err)
 		return nil
 	}
-	s := &Serve{cfg: c, log: log, cmd: cmd, done: make(chan struct{})}
+	s := &Serve{cfg: c, root: root, log: log, cmd: cmd, done: make(chan struct{})}
 	lines := make(chan struct{})
 	go func() {
 		defer close(lines)
@@ -158,6 +161,37 @@ func errString(err error) string {
 	return err.Error()
 }
 
+// minAfterTerm is the least ynr serve has after SIGTERM, whatever the wait for the spool took.
+const minAfterTerm = 5 * time.Second
+
+// waitShipped waits until ynr serve has shipped and deleted every closed file under the spool's
+// factory/ and runs/ folders, or the deadline, or ynr serve ends.
+func (s *Serve) waitShipped(deadline time.Time) {
+	for time.Now().Before(deadline) && closedFiles(s.root) {
+		select {
+		case <-s.done:
+			return
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
+// closedFiles reports whether a closed spool file (*.jsonl, not *.open.jsonl) is left in the
+// factory/ or runs/ folders of the spool root.
+func closedFiles(root string) bool {
+	found := false
+	for _, dir := range []string{"factory", "runs"} {
+		_ = filepath.WalkDir(filepath.Join(root, dir), func(p string, d fs.DirEntry, err error) error {
+			if err == nil && d.Type().IsRegular() && strings.HasSuffix(p, ".jsonl") && !strings.HasSuffix(p, ".open.jsonl") {
+				found = true
+				return filepath.SkipAll
+			}
+			return nil
+		})
+	}
+	return found
+}
+
 // Running reports whether ynr serve is still running. It is safe on a nil Serve.
 func (s *Serve) Running() bool {
 	if s == nil {
@@ -171,8 +205,12 @@ func (s *Serve) Running() bool {
 	}
 }
 
-// Stop ends ynr serve at a job's end: SIGTERM, then the archive time to ship what is left, then
-// a kill. It reports whether ynr serve ended within the time. It is safe on a nil Serve.
+// Stop ends ynr serve at a job's end. ynr serve ships a closed file as it finds it and deletes the
+// file once it is shipped, and it polls, so what ynf wrote last may still be waiting: Stop first
+// waits for the closed files in factory/ and runs/ to be gone, then sends SIGTERM and gives ynr
+// serve the rest of the archive time to ship what is left (at least 5 seconds, or all of a shorter
+// archive time), then kills it.
+// It reports whether ynr serve ended within the time. It is safe on a nil Serve.
 func (s *Serve) Stop() bool {
 	if s == nil {
 		return true
@@ -187,6 +225,9 @@ func (s *Serve) Stop() bool {
 	if archive <= 0 {
 		archive = DefaultArchive
 	}
+	began := time.Now()
+	s.waitShipped(began.Add(archive))
+	archive = max(archive-time.Since(began), min(archive, minAfterTerm))
 	_ = s.cmd.Process.Signal(syscall.SIGTERM)
 	select {
 	case <-s.done:
