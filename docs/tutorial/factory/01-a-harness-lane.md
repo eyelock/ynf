@@ -166,7 +166,7 @@ the tools its sensors run. Build it once:
 make -C "$YNF_SRC/sandbox" agent-image
 ```
 
-Expected: the image's ynh answering its version as the last line, `0.10.0` for the ynh release the
+Expected: the image's ynh answering its version as the last line, `0.11.0` for the ynh release the
 base image is built on (the `--auto-approve` the lanes use needs 0.9.0 or later). The image is
 `ynf-sandbox-agent:latest`, which is the lint lane's `base`.
 
