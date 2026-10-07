@@ -1,6 +1,7 @@
 # Gitflow, as in ynh and ynm: develop is the default branch and takes feature PRs; main moves only
-# by release or hotfix PRs and carries the release tags. Neither takes a direct push, admins
-# included. The branches themselves are git history, pushed from a clone, not created here.
+# by release or hotfix PRs and carries the release tags. Each is protected by one ruleset, and there
+# is no classic branch protection. The branches themselves are git history, pushed from a clone, not
+# created here.
 
 resource "github_branch_default" "develop" {
   repository = github_repository.ynf.name
@@ -8,45 +9,66 @@ resource "github_branch_default" "develop" {
 }
 
 locals {
-  # Status checks each protected branch requires before a PR can merge. "check" is the ci
-  # workflow's make check; "Verify PR source branch" (protect-main.yml) runs only on PRs into main.
-  protected_branches = {
-    main    = ["check", "Verify PR source branch"]
-    develop = ["check"]
+  # Status checks each protected branch requires before a PR can merge. "All Clear" is the last job
+  # of the ci workflow and needs every other job there; "Verify PR source branch" (protect-main.yml)
+  # runs only on PRs into main.
+  rulesets = {
+    develop = {
+      name   = "Develop Branch Protection"
+      checks = ["All Clear"]
+    }
+    main = {
+      name   = "Main Branch Protection"
+      checks = ["All Clear", "Verify PR source branch"]
+    }
   }
 }
 
-resource "github_branch_protection" "this" {
-  for_each = local.protected_branches
+resource "github_repository_ruleset" "this" {
+  for_each = local.rulesets
 
-  repository_id  = github_repository.ynf.node_id
-  pattern        = each.key
-  enforce_admins = true
+  repository  = github_repository.ynf.name
+  name        = each.value.name
+  target      = "branch"
+  enforcement = "active"
 
-  required_status_checks {
-    strict   = false
-    contexts = each.value
+  conditions {
+    ref_name {
+      include = ["refs/heads/${each.key}"]
+      exclude = []
+    }
   }
 
-  # A pull request is required, with no approving review: changes go through a PR and green CI.
-  required_pull_request_reviews {
-    required_approving_review_count = 0
-    dismiss_stale_reviews           = false
-    require_code_owner_reviews      = false
-    require_last_push_approval      = false
+  rules {
+    deletion         = true
+    non_fast_forward = true
+
+    # A pull request is required, with no approving review, and its conversations resolved.
+    pull_request {
+      required_approving_review_count   = 0
+      dismiss_stale_reviews_on_push     = false
+      require_code_owner_review         = false
+      require_last_push_approval        = false
+      required_review_thread_resolution = true
+    }
+
+    required_status_checks {
+      strict_required_status_checks_policy = true
+      do_not_enforce_on_create             = false
+
+      dynamic "required_check" {
+        for_each = each.value.checks
+        content {
+          context = required_check.value
+        }
+      }
+    }
   }
 
-  require_signed_commits = false
-  # Release and hotfix PRs into main are true merges, so the back-merge into develop is clean.
-  required_linear_history         = false
-  require_conversation_resolution = false
-  allows_force_pushes             = false
-  allows_deletions                = false
-  lock_branch                     = false
-}
-
-# main's protection predates the per-branch map: keep it, rather than delete and recreate it.
-moved {
-  from = github_branch_protection.main
-  to   = github_branch_protection.this["main"]
+  # Repository admins (role 5) can bypass, for emergencies.
+  bypass_actors {
+    actor_id    = 5
+    actor_type  = "RepositoryRole"
+    bypass_mode = "always"
+  }
 }

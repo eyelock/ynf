@@ -40,7 +40,7 @@ ticket text, code, diff or memory body is exported.
 
 A step is one trace. Its root is the `ynf.step` span, carrying the item key
 (`ynf.item.key`), `ynf.step.id`, the lane (`ynf.lane`, such as
-`github.com/acme/factory-config#lint-paydown`), `ynf.policy.hash`, `ynf.lease.epoch` and the
+`github.com/example-org/factory-config#lint-paydown`), `ynf.policy.hash`, `ynf.lease.epoch` and the
 repository (`ynf.repo`, `github.com/eyelock/ynh`). Beneath it:
 
 - `ynf.claim`, taking the item's lease
@@ -71,7 +71,7 @@ With a spool, read the files directly. Each line is one OTLP request:
 
 ```bash
 export YNR_SPOOL=/tmp/ynf-spool
-ynf start github.com/acme/payments#12
+ynf start github.com/example-org/payments#12
 jq -c '.resourceSpans[]?.scopeSpans[].spans[] | {name, spanId, links: [.links[]?.spanId]}' "$YNR_SPOOL"/ynf-*.jsonl
 ```
 

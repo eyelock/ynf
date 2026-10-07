@@ -153,7 +153,7 @@
           "url": {
             "type": "string",
             "pattern": "^https://[^/]+/?$",
-            "description": "The forge's web address, such as https://github.acme.internal. Its host names the forge in item keys; its API is found from it."
+            "description": "The forge's web address, such as https://github.example.internal. Its host names the forge in item keys; its API is found from it."
           },
           "token_env": {
             "type": "string",

@@ -121,14 +121,14 @@ func TestTheBuildTagFollowsTheHarness(t *testing.T) {
 
 func TestPickHarness(t *testing.T) {
 	one := []listed{{ID: "local/ynf-sandbox", Name: "ynf-sandbox"}}
-	two := append(one, listed{ID: "github.com/acme/lint", Name: "lint"})
+	two := append(one, listed{ID: "github.com/example-org/lint", Name: "lint"})
 	for _, c := range []struct {
 		hs   []listed
 		want string
 		id   string
 	}{
 		{one, "", "local/ynf-sandbox"}, {one, ".", "local/ynf-sandbox"}, {one, "harnesses/lint", ""}, {one, "ynf-sandbox", "local/ynf-sandbox"},
-		{two, "lint", "github.com/acme/lint"}, {two, "local/ynf-sandbox", "local/ynf-sandbox"},
+		{two, "lint", "github.com/example-org/lint"}, {two, "local/ynf-sandbox", "local/ynf-sandbox"},
 		{two, "", ""}, {two, "nope", ""}, {one, "eyelock/ynh-lint@1.4", ""}, {nil, "", ""},
 	} {
 		id, err := pickHarness(c.hs, c.want)

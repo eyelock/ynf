@@ -15,7 +15,7 @@ CEL `fields`:
 trackers:
   jira:
     provider: mcp
-    site: https://acme.atlassian.net
+    site: https://example.atlassian.net
     server:
       command: [jira-mcp]                  # or url: https://… with token_env
       env: [JIRA_API_TOKEN]                # the only variables it gets, besides PATH and HOME
@@ -54,7 +54,7 @@ than in the middle of a run. `ynf ticket` shows the title, state, labels and rep
 ## Start work on a ticket
 
 ```bash
-ynf start jira/PLAT-881 --repo acme/payments
+ynf start jira/PLAT-881 --repo example-org/payments
 ```
 
 A tracker ticket doesn't belong to a repository, so `--repo` says where its code goes. If the

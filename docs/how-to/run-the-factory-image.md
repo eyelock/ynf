@@ -22,7 +22,7 @@ The config the job gives ynf says every run is inline:
 
 ```yaml
 version: 1
-factory: { repo: acme/factory }
+factory: { repo: example-org/factory }
 executor: inline
 work_dir: /work
 ```
@@ -39,7 +39,7 @@ docker run --rm --user root \
   -e GITHUB_TOKEN -e ANTHROPIC_API_KEY \
   -v "$PWD/config.yaml:/etc/ynf/config.yaml:ro" -v ynf-work:/work \
   --entrypoint ynf <your harness image> \
-  --config /etc/ynf/config.yaml start acme/payments#42
+  --config /etc/ynf/config.yaml start example-org/payments#42
 ```
 
 ynf runs as root with only the capabilities it needs to hand a run's folders to the `ynh` user and

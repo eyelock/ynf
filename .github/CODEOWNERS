@@ -1,0 +1,21 @@
+# Default owners for everything in the repo
+* @eyelock
+
+# Source code
+/cmd/ @eyelock
+/internal/ @eyelock
+/ynf.go @eyelock
+
+# Docs and design decisions
+/docs/ @eyelock
+
+# Sandbox and its fixtures
+/sandbox/ @eyelock
+
+# Infrastructure
+/infra/ @eyelock
+
+# Build and CI
+/Makefile @eyelock
+/.goreleaser.yml @eyelock
+/.github/workflows/ @eyelock

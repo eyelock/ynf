@@ -66,7 +66,7 @@ result, as CEL over the tool's JSON:
 trackers:
   jira:
     provider: mcp
-    site: https://acme.atlassian.net
+    site: https://example.atlassian.net
     server: { harness: ., name: atlassian }   # a harness's declared server, or a command or URL
     env: [JIRA_API_TOKEN]
     get:     { tool: jira_get_issue,   args: { issueKey: "{key}" } }

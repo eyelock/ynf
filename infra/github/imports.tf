@@ -1,6 +1,6 @@
 # Adopt the live repository into state. On a fresh state these import; once imported they are
 # no-ops. To set the repository up from nothing (a new owner or name), delete this file first.
-# main has no protection to import yet; the first apply creates it.
+# The rulesets (branches.tf) are not imported: the first apply creates them.
 
 import {
   to = github_repository.ynf
