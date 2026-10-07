@@ -24,14 +24,14 @@ func TestShortReferenceFindsPullRequestItems(t *testing.T) {
 		}
 	}
 	for in, want := range map[string]string{
-		"o/r#5":                        "item/github.com/o/r/issues/5",
-		"o/r#7":                        "item/github.com/o/r/pulls/7",
-		"github.com/o/r#5":             "item/github.com/o/r/issues/5",
-		"github.com/o/r#7":             "item/github.com/o/r/pulls/7",
-		"o/r#9":                        "item/github.com/o/r/issues/9",
-		"item/github.com/o/r/pulls/7":  "item/github.com/o/r/pulls/7",
-		"item/github.com/o/r/issues/7": "item/github.com/o/r/issues/7",
-		"acme.atlassian.net/PLAT-881":  "item/acme.atlassian.net/PLAT-881",
+		"o/r#5":                          "item/github.com/o/r/issues/5",
+		"o/r#7":                          "item/github.com/o/r/pulls/7",
+		"github.com/o/r#5":               "item/github.com/o/r/issues/5",
+		"github.com/o/r#7":               "item/github.com/o/r/pulls/7",
+		"o/r#9":                          "item/github.com/o/r/issues/9",
+		"item/github.com/o/r/pulls/7":    "item/github.com/o/r/pulls/7",
+		"item/github.com/o/r/issues/7":   "item/github.com/o/r/issues/7",
+		"example.atlassian.net/PLAT-881": "item/example.atlassian.net/PLAT-881",
 	} {
 		got, err := itemKey(ctx, st, in, "github.com", nil)
 		if err != nil || got != want {

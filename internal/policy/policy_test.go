@@ -281,9 +281,9 @@ lanes:
 }
 
 func TestLoadFactory(t *testing.T) {
-	f, err := policy.LoadFactory([]byte("version: 1\nrepos: [o/r, github.acme.internal/acme/x]\n" +
-		"forges:\n  ghe: {provider: github, url: https://github.acme.internal, token_env: GHE_TOKEN}\n" +
-		"trackers:\n  jira:\n    provider: mcp\n    site: https://acme.atlassian.net\n    server: {command: [jira-mcp], env: [JIRA_TOKEN]}\n" +
+	f, err := policy.LoadFactory([]byte("version: 1\nrepos: [o/r, github.example.internal/example-org/x]\n" +
+		"forges:\n  ghe: {provider: github, url: https://github.example.internal, token_env: GHE_TOKEN}\n" +
+		"trackers:\n  jira:\n    provider: mcp\n    site: https://example.atlassian.net\n    server: {command: [jira-mcp], env: [JIRA_TOKEN]}\n" +
 		"    get: {tool: get, args: {issueKey: \"{key}\"}}\n    comment: {tool: comment}\n    label: {tool: label}\n" +
 		"    fields: {title: result.t, labels: result.l, status: result.s}\n"))
 	if err != nil || len(f.Repos) != 2 || f.Trackers["jira"]["provider"] != "mcp" {

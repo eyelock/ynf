@@ -1,7 +1,7 @@
 # Terraform state backend
 
 Where ynf's Terraform keeps its state: an S3 bucket in `us-east-1`, plus the IAM user that
-day-to-day runs use. ynf has its own, as ynm, astrolock, acme and collective each have theirs.
+day-to-day runs use. ynf has its own, as ynm has.
 
 This is its own configuration with its own state, so a plan or apply elsewhere uses the bucket
 but never touches it. It is applied once to bootstrap, and after that only to change the bucket

@@ -28,3 +28,11 @@ Or from source: `make build`, then `bin/ynf`.
 make check    # gofmt, vet, golangci-lint, race tests, and an 80% per-package coverage gate
 make e2e      # rebuild the sandbox and run ynf against it end to end
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch and pull request workflow. Report
+vulnerabilities as [SECURITY.md](SECURITY.md) describes. Everyone taking part follows the
+[Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Licence
+
+[MIT](LICENSE), copyright (c) 2026 David Collie.

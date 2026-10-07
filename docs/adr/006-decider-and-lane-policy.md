@@ -172,7 +172,7 @@ launches export telemetry that needs relaying, so a lane that names the command 
 at load. It is in the policy hash like every other setting.
 
 **A lane has an id.** Telemetry names a lane by where it is defined plus its name, host first:
-`github.com/acme/factory-config#lint-paydown` for a lane in the configuration repository, however
+`github.com/example-org/factory-config#lint-paydown` for a lane in the configuration repository, however
 a target repository overrides it (the override is a variant of the same lane, told apart by the
 harness and focus the run used), and `github.com/eyelock/ynh#docs-refresh` for a lane a target
 repository defines itself. A lane may declare an explicit `id` in `lanes.yaml`, which then is its

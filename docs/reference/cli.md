@@ -22,7 +22,7 @@ item exists. The `items` commands and `replay` find it either way. Commands that
 (`start`, `ticket`, `shadow run --ticket`) take the number as an issue. An item can also be named
 by its key, `item/<host>/<owner>/<name>/issues/<number>`, or `…/pulls/<number>` for an adopted pull
 request. The host is the forge's own, so an issue on GitHub Enterprise Server is
-`item/github.acme.internal/…`.
+`item/github.example.internal/…`.
 
 ## Commands
 

@@ -15,7 +15,7 @@ import (
 // named, not closed.
 func TestPullRequestsAreNamedForTheirTicket(t *testing.T) {
 	gh := item.Item{Ticket: tracker.Ref{Host: "github.com", Key: "o/r#7"}, Forge: "github.com", Repo: "o/r"}
-	jira := item.Item{Ticket: tracker.Ref{Host: "acme.atlassian.net", Key: "PLAT-881"}, Forge: "github.com", Repo: "o/r"}
+	jira := item.Item{Ticket: tracker.Ref{Host: "example.atlassian.net", Key: "PLAT-881"}, Forge: "github.com", Repo: "o/r"}
 	other := item.Item{Ticket: tracker.Ref{Host: "github.com", Key: "o/elsewhere#7"}, Forge: "github.com", Repo: "o/r"}
 	if prLink(gh, 12) != "#12" || prLink(jira, 12) != "https://github.com/o/r/pull/12" || prLink(other, 12) != "https://github.com/o/r/pull/12" {
 		t.Fatalf("%s %s %s", prLink(gh, 12), prLink(jira, 12), prLink(other, 12))
@@ -24,7 +24,7 @@ func TestPullRequestsAreNamedForTheirTicket(t *testing.T) {
 	if b := prBody(gh, policy.Lane{Name: "l"}, run); !strings.HasPrefix(b, "Closes #7.") {
 		t.Fatal(b)
 	}
-	if b := prBody(jira, policy.Lane{Name: "l"}, run); !strings.HasPrefix(b, "For acme.atlassian.net/PLAT-881.") || strings.Contains(b, "Closes") {
+	if b := prBody(jira, policy.Lane{Name: "l"}, run); !strings.HasPrefix(b, "For example.atlassian.net/PLAT-881.") || strings.Contains(b, "Closes") {
 		t.Fatal(b)
 	}
 }

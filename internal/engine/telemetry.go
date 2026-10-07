@@ -38,7 +38,7 @@ func repoAttrs(hostFirst string) []attribute.KeyValue {
 }
 
 // LaneID is the lane's id in telemetry (ADR-006): the id the lane declares, else where it is
-// defined, host first, then its name: github.com/acme/factory-config#lint-paydown for a lane in
+// defined, host first, then its name: github.com/example-org/factory-config#lint-paydown for a lane in
 // the configuration repository, however a repository overrides it, and
 // github.com/eyelock/ynh#docs-refresh for one the repository defines itself.
 func (e *Engine) LaneID(rp *RepoPolicy, lane policy.Lane) string {

@@ -108,7 +108,7 @@ func TestLayoutRefusesALinkedFolder(t *testing.T) {
 
 func TestManifestIsWhatYnrReads(t *testing.T) {
 	s, _ := newSpool(t)
-	m := Manifest{Run: "01JABC-1", Lane: "github.com/acme/factory-config#lint", Harness: "h@1.0", Focus: "go", Item: "github.com/acme/app#7", Step: "01JABC"}
+	m := Manifest{Run: "01JABC-1", Lane: "github.com/example-org/factory-config#lint", Harness: "h@1.0", Focus: "go", Item: "github.com/example-org/app#7", Step: "01JABC"}
 	if err := s.WriteManifest(m); err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestManifestIsWhatYnrReads(t *testing.T) {
 	if err := json.Unmarshal(b, &got); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"run": "01JABC-1", "lane": "github.com/acme/factory-config#lint", "harness": "h@1.0", "focus": "go", "item": "github.com/acme/app#7", "step": "01JABC"}
+	want := map[string]string{"run": "01JABC-1", "lane": "github.com/example-org/factory-config#lint", "harness": "h@1.0", "focus": "go", "item": "github.com/example-org/app#7", "step": "01JABC"}
 	if len(got) != len(want) {
 		t.Errorf("keys: %v", got)
 	}

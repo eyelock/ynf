@@ -49,7 +49,7 @@ factory folder, ADR-009), `--format text|json`, `--interactive` (allows the unco
 executor, ADR-007), `--log-file <path>`, `--log-format text|json` and `-v`.
 
 **References.** An item is named by its reference (ADR-002): `github.com/eyelock/ynh#77`,
-`acme.atlassian.net/PLAT-881`, `adhoc/<id>`, or by its store key. Shorthands are for typing only:
+`example.atlassian.net/PLAT-881`, `adhoc/<id>`, or by its store key. Shorthands are for typing only:
 `eyelock/ynh#77` means the default GitHub instance, `jira/PLAT-881` the tracker configured as
 `jira`. They resolve to the host form before anything is stored, so configured names never reach
 an item's identity.

@@ -6,12 +6,14 @@ lives in [`sandbox/`](../../sandbox/README.md).
 
 | File | What it manages |
 |---|---|
-| `repository.tf` | The repository: description, topics, visibility, features, merge options; and the docs site, GitHub Pages from `/docs` on `main` |
-| `branches.tf` | Gitflow: `develop` as the default branch, and protection on `main` and `develop`: a pull request required with `check` green (plus "Verify PR source branch" into `main`, so it takes only `develop`, `release/*` and `hotfix/*`), admins included, no force-push or delete |
+| `repository.tf` | The repository: description, topics, visibility, features (issues, discussions and projects on, wiki off), merge options (squash and merge commits, no rebase), secret scanning and push protection once `visibility` is `public`; and the docs site, GitHub Pages from `/docs` on `main` |
+| `branches.tf` | Gitflow: `develop` as the default branch, and one ruleset on each of `develop` ("Develop Branch Protection") and `main` ("Main Branch Protection"): a pull request required with conversations resolved, "All Clear" green and the branch up to date (plus "Verify PR source branch" into `main`, so it takes only `develop`, `release/*` and `hotfix/*`), no force-push or delete, and repository admins able to bypass. [`.github/BRANCH_PROTECTION.md`](../../.github/BRANCH_PROTECTION.md) describes them |
 | `labels.tf` | Issue and PR labels, authoritatively: a label not listed is removed |
 | `actions.tf` | Actions permissions, the read-only default `GITHUB_TOKEN`, and that the `RELEASE_TOKEN` secret exists |
-| `security.tf` | Dependabot alerts and security updates |
+| `security.tf` | Dependabot alerts and security updates, and private vulnerability reporting (set with `gh api`, as the provider has no resource for it) |
 | `imports.tf` | Import blocks that adopt the live repository into a fresh state |
+
+Secret scanning and push protection are not on yet: they need a public repository, and switch on when `visibility` is set to `public`.
 
 Not managed here: anything committed to the repository (`.github/`), and the value of `RELEASE_TOKEN`: GitHub never returns it, so
 Terraform only tracks that the secret exists.
@@ -31,7 +33,7 @@ gh secret set RELEASE_TOKEN -R eyelock/ynf
 
 ## Use
 
-Needs Terraform 1.10 or later, a GitHub token with the `repo` and `workflow` scopes, and the
+Needs Terraform 1.10 or later, the `gh` CLI (for private vulnerability reporting), a GitHub token with the `repo` and `workflow` scopes, and the
 `ynf-terraform` AWS profile. State is in S3 at
 `s3://ynf-terraform-state.eyelock.net/github/terraform.tfstate`, locked with a `.tflock` object
 beside it; the bucket comes from [`../terraform-state`](../terraform-state/README.md). It holds
@@ -45,6 +47,8 @@ terraform init
 terraform plan     # no changes means the repository matches this configuration
 terraform apply
 ```
+
+The rulesets require the "All Clear" job in `.github/workflows/ci.yml`, so merge the change that adds it before applying them: a required check that never reports blocks every pull request. Applying replaces the classic branch protection on `develop` and `main` with the rulesets in one run.
 
 To change a setting, edit the `.tf` file, `plan`, then `apply`. A change made in the GitHub UI
 shows as drift in the next `plan`; either copy it into the configuration or `apply` to undo it.

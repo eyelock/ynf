@@ -25,7 +25,7 @@ groups:
         brief: >
           The lane's id: where the lane is defined, host first, then its name, or the lane's own
           explicit id. ynr stamps it on a run's records from ynf's run manifest, on ynf's behalf.
-        examples: ["github.com/acme/factory-config#lint-paydown", "github.com/eyelock/ynh#docs-refresh"]
+        examples: ["github.com/example-org/factory-config#lint-paydown", "github.com/eyelock/ynh#docs-refresh"]
         annotations:
           ynr.cardinality: 100
       - id: ynf.lane.harness
@@ -55,7 +55,7 @@ groups:
         type: string
         stability: development
         brief: The repository the work's code goes to, in ynf's host-first form.
-        examples: ["github.com/eyelock/ynh", "github.acme.internal/acme/x"]
+        examples: ["github.com/eyelock/ynh", "github.example.internal/example-org/x"]
       - id: ynf.item.state
         type: string
         stability: development

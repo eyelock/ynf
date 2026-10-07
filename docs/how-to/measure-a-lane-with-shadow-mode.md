@@ -26,7 +26,7 @@ page is only how ynf does it.
 ## Run the lane
 
 ```bash
-ynf shadow run lint-paydown --repo acme/payments --since 90d --limit 20
+ynf shadow run lint-paydown --repo example-org/payments --since 90d --limit 20
 ```
 
 ynf takes the lane's `github.search` intakes and reads them as closed: `is:open` becomes
@@ -34,7 +34,7 @@ ynf takes the lane's `github.search` intakes and reads them as closed: `is:open`
 (repeatable), which replaces the search:
 
 ```bash
-ynf shadow run lint-paydown --ticket acme/payments#412 --ticket acme/payments#437
+ynf shadow run lint-paydown --ticket example-org/payments#412 --ticket example-org/payments#437
 ```
 
 A ticket is run only if the lane would have taken it and a merged pull request fixed it. The rest
@@ -42,9 +42,9 @@ are skipped, and the command says how many and why:
 
 ```
 shadow run 01K9Q3…: lane lint-paydown, 14 candidate(s), 9 attempted, 5 skipped
-  attempt 01K9Q4…: acme/payments#412 against the fix in #420, converged
-  skipped acme/payments#388: no merged pull request closed it
-  skipped acme/payments#401: the lane cannot run it: no pkg: label for {label.pkg}
+  attempt 01K9Q4…: example-org/payments#412 against the fix in #420, converged
+  skipped example-org/payments#388: no merged pull request closed it
+  skipped example-org/payments#401: the lane cannot run it: no pkg: label for {label.pkg}
 ```
 
 For each ticket that is run:

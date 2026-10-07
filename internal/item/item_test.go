@@ -18,14 +18,14 @@ func TestKeysAreTheSystemsOwn(t *testing.T) {
 	if gh.Subject() != "github.com/eyelock/ynf-sandbox#10" || gh.Ref() != gh.Subject() || gh.BranchName() != "ynf/issue-10" {
 		t.Fatalf("%s %s %s", gh.Subject(), gh.Ref(), gh.BranchName())
 	}
-	if item.IssueKey("github.acme.internal", "acme/x", 3) != "item/github.acme.internal/acme/x/issues/3" {
+	if item.IssueKey("github.example.internal", "example-org/x", 3) != "item/github.example.internal/example-org/x/issues/3" {
 		t.Fatal("an Enterprise Server key")
 	}
 	if item.PRKey("github.com", "o/r", 412) != "item/github.com/o/r/pulls/412" {
 		t.Fatal("a pull request key")
 	}
-	jira := item.Item{Ticket: tracker.Ref{Host: "acme.atlassian.net", Key: "PLAT-881"}}
-	if item.Key(jira.Ticket) != "item/acme.atlassian.net/PLAT-881" || jira.Ref() != "acme.atlassian.net/PLAT-881" || jira.BranchName() != "ynf/plat-881" {
+	jira := item.Item{Ticket: tracker.Ref{Host: "example.atlassian.net", Key: "PLAT-881"}}
+	if item.Key(jira.Ticket) != "item/example.atlassian.net/PLAT-881" || jira.Ref() != "example.atlassian.net/PLAT-881" || jira.BranchName() != "ynf/plat-881" {
 		t.Fatalf("%s %s %s", item.Key(jira.Ticket), jira.Ref(), jira.BranchName())
 	}
 	odd := item.Item{Ticket: tracker.Ref{Host: "x.example", Key: "A B/C#d"}}

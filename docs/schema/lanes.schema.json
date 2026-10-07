@@ -127,7 +127,7 @@
         "id": {
           "type": "string",
           "pattern": "^[A-Za-z0-9._~:@/#-]+$",
-          "description": "The lane's own id for telemetry, which stays fixed if the repository that defines it moves. Without one the id is where the lane is defined, host first, then its name: github.com/acme/factory-config#lint-paydown (ADR-006)."
+          "description": "The lane's own id for telemetry, which stays fixed if the repository that defines it moves. Without one the id is where the lane is defined, host first, then its name: github.com/example-org/factory-config#lint-paydown (ADR-006)."
         },
         "kind": {
           "enum": [

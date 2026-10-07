@@ -1530,7 +1530,7 @@ func TestStartRefusesBeforeCreatingAnything(t *testing.T) {
 		{engine.StartRequest{Ref: gh, Repo: "o/other", Lane: "agent"}, "is an issue in o/r, not o/other"},
 		{engine.StartRequest{Prompt: "p", Lane: "agent"}, "say which repository"},
 		{engine.StartRequest{Prompt: "p", Repo: "x/y", Lane: "agent"}, "github.com/x/y is not an enrolled repository"},
-		{engine.StartRequest{Ref: tracker.Ref{Host: "acme.atlassian.net", Key: "PLAT-1"}, Repo: "o/r", Lane: "agent"}, "no tracker is configured for acme.atlassian.net"},
+		{engine.StartRequest{Ref: tracker.Ref{Host: "example.atlassian.net", Key: "PLAT-1"}, Repo: "o/r", Lane: "agent"}, "no tracker is configured for example.atlassian.net"},
 		{engine.StartRequest{Ref: tracker.Ref{Host: "github.com", Key: "o/r#404"}, Lane: "agent"}, "github.com/o/r#404 cannot be read"},
 		{engine.StartRequest{Ref: gh}, "lanes that take tickets; name one with --lane"},
 		{engine.StartRequest{Ref: gh, Lane: "nope"}, "has no lane nope"},
@@ -1651,9 +1651,9 @@ func TestAConfigurationRepositoryEnrolsAndGivesDefaults(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	h.e.Repos = nil
-	h.e.ConfigRepo = "acme/factory"
-	h.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r, github.com/o/plain]\n"))
-	h.f.setFile("acme/factory", ".agents/factory/lanes.yaml", []byte(`version: 1
+	h.e.ConfigRepo = "example-org/factory"
+	h.f.setFile("example-org/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r, github.com/o/plain]\n"))
+	h.f.setFile("example-org/factory", ".agents/factory/lanes.yaml", []byte(`version: 1
 lanes:
   agent:
     kind: originate
@@ -1691,7 +1691,7 @@ lanes:
 		t.Fatal(err)
 	}
 	entries, _ := h.e.Store.Log(ctx, "item/github.com/o/r/issues/1")
-	if !strings.Contains(string(entries[0].Body), `"sha":"c0ffee","config":"acme/factory","config_sha":"c0ffee"`) {
+	if !strings.Contains(string(entries[0].Body), `"sha":"c0ffee","config":"example-org/factory","config_sha":"c0ffee"`) {
 		t.Fatalf("the decision should record both commits: %s", entries[0].Body)
 	}
 	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "github.com", Key: "x/y#1"}, Lane: "agent"}); err == nil || !strings.Contains(err.Error(), "not an enrolled repository") {
@@ -1699,28 +1699,28 @@ lanes:
 	}
 
 	bad := newHarness(t)
-	bad.e.ConfigRepo = "acme/factory"
-	bad.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [ghe.acme.internal/o/r]\n"))
-	if _, err := bad.e.Enrolled(ctx); err == nil || !strings.Contains(err.Error(), "ghe.acme.internal, which is not a configured forge") {
+	bad.e.ConfigRepo = "example-org/factory"
+	bad.f.setFile("example-org/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [ghe.example.internal/o/r]\n"))
+	if _, err := bad.e.Enrolled(ctx); err == nil || !strings.Contains(err.Error(), "ghe.example.internal, which is not a configured forge") {
 		t.Fatalf("another forge: %v", err)
 	}
 	missing := newHarness(t)
-	missing.e.ConfigRepo = "acme/factory"
-	missing.f.setFile("acme/factory", ".agents/factory/factory.yaml", nil)
-	missing.f.setFile("acme/factory", ".agents/factory/lanes.yaml", nil)
+	missing.e.ConfigRepo = "example-org/factory"
+	missing.f.setFile("example-org/factory", ".agents/factory/factory.yaml", nil)
+	missing.f.setFile("example-org/factory", ".agents/factory/lanes.yaml", nil)
 	if err := missing.e.Sweep(ctx); err == nil || !strings.Contains(err.Error(), "has no factory.yaml") {
 		t.Fatalf("no factory.yaml: %v", err)
 	}
 	invalid := newHarness(t)
-	invalid.e.ConfigRepo = "acme/factory"
-	invalid.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\n"))
+	invalid.e.ConfigRepo = "example-org/factory"
+	invalid.f.setFile("example-org/factory", ".agents/factory/factory.yaml", []byte("version: 1\n"))
 	if _, err := invalid.e.Enrolled(ctx); err == nil || !strings.Contains(err.Error(), "repos") {
 		t.Fatalf("a factory.yaml without repos: %v", err)
 	}
 	none := newHarness(t)
-	none.e.ConfigRepo = "acme/factory"
-	none.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\n"))
-	none.f.setFile("acme/factory", ".agents/factory/lanes.yaml", nil)
+	none.e.ConfigRepo = "example-org/factory"
+	none.f.setFile("example-org/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\n"))
+	none.f.setFile("example-org/factory", ".agents/factory/lanes.yaml", nil)
 	none.f.setFile("o/r", ".agents/factory/lanes.yaml", nil)
 	if _, err := none.e.Policy(ctx, "o/r"); err == nil || !strings.Contains(err.Error(), "no configuration repository gives it lanes") {
 		t.Fatalf("no lanes anywhere: %v", err)
@@ -1736,55 +1736,55 @@ func TestASecondForge(t *testing.T) {
 	ghe := newForge()
 	ghe.labels[1] = []string{"ynf:agent"}
 	h.e.Repos = nil
-	h.e.ConfigRepo = "acme/factory"
-	h.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r, ghe.acme.internal/acme/x]\nforges:\n  ghe: {provider: github, url: https://ghe.acme.internal, token_env: GHE_TOKEN}\n"))
-	h.f.setFile("acme/factory", ".agents/factory/lanes.yaml", nil)
+	h.e.ConfigRepo = "example-org/factory"
+	h.f.setFile("example-org/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r, ghe.example.internal/example-org/x]\nforges:\n  ghe: {provider: github, url: https://ghe.example.internal, token_env: GHE_TOKEN}\n"))
+	h.f.setFile("example-org/factory", ".agents/factory/lanes.yaml", nil)
 	gheGit := workspace.Workspace{Root: filepath.Join(h.e.WorkDir), RemoteURL: func(string) string { return h.remote }}
 	var asked map[string]any
 	h.e.NewForge = func(name string, cfg map[string]any) (engine.ForgeInstance, error) {
 		asked = cfg
-		return engine.ForgeInstance{Host: "ghe.acme.internal", Forge: ghe, Git: gheGit, Tracker: forge.IssueTracker(ghe)}, nil
+		return engine.ForgeInstance{Host: "ghe.example.internal", Forge: ghe, Git: gheGit, Tracker: forge.IssueTracker(ghe)}, nil
 	}
 	enrolled, err := h.e.Enrolled(ctx)
-	if err != nil || strings.Join(enrolled, ",") != "o/r,ghe.acme.internal/acme/x" || asked["token_env"] != "GHE_TOKEN" {
+	if err != nil || strings.Join(enrolled, ",") != "o/r,ghe.example.internal/example-org/x" || asked["token_env"] != "GHE_TOKEN" {
 		t.Fatalf("%v %v %v", enrolled, err, asked)
 	}
-	it, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "ghe.acme.internal", Key: "acme/x#1"}, Lane: "agent"})
-	if err != nil || it.State != item.Proposed || it.Key != "item/ghe.acme.internal/acme/x/issues/1" || it.Forge != "ghe.acme.internal" || it.Repo != "acme/x" {
+	it, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "ghe.example.internal", Key: "example-org/x#1"}, Lane: "agent"})
+	if err != nil || it.State != item.Proposed || it.Key != "item/ghe.example.internal/example-org/x/issues/1" || it.Forge != "ghe.example.internal" || it.Repo != "example-org/x" {
 		t.Fatalf("%+v %v", it, err)
 	}
 	if len(ghe.opened) != 1 || len(h.f.opened) != 0 {
 		t.Fatalf("the pull request belongs on the second forge: there %d, default %d", len(ghe.opened), len(h.f.opened))
 	}
-	if _, err := os.Stat(filepath.Join(h.e.WorkDir, "repos", "ghe.acme.internal", "acme", "x")); err != nil {
+	if _, err := os.Stat(filepath.Join(h.e.WorkDir, "repos", "ghe.example.internal", "example-org", "x")); err != nil {
 		t.Fatalf("the second forge's mirror should be under its host: %v", err)
 	}
 	if strings.Join(ghe.labels[1], ",") != "ynf:proposed" {
 		t.Fatalf("labels go on the second forge's issue: %v", ghe.labels[1])
 	}
-	body := []byte(`{"repository":{"full_name":"acme/x","html_url":"https://ghe.acme.internal/acme/x"},"issue":{"number":1}}`)
+	body := []byte(`{"repository":{"full_name":"example-org/x","html_url":"https://ghe.example.internal/example-org/x"},"issue":{"number":1}}`)
 	touched, err := h.e.HandleGitHubEvent(ctx, "issues", body)
-	if err != nil || touched.Host != "ghe.acme.internal" {
+	if err != nil || touched.Host != "ghe.example.internal" {
 		t.Fatalf("a webhook from the second forge: %+v %v", touched, err)
 	}
-	stranger := []byte(`{"repository":{"full_name":"acme/x","html_url":"https://elsewhere.example/acme/x"},"issue":{"number":1}}`)
+	stranger := []byte(`{"repository":{"full_name":"example-org/x","html_url":"https://elsewhere.example/example-org/x"},"issue":{"number":1}}`)
 	if _, err := h.e.HandleGitHubEvent(ctx, "issues", stranger); err == nil || !strings.Contains(err.Error(), "not a configured forge") {
 		t.Fatalf("a webhook from an unknown forge: %v", err)
 	}
-	if _, err := h.e.Start(ctx, engine.StartRequest{Prompt: "p", Repo: "ghe.acme.internal/acme/x", Lane: "agent"}); err != nil {
+	if _, err := h.e.Start(ctx, engine.StartRequest{Prompt: "p", Repo: "ghe.example.internal/example-org/x", Lane: "agent"}); err != nil {
 		t.Fatalf("a prompt for the second forge's repository: %v", err)
 	}
-	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "ghe.acme.internal", Key: "acme/x#1"}, Repo: "o/r", Lane: "agent"}); err == nil || !strings.Contains(err.Error(), "is an issue in ghe.acme.internal/acme/x") {
+	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "ghe.example.internal", Key: "example-org/x#1"}, Repo: "o/r", Lane: "agent"}); err == nil || !strings.Contains(err.Error(), "is an issue in ghe.example.internal/example-org/x") {
 		t.Fatalf("a forge's issue sent elsewhere: %v", err)
 	}
 	stats, err := h.e.Stats(ctx)
-	if err != nil || !slices.ContainsFunc(stats, func(s engine.Stats) bool { return s.Repo == "ghe.acme.internal/acme/x" && s.Proposed == 2 }) {
+	if err != nil || !slices.ContainsFunc(stats, func(s engine.Stats) bool { return s.Repo == "ghe.example.internal/example-org/x" && s.Proposed == 2 }) {
 		t.Fatalf("stats name the second forge's repository: %+v %v", stats, err)
 	}
 
 	broken := newHarness(t)
-	broken.e.ConfigRepo = "acme/factory"
-	broken.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\nforges:\n  ghe: {provider: github, url: https://ghe.acme.internal, token_env: GHE_TOKEN}\n"))
+	broken.e.ConfigRepo = "example-org/factory"
+	broken.f.setFile("example-org/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\nforges:\n  ghe: {provider: github, url: https://ghe.example.internal, token_env: GHE_TOKEN}\n"))
 	if _, err := broken.e.Enrolled(ctx); err == nil || !strings.Contains(err.Error(), "cannot add forges") {
 		t.Fatalf("no way to add forges: %v", err)
 	}
@@ -1842,27 +1842,27 @@ func TestATicketFromATrackerThatIsNotAForge(t *testing.T) {
 		"PLAT-3": {Key: "PLAT-3", State: "open", Repo: "github.com/o/r"},
 	}}
 	h.e.Repos = nil
-	h.e.ConfigRepo = "acme/factory"
-	h.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\ntrackers:\n  jira:\n    provider: mcp\n    site: https://acme.atlassian.net\n    server: {command: [jira-mcp]}\n    get: {tool: get}\n    comment: {tool: comment}\n    label: {tool: label}\n    fields: {title: result.t, labels: result.l, status: result.s}\n"))
-	h.f.setFile("acme/factory", ".agents/factory/lanes.yaml", nil)
+	h.e.ConfigRepo = "example-org/factory"
+	h.f.setFile("example-org/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\ntrackers:\n  jira:\n    provider: mcp\n    site: https://example.atlassian.net\n    server: {command: [jira-mcp]}\n    get: {tool: get}\n    comment: {tool: comment}\n    label: {tool: label}\n    fields: {title: result.t, labels: result.l, status: result.s}\n"))
+	h.f.setFile("example-org/factory", ".agents/factory/lanes.yaml", nil)
 	h.e.NewTracker = func(name string, cfg map[string]any) (string, tracker.Tracker, error) {
-		return "acme.atlassian.net", jira, nil
+		return "example.atlassian.net", jira, nil
 	}
-	if host, err := h.e.TrackerHost(ctx, "jira"); err != nil || host != "acme.atlassian.net" {
+	if host, err := h.e.TrackerHost(ctx, "jira"); err != nil || host != "example.atlassian.net" {
 		t.Fatalf("%q %v", host, err)
 	}
 	if _, err := h.e.TrackerHost(ctx, "linear"); err == nil {
 		t.Fatal("an unconfigured tracker name")
 	}
-	ref := tracker.Ref{Host: "acme.atlassian.net", Key: "PLAT-1"}
+	ref := tracker.Ref{Host: "example.atlassian.net", Key: "PLAT-1"}
 	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: ref, Lane: "agent"}); err == nil || !strings.Contains(err.Error(), "say which repository") {
 		t.Fatalf("a JIRA ticket needs --repo: %v", err)
 	}
 	it, err := h.e.Start(ctx, engine.StartRequest{Ref: ref, Repo: "o/r", Lane: "agent"})
-	if err != nil || it.State != item.Proposed || it.Key != "item/acme.atlassian.net/PLAT-1" || it.Branch != "ynf/plat-1" {
+	if err != nil || it.State != item.Proposed || it.Key != "item/example.atlassian.net/PLAT-1" || it.Branch != "ynf/plat-1" {
 		t.Fatalf("%+v %v", it, err)
 	}
-	if body := h.f.opened[0].Body; !strings.HasPrefix(body, "For acme.atlassian.net/PLAT-1.") {
+	if body := h.f.opened[0].Body; !strings.HasPrefix(body, "For example.atlassian.net/PLAT-1.") {
 		t.Fatal(body)
 	}
 	if !slices.ContainsFunc(jira.comments, func(c string) bool { return strings.Contains(c, "proposed https://github.com/o/r/pull/") }) {
@@ -1871,16 +1871,16 @@ func TestATicketFromATrackerThatIsNotAForge(t *testing.T) {
 	if got := strings.Join(jira.tickets["PLAT-1"].Labels, ","); got != "ynf:proposed" {
 		t.Fatalf("labels on the ticket: %s", got)
 	}
-	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "acme.atlassian.net", Key: "PLAT-2"}, Repo: "o/r", Lane: "agent"}); err == nil || !strings.Contains(err.Error(), "says its code goes to github.com/o/elsewhere, not o/r") {
+	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "example.atlassian.net", Key: "PLAT-2"}, Repo: "o/r", Lane: "agent"}); err == nil || !strings.Contains(err.Error(), "says its code goes to github.com/o/elsewhere, not o/r") {
 		t.Fatalf("a ticket that names another repository: %v", err)
 	}
-	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "acme.atlassian.net", Key: "PLAT-3"}, Repo: "o/r", Lane: "agent"}); err != nil {
+	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "example.atlassian.net", Key: "PLAT-3"}, Repo: "o/r", Lane: "agent"}); err != nil {
 		t.Fatalf("a ticket that agrees: %v", err)
 	}
 
 	bad := newHarness(t)
-	bad.e.ConfigRepo = "acme/factory"
-	bad.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\ntrackers:\n  jira:\n    provider: mcp\n    site: https://acme.atlassian.net\n    server: {command: [jira-mcp]}\n    get: {tool: get}\n    comment: {tool: comment}\n    label: {tool: label}\n    fields: {title: result.t, labels: result.l, status: result.s}\n"))
+	bad.e.ConfigRepo = "example-org/factory"
+	bad.f.setFile("example-org/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\ntrackers:\n  jira:\n    provider: mcp\n    site: https://example.atlassian.net\n    server: {command: [jira-mcp]}\n    get: {tool: get}\n    comment: {tool: comment}\n    label: {tool: label}\n    fields: {title: result.t, labels: result.l, status: result.s}\n"))
 	if _, err := bad.e.Enrolled(ctx); err == nil || !strings.Contains(err.Error(), "cannot add trackers") {
 		t.Fatalf("no way to add trackers: %v", err)
 	}
@@ -2203,9 +2203,9 @@ func TestAFailedTicketCommentIsLogged(t *testing.T) {
 func TestPolicyWithLayer(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	h.e.ConfigRepo = "acme/factory"
-	h.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\n"))
-	h.f.setFile("acme/factory", ".agents/factory/lanes.yaml", []byte(`version: 1
+	h.e.ConfigRepo = "example-org/factory"
+	h.f.setFile("example-org/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\n"))
+	h.f.setFile("example-org/factory", ".agents/factory/lanes.yaml", []byte(`version: 1
 lanes:
   agent:
     kind: originate
@@ -2227,7 +2227,7 @@ lanes:
 	if _, err := none.e.PolicyWithLayer(ctx, "o/r", nil); err == nil {
 		t.Fatal("no lanes anywhere")
 	}
-	h.e.ConfigRepo = "acme/missing"
+	h.e.ConfigRepo = "example-org/missing"
 	h.e.ResetPolicies()
 	if _, err := h.e.PolicyWithLayer(ctx, "o/r", nil); err == nil {
 		t.Fatal("an unreadable configuration repository")

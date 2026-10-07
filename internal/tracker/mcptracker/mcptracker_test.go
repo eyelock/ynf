@@ -52,7 +52,7 @@ func (f *fakeJira) server() *mcp.Server {
 		return nil, map[string]any{"key": a.IssueKey, "fields": map[string]any{
 			"comment": map[string]any{"comments": posted},
 			"summary": "Fix the thing", "description": "It is broken.", "labels": slices.Clone(f.labels),
-			"status": map[string]any{"name": f.status}, "components": []any{map[string]any{"name": "github.com/acme/x"}},
+			"status": map[string]any{"name": f.status}, "components": []any{map[string]any{"name": "github.com/example-org/x"}},
 		}}, nil
 	})
 	mcp.AddTool(s, &mcp.Tool{Name: "jira_add_comment"}, func(_ context.Context, _ *mcp.CallToolRequest, a commentArgs) (*mcp.CallToolResult, map[string]any, error) {
@@ -79,7 +79,7 @@ func config(t *testing.T, label map[string]any) mcptracker.Config {
 	t.Helper()
 	c, err := mcptracker.Parse(map[string]any{
 		"provider": "mcp",
-		"site":     "https://acme.atlassian.net",
+		"site":     "https://example.atlassian.net",
 		"server":   map[string]any{"command": []any{"unused"}},
 		"get":      map[string]any{"tool": "jira_get_issue", "args": map[string]any{"issueKey": "{key}"}},
 		"comment":  map[string]any{"tool": "jira_add_comment", "args": map[string]any{"issueKey": "{key}", "body": "{text}"}},
@@ -118,17 +118,17 @@ func TestATrackerOverMCP(t *testing.T) {
 	ctx := context.Background()
 	f := &fakeJira{labels: []string{"ynf-lint", "keep"}, status: "To Do"}
 	tr := connect(t, f, config(t, map[string]any{"issueKey": "{key}", "labels": "{labels}"}))
-	if tr.Host() != "acme.atlassian.net" {
+	if tr.Host() != "example.atlassian.net" {
 		t.Fatal(tr.Host())
 	}
 	ft, text, err := tr.Get(ctx, "PLAT-881")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ft.Key != "PLAT-881" || ft.State != "open" || strings.Join(ft.Labels, ",") != "keep,ynf-lint" || ft.Repo != "github.com/acme/x" {
+	if ft.Key != "PLAT-881" || ft.State != "open" || strings.Join(ft.Labels, ",") != "keep,ynf-lint" || ft.Repo != "github.com/example-org/x" {
 		t.Fatalf("%+v", ft)
 	}
-	if text.Title != "Fix the thing" || text.Body != "It is broken." || text.URL != "https://acme.atlassian.net/browse/PLAT-881" {
+	if text.Title != "Fix the thing" || text.Body != "It is broken." || text.URL != "https://example.atlassian.net/browse/PLAT-881" {
 		t.Fatalf("%+v", text)
 	}
 	if err := tr.Comment(ctx, "PLAT-881", "<!-- m -->", "proposed"); err != nil || len(f.comments) != 1 || f.comments[0] != "PLAT-881: proposed\n\n<!-- m -->" {
