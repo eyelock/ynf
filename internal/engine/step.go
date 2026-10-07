@@ -519,12 +519,29 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		if err != nil {
 			return fail(runner.OperatorError, err)
 		}
-		if inline && h.ID != "" {
+		usedHarness = y.Cfg.Harness
+		switch {
+		case inline && h.ID != "":
 			y.Cfg.Harness = h.ID // run the harness installed here, by its id
+			usedHarness = h.ID
+			r = y
+		case known && h.ID == "" && !inImage && e.InstallHarness != nil:
+			// A harness folder on the host: ynh agent run takes only an id, so install the folder
+			// into a ynh home of this run's own, and run with that home. The operator's is never
+			// touched, and the run record and telemetry keep the folder the lane names.
+			home := filepath.Join(runDir, "ynh")
+			id, err := telemetry.Call(s.ctx, e.Telemetry, telemetry.CallSystemYnh, "install", func(ctx context.Context) (string, error) {
+				return e.InstallHarness(ctx, harnessDir(wt, y.Cfg.Harness), home)
+			})
+			if err != nil {
+				return fail(runner.OperatorError, fmt.Errorf("install the harness %s for this run: %w", y.Cfg.Harness, err))
+			}
+			y.Cfg.Harness = id
+			job.Env["YNH_HOME"] = home
 			r = y
 		}
 		harness, harnessKnown = h, known
-		usedHarness, usedFocus = y.Cfg.Harness, y.Cfg.Focus
+		usedFocus = y.Cfg.Focus
 		if usedHarness == "" {
 			usedHarness = h.ID
 		}
@@ -767,6 +784,13 @@ func (s *step) harness(y runner.YnhRunner, image string, inImage, built, inline 
 			want = ""
 		}
 		if h, err = s.e.ImageHarness(s.ctx, "", want); err != nil {
+			// Nothing installed here for a lane that names the repository's harness: run the
+			// one the repository carries, as the process executor does.
+			if y.Cfg.Harness != "" && isFolder(wt, y.Cfg.Harness) {
+				if hf, rerr := runner.ReadHarness(harnessDir(wt, y.Cfg.Harness)); rerr == nil {
+					return hf, true, nil
+				}
+			}
 			return h, false, fmt.Errorf("read the harness installed here: %w", err)
 		}
 		return h, true, nil
@@ -790,12 +814,17 @@ func (s *step) harness(y runner.YnhRunner, image string, inImage, built, inline 
 	if y.Cfg.Harness == "" {
 		return h, false, errors.New("a ynh lane on the host needs ynh.harness, the harness to run")
 	}
-	dir := y.Cfg.Harness
-	if !filepath.IsAbs(dir) { // shadow mode pins a harness folder outside the checkout
-		dir = filepath.Join(wt, filepath.FromSlash(dir))
-	}
-	h, err = runner.ReadHarness(dir)
+	h, err = runner.ReadHarness(harnessDir(wt, y.Cfg.Harness))
 	return h, err == nil, nil
+}
+
+// harnessDir is the folder a lane's harness value names: in the checkout, or absolute (shadow mode
+// pins a harness folder outside the checkout).
+func harnessDir(wt, harness string) string {
+	if filepath.IsAbs(harness) {
+		return harness
+	}
+	return filepath.Join(wt, filepath.FromSlash(harness))
 }
 
 // isFolder reports whether name is a folder in the worktree, rather than an installed harness id.

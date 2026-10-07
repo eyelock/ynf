@@ -87,6 +87,9 @@ type Engine struct {
 	// ImageHarness reads what the harness inside an agent image declares, by asking the image's
 	// own ynh; harness picks one when the image carries several. nil skips reading it.
 	ImageHarness func(ctx context.Context, image, harness string) (runner.Harness, error)
+	// InstallHarness installs a harness folder into the ynh home ynhHome, which is the run's own,
+	// and returns the id `ynh agent run` takes for it; nil runs the lane's harness value as it is.
+	InstallHarness func(ctx context.Context, dir, ynhHome string) (string, error)
 	// ImageCapabilities reports the capabilities version of the ynh inside an agent image; nil
 	// skips the check.
 	ImageCapabilities func(ctx context.Context, image string) (string, error)

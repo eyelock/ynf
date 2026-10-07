@@ -11,6 +11,10 @@
 // own as ynr serve's upstream. It uses no model, no network and no docker, and touches nothing of
 // yours: HOME, XDG_STATE_HOME and YNH_HOME are its own.
 //
+// The lane's harness is ".", the one the repository carries. ynf installs it into a ynh home of
+// the run's own, so the check also asserts that YNH_HOME, which stands for the operator's, is left
+// as it was.
+//
 // The lane runs on the process executor. The docker executor needs an agent image with ynh and the
 // vendor in it, which is a build of its own; the process executor is the same ynf code path for the
 // run folder, the manifest, TRACEPARENT and the relay setting, and the allowed uncontained run is
@@ -46,7 +50,7 @@ import (
 
 const (
 	lane    = "chain"
-	harness = "local/chain"
+	harness = "."
 	focus   = "tidy"
 )
 
@@ -227,7 +231,7 @@ lanes:
     run:
       runner: ynh
       executor: process
-      ynh: {harness: local/chain, vendor: claude, focus: tidy, telemetry_relay: true}
+      ynh: {harness: ".", vendor: claude, focus: tidy, telemetry_relay: true}
     when: {converged: open_pr}
 `
 
@@ -246,7 +250,7 @@ func run() error {
 		fmt.Println("kept", t)
 	}
 	bin := filepath.Join(t, "bin")
-	for _, d := range []string{bin, filepath.Join(t, "home"), filepath.Join(t, "state"), filepath.Join(t, "ynh"), filepath.Join(t, "src", "local", "chain", ".agents", "harness")} {
+	for _, d := range []string{bin, filepath.Join(t, "home"), filepath.Join(t, "state"), filepath.Join(t, "ynh"), filepath.Join(t, "src", ".agents", "harness")} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return err
 		}
@@ -258,7 +262,7 @@ func run() error {
 
 	// A local repository standing in for github.com/o/r, with the harness in it.
 	src, remote := filepath.Join(t, "src"), filepath.Join(t, "remote", "o", "r.git")
-	if err := os.WriteFile(filepath.Join(src, "local", "chain", ".agents", "harness", "plugin.json"), []byte(pluginJSON), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(src, ".agents", "harness", "plugin.json"), []byte(pluginJSON), 0o644); err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(src, "README.md"), []byte("hello\n"), 0o644); err != nil {
@@ -279,14 +283,6 @@ func run() error {
 	}
 	gitconfig := filepath.Join(t, "gitconfig")
 	if err := os.WriteFile(gitconfig, []byte(fmt.Sprintf("[url %q]\n\tinsteadOf = https://github.com/o/r.git\n", remote)), 0o644); err != nil {
-		return err
-	}
-
-	// ynh runs a harness by its id. The repository carries the harness at local/chain, which is
-	// where ynf reads the manifest for the lane's focus, and ynh has it installed under that id.
-	henv := append(cleanEnv(), "PATH="+filepath.Dir(tools["ynh"])+string(os.PathListSeparator)+os.Getenv("PATH"),
-		"HOME="+filepath.Join(t, "home"), "YNH_HOME="+filepath.Join(t, "ynh"))
-	if err := sh(filepath.Join(src, "local", "chain"), henv, tools["ynh"], "install", "."); err != nil {
 		return err
 	}
 
@@ -325,6 +321,11 @@ func run() error {
 	runErr := cmd.Run()
 	if runErr != nil {
 		return fmt.Errorf("ynf sweep: %w\n%s", runErr, out.String())
+	}
+	// The run installed the harness into a home of its own: the one standing for the operator's is
+	// as it was made.
+	if es, err := os.ReadDir(filepath.Join(t, "ynh")); err != nil || len(es) != 0 {
+		return fmt.Errorf("the run changed the operator's ynh home (%d entries, %v)\n%s", len(es), err, out.String())
 	}
 	if os.Getenv("FULLCHAIN_VERBOSE") != "" {
 		fmt.Println(out.String())

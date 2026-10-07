@@ -376,6 +376,7 @@ func (a *app) engine() (*engine.Engine, error) {
 		Executor:          a.executor,
 		BuildImage:        imageBuilder(c.Images.Build == nil || *c.Images.Build),
 		ImageHarness:      imageHarness,
+		InstallHarness:    runner.InstallFolder,
 		ImageCapabilities: imageCapabilities,
 		HostCapabilities:  hostCapabilities,
 		DetectYnh:         runner.DetectedYnh,

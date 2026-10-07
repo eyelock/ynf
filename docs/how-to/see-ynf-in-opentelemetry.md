@@ -186,13 +186,14 @@ rest: a local repository carrying the harness, `.ynr/fakeforge` for the forge, a
 the collector on, and a receiver of its own as `ynr serve`'s upstream. HOME, `XDG_STATE_HOME` and
 `YNH_HOME` are its own. It uses no model, no network and no docker.
 
-Three things in it are there because of the releases it runs against, and each goes when the release
+The lane runs on the `process` executor, which ynf allows with `--interactive`. Its harness is `.`,
+the one the repository carries in `.agents/harness/`. `ynh agent run` takes only a harness id, so
+ynf installs the folder into a ynh home of the run's own (never yours) and runs it by the id ynh
+gives it; the focus is read from the checkout. `ynf.lane.harness` holds what the lane names, `.`.
+
+Two things in it are there because of the releases it runs against, and each goes when the release
 changes:
 
-- The lane runs on the `process` executor, which ynf allows with `--interactive`. ynh runs a harness
-  by its id, so the harness is installed first (`ynh install`) and the repository carries it at
-  `local/chain`, which is where ynf reads the lane's focus. A harness folder named with
-  `harness: .` is for the docker executor, which builds an image from it.
 - `.ynr/fakeclaude` is the `claude` on `PATH`. ynh drives Claude Code as a stream-json session and
   ynr's stub vendor (0.2.0) is a one-shot command, so the adapter speaks the session and runs
   `ynr-stub-vendor` for each turn. The vendor's records, in the relay's trace, are the stub's.
