@@ -2,7 +2,9 @@
 
 ## Reporting a vulnerability
 
-Report vulnerabilities privately, through GitHub's private vulnerability reporting:
+Report vulnerabilities privately. While the repository is private, GitHub's private vulnerability
+reporting is not available, so email the maintainer, David Collie, at david@eyelock.net. Once the
+repository is public, report through GitHub's private vulnerability reporting:
 
 1. Open the [Security tab](https://github.com/eyelock/ynf/security) of the repository.
 2. Choose **Report a vulnerability** and describe the problem: what is affected, how to reproduce
