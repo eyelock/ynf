@@ -17,7 +17,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
@@ -36,7 +36,7 @@ jobs:
     env:
       WEAVER_VERSION: v0.27.0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: weaver registry check
         run: |
           set -eu
@@ -48,7 +48,7 @@ jobs:
     # ynf finds tools only on PATH, so both binaries are put there; ynr is never built from source or installed from a package manager.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
