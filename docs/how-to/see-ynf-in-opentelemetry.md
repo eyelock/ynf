@@ -131,6 +131,45 @@ upstream, and checks each run's manifest and folder, that the run's own records 
 `ynr.provenance=run` and the lane the manifest names, and that a flooded folder was held to its
 quota.
 
+## Check ynf against ynr's contract
+
+`ynr conformance` runs ynf's own scenarios and checks what ynf wrote against ynr's contract: that it
+writes where the contract says (and nothing with no target), identifies itself, joins the trace it
+is given, announces each step with a started event, ends each step with an outcome and a status that
+agree, keeps to the names in its registry, exports none of the content planted in the inputs, and
+keeps its exit code with a full spool or an endpoint that never answers. CI runs it as the
+`conformance` job.
+
+The scenarios are in `.ynr/conformance.yaml`. Each runs `ynf sweep` or `ynf start` against
+`.ynr/fakeforge`, a small stand-in for GitHub with its own config and store, so the run needs no
+network, no clone, no docker and no model, and touches nothing of yours. To run it, put a `ynr` at
+the version CI pins (`YNR_VERSION` in `.github/workflows/ci.yml`) first on your `PATH` for the shell
+and run:
+
+```bash
+make conformance                          # a report you can read
+make conformance CONFORMANCE_FORMAT=json  # the same, as JSON
+```
+
+While ynr is private, its releases need a token that can read `eyelock/ynr`. Download the archive
+for your machine and `checksums.txt`, check the checksum, and unpack the `ynr` binary into a folder
+of its own, put on the `PATH` for that shell only:
+
+```bash
+GH_TOKEN=<a token that can read eyelock/ynr> gh release download v0.2.0 -R eyelock/ynr \
+  -p 'ynr_0.2.0_darwin_arm64.tar.gz' -p checksums.txt
+shasum -a 256 --check --ignore-missing checksums.txt
+mkdir ynr-bin && tar -xzf ynr_0.2.0_darwin_arm64.tar.gz -C ynr-bin ynr
+PATH="$PWD/ynr-bin:$PATH" make conformance
+```
+
+ynf runs no vendor CLI (ynh does), so its scenarios name no stub vendor. A scenario that has to
+leave a step running, as conformance's kill run does, needs the forge to be slow: `.ynr/fakeforge`
+delays the ticket by `YNR_STUB_TURN_DELAY`.
+
+Conformance checks ynf alone. The check through the whole chain, a ynf step into `ynh agent run` with
+the relay on and the stub vendor, waits for a ynh release with relay support.
+
 ## The names
 
 `ynf telemetry registry --format json` prints every name ynf emits, as an OpenTelemetry Weaver

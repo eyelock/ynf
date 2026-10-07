@@ -167,6 +167,18 @@ stamps on ynf's behalf (`ynf.lane`, `ynf.lane.harness`, `ynf.lane.focus`). It is
 binary, `ynf telemetry registry --format json` prints it, and the Go constants ynf uses are
 generated from it. CI checks it with Weaver.
 
+*Conformance.* `ynr conformance` (ynr ADR-008) runs in CI as the `conformance` job, against a
+pinned ynr release whose binaries are checked against the release's checksums and put on `PATH`;
+ynf never builds or installs ynr. Its scenarios are `.ynr/conformance.yaml`, each a `ynf sweep` or
+`ynf start` against an offline stand-in for GitHub with its own config and store, so they need no
+network, no clone, no docker and no model. They check where ynf writes, its resource, the trace it
+joins, a started event for each step, outcomes and statuses that agree, its names against the
+registry, that planted ticket text, file contents, a prompt and a token never reach a record, that a
+full spool or an endpoint that never answers changes neither its exit code nor its time, and that it
+starts nothing because `ynr` is on `PATH`. A kill mid-step leaves the started event in the spool.
+The check through the whole chain, a ynf step into `ynh agent run` with the relay on and ynr's stub
+vendor, belongs to the factory image's CI and waits for a ynh release with relay support.
+
 *People and content.* An actor appears only as a host-qualified handle, such as
 `github.com/octocat`, never a name or email. ynf's forge and tracker ports return structure and no
 author: the facts a decision reads hold labels, states and check conclusions, and the review logins
