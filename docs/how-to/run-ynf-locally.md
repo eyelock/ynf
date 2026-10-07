@@ -14,13 +14,11 @@ without a human is done.
 ## Install
 
 ```bash
-export HOMEBREW_GITHUB_API_TOKEN="$(gh auth token)"   # the repository is private for now
 brew install eyelock/tap/ynf
 ```
 
 The formula installs `ynf`, and keeps the static linux builds the docker executor runs as its
-egress proxy in its `libexec`, off your PATH. The token is only needed while ynf's repository is
-private: its release downloads need one, and the formula sends it.
+egress proxy in its `libexec`, off your PATH.
 
 Or build from source:
 

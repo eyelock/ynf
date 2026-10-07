@@ -84,11 +84,6 @@ brews:
     homepage: "https://github.com/eyelock/ynf"
     description: "Your named factory: the event-driven outer loop around agent runs"
     license: "MIT"
-    # ynf's repository is private for now: the release assets need a token. Homebrew sends this
-    # header with the download; export HOMEBREW_GITHUB_API_TOKEN before installing.
-    url_headers:
-      - "Accept: application/octet-stream"
-      - 'Authorization: bearer #{ENV["HOMEBREW_GITHUB_API_TOKEN"]}'
     test: |
       system "#{bin}/ynf", "version"
     install: |

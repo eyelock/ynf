@@ -28,8 +28,6 @@ Timestamps, ids, issue and pull request numbers will differ from the ones shown.
 ## What you need
 
 - **Go 1.26, git and Docker running.** The sandbox's lanes run in a container.
-- **Read access to `github.com/eyelock/ynr`,** while that repository is private. Building ynf from
-  source needs it; lesson 1 says where to read how.
 - **Terraform 1.10 or later,** which builds the sandbox.
 - **The GitHub CLI, signed in,** with the `repo` and `delete_repo` scopes:
   `gh auth refresh -s delete_repo`. ynf uses its token when `GITHUB_TOKEN` isn't set.

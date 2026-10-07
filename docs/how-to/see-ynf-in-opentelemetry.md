@@ -151,12 +151,11 @@ make conformance                          # a report you can read
 make conformance CONFORMANCE_FORMAT=json  # the same, as JSON
 ```
 
-While ynr is private, its releases need a token that can read `eyelock/ynr`. Download the archive
-for your machine and `checksums.txt`, check the checksum, and unpack the `ynr` binary into a folder
+Download ynr's archive for your machine and `checksums.txt`, check the checksum, and unpack the `ynr` binary into a folder
 of its own, put on the `PATH` for that shell only:
 
 ```bash
-GH_TOKEN=<a token that can read eyelock/ynr> gh release download v0.2.0 -R eyelock/ynr \
+gh release download v0.2.0 -R eyelock/ynr \
   -p 'ynr_0.2.0_darwin_arm64.tar.gz' -p checksums.txt
 shasum -a 256 --check --ignore-missing checksums.txt
 mkdir ynr-bin && tar -xzf ynr_0.2.0_darwin_arm64.tar.gz -C ynr-bin ynr

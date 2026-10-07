@@ -58,7 +58,7 @@ resource "github_repository" "ynf" {
 # (https://eyelock.github.io/ynf/schema/...) resolve from it.
 
 # The docs site, built by GitHub from /docs on main: docsify renders the Markdown in the browser,
-# so there is no build step. It is public even while the repository is private, as ynm's is; the
+# so there is no build step. The
 # JSON schemas' $id URLs resolve here too.
 resource "github_repository_pages" "ynf" {
   repository = github_repository.ynf.name

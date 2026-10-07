@@ -10,7 +10,6 @@ A lane that runs an agent unsupervised (`run.ynh.auto_approve`) needs ynh 0.9.0 
 agent image.
 
 ```bash
-export HOMEBREW_GITHUB_API_TOKEN="$(gh auth token)"   # while the repository is private
 brew install eyelock/tap/ynf
 ynf --config config.yaml sweep --until-settled
 ```

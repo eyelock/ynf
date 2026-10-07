@@ -7,10 +7,8 @@ one is there.
 ## Build ynf
 
 ynf's repository holds the sandbox too, so start from a clone, and build ynf from it. Installing
-with Homebrew doesn't work yet, while the repository is private. Building from source also needs
-read access to `github.com/eyelock/ynr` for as long as that repository is private:
-[`CONTRIBUTING.md`](https://github.com/eyelock/ynf/blob/develop/CONTRIBUTING.md) says how to give git
-that access.
+with Homebrew (`brew install eyelock/tap/ynf`) gives you the binary but not the sandbox, so build
+from the clone, which needs only Go.
 
 ```bash
 gh repo clone eyelock/ynf

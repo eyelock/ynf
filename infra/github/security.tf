@@ -1,6 +1,5 @@
 # Dependabot alerts and automatic security fixes are on. Private vulnerability reporting, secret
-# scanning and push protection are on once the repository is public (repository.tf): they are not
-# available on a private repository (secret scanning needs GitHub Advanced Security there).
+# scanning and push protection need a public repository (repository.tf), and follow `visibility`.
 resource "github_repository_vulnerability_alerts" "ynf" {
   repository = github_repository.ynf.name
   enabled    = true
