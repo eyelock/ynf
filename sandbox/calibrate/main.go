@@ -50,6 +50,7 @@ type calibration struct {
 	Command  *struct{ Deterministic bool } `yaml:"command"`
 	Disabled bool                          `yaml:"disabled"`
 	Refused  bool                          `yaml:"refused"`
+	Skip     string                        `yaml:"skip"`
 }
 
 type flaky struct {
@@ -144,7 +145,11 @@ func run(root, repo, ynh, only string) error {
 		v := calibrator{root: root, origin: origin, tmp: tmp, ynh: ynh, seed: seed}
 		detail, err := v.fixture(f, lf.Lanes[f.Lane])
 		mark := "ok  "
-		if err != nil {
+		var skip skipped
+		switch {
+		case errors.As(err, &skip):
+			mark, detail = "skip", "skipped: "+string(skip)
+		case err != nil:
 			mark, detail = "FAIL", err.Error()
 			failed++
 		}
@@ -186,6 +191,11 @@ func seedCommit(origin string) (string, error) {
 	return roots[0], nil
 }
 
+// skipped is the result of a fixture that declares calibrate.skip. It is not a failure.
+type skipped string
+
+func (s skipped) Error() string { return string(s) }
+
 func (v calibrator) fixture(f fixture, l lane) (string, error) {
 	switch {
 	case f.Calibrate.Disabled:
@@ -193,6 +203,9 @@ func (v calibrator) fixture(f fixture, l lane) (string, error) {
 			return "", fmt.Errorf("lane %s is enabled; expected it switched off", f.Lane)
 		}
 		return fmt.Sprintf("lane %s is switched off", f.Lane), nil
+	case f.Calibrate.Skip != "":
+		// A fixture with no fixed state: the lane is on, but nothing it does has a fixed and an unfixed side.
+		return "", skipped(f.Calibrate.Skip)
 	case f.Calibrate.Refused:
 		// ynf refuses the lane's scope before any run (ADR-006); `make e2e` watches it do so.
 		if len(l.Run.Ynh.SensorScope) == 0 {

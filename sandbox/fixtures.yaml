@@ -232,7 +232,7 @@ fixtures:
     labels: ["ynf:outage", "pkg:internal/format"]
     lane: outage
     calibrate:
-      disabled: true
+      skip: the outage lane is enabled and its command always fails, so there is no fixed state to calibrate
     expect:
       result: escalated
       signatures: ["sig/outcome/error"]
