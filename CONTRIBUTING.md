@@ -57,5 +57,8 @@ Participation is under the [Code of Conduct](CODE_OF_CONDUCT.md). Report a vulne
 as [SECURITY.md](SECURITY.md) describes, not in an issue. Contributions are made under the
 [MIT licence](LICENSE).
 
+CI scans the history for secrets with gitleaks. `.gitleaks.toml` extends the default rules and
+allowlists only `internal/telemetry/telemetry_test.go`, whose fake tokens check that scrubbing works.
+
 The protection on `develop` and `main`, and the one required check "All Clear", are described in
 [.github/BRANCH_PROTECTION.md](.github/BRANCH_PROTECTION.md).

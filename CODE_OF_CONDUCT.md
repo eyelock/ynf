@@ -38,8 +38,9 @@ discussions, and any place where someone represents the project in public.
 
 ## Reporting
 
-Report unacceptable behaviour privately to the maintainer, [@eyelock](https://github.com/eyelock),
-through the repository's
+Report unacceptable behaviour privately to the maintainer, [@eyelock](https://github.com/eyelock).
+While the repository is private, GitHub's private vulnerability reporting is not available, so email
+support@eyelock.net. Once the repository is public, use the repository's
 [private vulnerability reporting](https://github.com/eyelock/ynf/security/advisories/new) form,
 noting that it is a conduct concern. All reports are reviewed promptly and kept confidential.
 
