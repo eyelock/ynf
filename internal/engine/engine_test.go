@@ -651,6 +651,7 @@ case " $* " in *" --focus "*" --task "*|*" --task "*" --focus "*)
 esac
 echo "$*" >> "` + calls + `"
 echo "key=${ANTHROPIC_API_KEY}" >> "` + calls + `"
+echo "home=${YNH_HOME}" >> "` + calls + `"
 while [ $# -gt 0 ]; do [ "$1" = --task ] && cat "${2#@}" >> "` + calls + `"; shift; done
 gofmt -w ./internal/format
 echo '{"exit_code":0,"reason":"converged","session_id":"S-ynh-7","backend":"claude","model":"opus"}'
@@ -687,6 +688,102 @@ func TestYnhRunnerOnTheHost(t *testing.T) {
 		if !strings.Contains(msg, want) {
 			t.Errorf("commit lacks %q:\n%s", want, msg)
 		}
+	}
+}
+
+// installs records what InstallHarness was asked, standing in for `ynh install` into the run's home.
+type installs struct{ dirs, homes []string }
+
+func (in *installs) install(_ context.Context, dir, home string) (string, error) {
+	in.dirs, in.homes = append(in.dirs, dir), append(in.homes, home)
+	return "local/installed", nil
+}
+
+// TestHarnessFolderOnTheHostIsInstalledForTheRun: ynh agent run takes a harness id, so a lane whose
+// harness is a folder is installed into a ynh home of the run's own, never the operator's, and runs
+// by the id it gets.
+func TestHarnessFolderOnTheHostIsInstalledForTheRun(t *testing.T) {
+	operator := t.TempDir()
+	t.Setenv("YNH_HOME", operator)
+	h := newHarness(t)
+	calls := fakeYnh(t)
+	in := &installs{}
+	h.e.InstallHarness = in.install
+	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "sk-test"}[k] }
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	it := h.item(t, 1)
+	if it.State != item.Proposed {
+		t.Fatalf("%s %s", it.State, it.Reason)
+	}
+	if len(in.dirs) != 1 || filepath.Base(in.dirs[0]) != "wt" {
+		t.Fatalf("the checkout's harness should be installed once: %v", in.dirs)
+	}
+	home := in.homes[0]
+	if strings.HasPrefix(home, operator) || filepath.Base(home) != "ynh" || filepath.Base(filepath.Dir(home)) != "run" {
+		t.Errorf("the harness was installed into %s, not a home of the run's own (operator's %s)", home, operator)
+	}
+	b, _ := os.ReadFile(calls)
+	if !strings.Contains(string(b), "agent run --harness local/installed --task @") || !strings.Contains(string(b), "home="+home+"\n") {
+		t.Errorf("ynh should run the installed id with the run's home:\n%s", b)
+	}
+	if es, _ := os.ReadDir(operator); len(es) != 0 {
+		t.Errorf("the operator's ynh home was written to: %v", es)
+	}
+}
+
+// TestNamedHarnessOnTheHostIsNotInstalled: a harness id is the operator's installed harness, run
+// as it is, in the operator's own ynh home.
+func TestNamedHarnessOnTheHostIsNotInstalled(t *testing.T) {
+	t.Setenv("YNH_HOME", "")
+	h := newHarness(t)
+	calls := fakeYnh(t)
+	in := &installs{}
+	h.e.InstallHarness = in.install
+	h.f.lanes = strings.Replace(lanesYAML, `      ynh: {harness: ".", focus: tidy}`, `      ynh: {harness: "local/named"}`, 1)
+	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "sk-test"}[k] }
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Proposed {
+		t.Fatalf("%s %s", it.State, it.Reason)
+	}
+	b, _ := os.ReadFile(calls)
+	if len(in.dirs) != 0 || !strings.Contains(string(b), "agent run --harness local/named --task @") || !strings.Contains(string(b), "home=\n") {
+		t.Errorf("a named harness should run as it is: installed %v\n%s", in.dirs, b)
+	}
+}
+
+// TestInlineRunsTheRepositorysHarnessWhenNoneIsInstalled: where the image has no harness installed
+// and the lane names the one the repository carries, the inline run installs it for the run.
+func TestInlineRunsTheRepositorysHarnessWhenNoneIsInstalled(t *testing.T) {
+	if _, err := user.Lookup("nobody"); err != nil {
+		t.Skip("no nobody user here")
+	}
+	h := newHarness(t)
+	calls := fakeYnh(t)
+	in := &installs{}
+	h.e.InstallHarness = in.install
+	h.e.Interactive = false
+	h.e.Executor = func(string) (executor.Executor, error) {
+		return executor.Inline{User: "nobody",
+			Chown:      func(string, int, int) error { return nil },
+			Credential: func(*exec.Cmd, uint32, uint32) {}}, nil
+	}
+	h.e.ImageHarness = func(context.Context, string, string) (runner.Harness, error) {
+		return runner.Harness{}, errors.New("no harness is installed")
+	}
+	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "k"}[k] }
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(calls)
+	if it := h.item(t, 1); it.State != item.Proposed || len(in.dirs) != 1 || !strings.Contains(string(b), "agent run --harness local/installed") || !strings.Contains(string(b), "home="+in.homes[0]) {
+		t.Fatalf("%s installed %v\n%s", it.State, in.dirs, b)
 	}
 }
 
