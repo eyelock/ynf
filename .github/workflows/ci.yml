@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 env:
   # The ynr release that `conformance` runs, without the leading v. The one place it is pinned.
-  YNR_VERSION: 0.2.1
+  YNR_VERSION: 0.2.2
   # The ynh release the full-chain check runs, without the leading v.
   YNH_VERSION: 0.12.0
 jobs:
