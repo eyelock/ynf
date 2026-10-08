@@ -31,8 +31,6 @@ func memoryFor(c *config.Config) (memory.Memory, func(string) string, string, er
 	case enabled != nil:
 		return memory.Ynm{Cwd: cwd}, ns, level, nil
 	}
-	if memory.Detect() == nil {
-		return nil, ns, level, nil
-	}
-	return memory.Ynm{Cwd: cwd}, ns, level, nil
+	m, _ := memory.Detect(cwd)
+	return m, ns, level, nil
 }

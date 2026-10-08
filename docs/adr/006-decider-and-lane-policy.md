@@ -68,6 +68,7 @@ lanes:
         sandbox: srt
         auto_approve: edits              # inside containment only (ADR-007)
         budgets: { max_turns: 20 }       # may only tighten the harness's own
+        telemetry_relay: true            # YNH_TELEMETRY_RELAY=1: the vendor's telemetry, relayed (ADR-011)
         sensor_scope:                    # narrows declared sensors to the item
           lint: 'golangci-lint run ./{label.pkg}/...'
       executor: docker
@@ -95,7 +96,7 @@ Rules branch on ynf's outcome vocabulary (ADR-012), never on a runner's exit cod
 The harness, its profile and its focus say *how*. The harness a lane is held to is the one inside
 the image that runs it, read from that image (ADR-012), never the repository's working copy. A
 lane names a published image, or names a harness folder in the repository that ynf builds into an
-image when nothing is published (ADR-007). Two rules keep the line sharp:
+image when nothing is published (ADR-007). On the host executors the harness is the one ynh installs into the run's own home, whether it is a folder in the checkout or one pinned from git as `<repository>@<tag-or-commit>`, and the lane is held to what was installed, read before the run starts; a harness folder that cannot be read fails the run rather than skipping the check. Two rules keep the line sharp:
 
 - a lane may only **tighten** budgets, never loosen them. ynf compares the lane's budgets with the
   image's harness before the run and refuses a lane that would loosen one; ynh's `budget_sources`
@@ -104,6 +105,18 @@ image when nothing is published (ADR-007). Two rules keep the line sharp:
   `--sensor-overlay` substitutes a command for a declared sensor for one run, and rejects a name
   the harness does not declare. A lane uses it to narrow a sensor to the item's part of the
   repository, so the run is judged on the debt it was asked to pay down rather than everyone's.
+  Because the overlay substitutes, ynf holds the scope to the declared command before the run:
+  both are split into words with shell quoting rules and nothing is evaluated, the scope may hold
+  no shell operator or expansion, and its words must be the declared ones, one for one and in
+  order, except that a path word (`.`, `./...`, a directory) may be replaced by one or more
+  relative paths beneath it, with no `..` and no leading dash. A command with no path word may
+  only have such paths appended. The declared command's leading `NAME=value` assignments belong
+  to the harness author, not the lane: the scope keeps them exactly as declared, the same text
+  with quotes and expansions as written (`GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint"`), and
+  the rest is narrowed under the rule above, where expansions are still refused. A scope that
+  adds, drops, reorders or changes an assignment, a different program, a flag or anything else
+  is refused as `operator_error`, naming the sensor, the declared command, the scope and
+  why; `ynf harness` reports the same, with each placeholder standing for a safe path segment.
   Placeholders come only from structured facts (`{label.<prefix>}` reads the value of a
   `<prefix>:<value>` label) and are validated against `^[A-Za-z0-9._/-]+$` before substitution,
   so ticket text never reaches a shell
@@ -153,6 +166,22 @@ asks for.
 **Every decision records the policy hash**, the SHA-256 of the effective lane's normalised YAML,
 plus both source commits, just as ynh records `harness.sha`. A step's log entry is
 `{event, facts, policy: {hash, config_sha, repo_sha}, decision}`.
+
+**The vendor relay is a lane's setting, in its `ynh` block.** `telemetry_relay: true` sets
+`YNH_TELEMETRY_RELAY=1` for the lane's runs, so `ynh agent run` starts `ynr relay` beside the
+vendor CLI and the vendor's telemetry reaches the run's spool folder (ADR-011). It is policy and
+not a harness's: whether a factory pays for the relay's records is the lane's call, and it is
+reviewed with the rest of the lane. It belongs to the ynh runner, since only the vendor CLIs ynh
+launches export telemetry that needs relaying, so a lane that names the command runner refuses it
+at load. It is in the policy hash like every other setting.
+
+**A lane has an id.** Telemetry names a lane by where it is defined plus its name, host first:
+`github.com/example-org/factory-config#lint-paydown` for a lane in the configuration repository, however
+a target repository overrides it (the override is a variant of the same lane, told apart by the
+harness and focus the run used), and `github.com/eyelock/ynh#docs-refresh` for a lane a target
+repository defines itself. A lane may declare an explicit `id` in `lanes.yaml`, which then is its
+id and stays fixed if the repository that defines it moves. The id is for telemetry and
+conformance; the lane's name stays what rules, labels and `--lane` use.
 
 **CEL sees structure, not prose** (NFR-5). The facts exposed to guards are labels, states,
 counts, identities and check conclusions. Titles, bodies and comments are not in the CEL

@@ -131,6 +131,30 @@ func (s *Store) Put(ctx context.Context, key string, doc []byte, ifVersion strin
 	return aws.ToString(out.ETag), nil
 }
 
+// Delete implements store.Store: S3's conditional delete, If-Match on the ETag that was read. MinIO
+// ignores the header, so the ETag is checked first as well: that makes a stale delete fail there
+// too, though not atomically, as with its conditional writes (see the package comment).
+func (s *Store) Delete(ctx context.Context, key, ifVersion string) error {
+	head, err := s.c.HeadObject(ctx, &s3.HeadObjectInput{Bucket: &s.bucket, Key: aws.String(s.key("docs", key))})
+	if notFound(err) {
+		return store.ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if aws.ToString(head.ETag) != ifVersion {
+		return store.ErrConflict
+	}
+	_, err = s.c.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: &s.bucket, Key: aws.String(s.key("docs", key)), IfMatch: aws.String(ifVersion)})
+	if conflict(err) {
+		return store.ErrConflict
+	}
+	if notFound(err) {
+		return store.ErrNotFound
+	}
+	return err
+}
+
 func (s *Store) list(ctx context.Context, prefix string) ([]string, error) {
 	var keys []string
 	p := s3.NewListObjectsV2Paginator(s.c, &s3.ListObjectsV2Input{Bucket: &s.bucket, Prefix: aws.String(prefix)})

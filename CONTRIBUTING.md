@@ -9,7 +9,12 @@ make install   # into ~/.ynf/bin
 make help      # every target
 ```
 
-`make check` is what CI runs on every pull request. `make e2e` runs the factory against a live
+`make check` is what CI runs on every pull request, in its `check` job. The same workflow's
+`registry` job runs Weaver over the telemetry registry, and its `conformance` job runs `ynr
+conformance` against a pinned ynr release (`make conformance`) and then the full-chain check
+against a pinned ynh release as well (`make fullchain`), each with the tool on your `PATH` (see
+[See ynf in OpenTelemetry](docs/how-to/see-ynf-in-opentelemetry.md#check-ynf-against-ynrs-contract)).
+`make e2e` runs the factory against a live
 sandbox of your own ([Test against the sandbox](docs/how-to/test-against-the-sandbox.md)).
 
 ## Branches and pull requests
@@ -44,3 +49,15 @@ A pull request stacked on another targets that branch. Merge the base first; whe
 squash-merged, replay the stacked branch's own commits onto `develop` before merging it.
 
 Releasing: [Cut a release](docs/how-to/cut-a-release.md).
+
+## Conduct and security
+
+Participation is under the [Code of Conduct](CODE_OF_CONDUCT.md). Report a vulnerability privately,
+as [SECURITY.md](SECURITY.md) describes, not in an issue. Contributions are made under the
+[MIT licence](LICENSE).
+
+CI scans the history for secrets with gitleaks. `.gitleaks.toml` extends the default rules and
+allowlists only `internal/telemetry/telemetry_test.go`, whose fake tokens check that scrubbing works.
+
+The protection on `develop` and `main`, and the one required check "All Clear", are described in
+[.github/BRANCH_PROTECTION.md](.github/BRANCH_PROTECTION.md).

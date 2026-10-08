@@ -60,6 +60,34 @@ func RunWith(t *testing.T, open func(t *testing.T) store.Store, opts Options) {
 		}
 	})
 
+	t.Run("conditional delete", func(t *testing.T) {
+		s := open(t)
+		ctx := context.Background()
+		v1, _ := s.Put(ctx, "k", []byte("a"), "")
+		v2, _ := s.Put(ctx, "k", []byte("b"), v1)
+		if err := s.Delete(ctx, "k", v1); !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("stale delete: want ErrConflict, got %v", err)
+		}
+		if _, _, err := s.Get(ctx, "k"); err != nil {
+			t.Fatalf("a refused delete removed the document: %v", err)
+		}
+		if err := s.Delete(ctx, "k", v2); err != nil {
+			t.Fatalf("delete: %v", err)
+		}
+		if _, _, err := s.Get(ctx, "k"); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("after delete: want ErrNotFound, got %v", err)
+		}
+		if err := s.Delete(ctx, "k", v2); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("second delete: want ErrNotFound, got %v", err)
+		}
+		if keys, _ := s.Keys(ctx, "k"); len(keys) != 0 {
+			t.Fatalf("keys after delete: %v", keys)
+		}
+		if _, err := s.Put(ctx, "k", []byte("again"), ""); err != nil {
+			t.Fatalf("create after delete: %v", err)
+		}
+	})
+
 	t.Run("exactly one racer wins", func(t *testing.T) {
 		if opts.NonAtomicCAS != "" {
 			t.Skip("not verifiable on this backend: " + opts.NonAtomicCAS)

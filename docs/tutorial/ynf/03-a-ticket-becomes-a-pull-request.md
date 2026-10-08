@@ -23,6 +23,9 @@ state   open
 labels  pkg:internal/format
 
 `internal/format` is not `gofmt`-clean.
+
+This ticket has no lane label, so no search finds it: the acceptance test starts it with
+`ynf start`, as a person or an automation would.
 ```
 
 `ynf ticket` reads a ticket exactly as ynf would before taking it on, and changes nothing. Its

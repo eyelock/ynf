@@ -87,9 +87,14 @@
               "type": "string",
               "pattern": "^[A-Za-z0-9._/-]+$"
             },
+            "base": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._/-]+$",
+              "description": "The branch the pull request targets, cut from main by Terraform; main when omitted. A fixture that needs rules of its own gives it a base of its own, so they cannot hold the merges into main."
+            },
             "files": {
               "type": "string",
-              "description": "Directory, relative to sandbox/, whose tree is committed on top of main on the branch."
+              "description": "Directory, relative to sandbox/, whose tree is committed on top of the base branch on the pull request's branch."
             }
           }
         },
@@ -139,13 +144,44 @@
                 }
               }
             },
+            "detail": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Text the last run's detail must contain, such as the reason a run was refused before it started."
+            },
             "start": {
               "type": "boolean",
               "description": "make e2e starts this fixture with ynf start --lane <lane> instead of letting a search find it."
             },
+            "runner": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name"
+              ],
+              "description": "The runner the item's last run record names, and whether it was detected because the lane named none. make e2e hides ynh from ynf, so a lane with no runner falls back to its command.",
+              "properties": {
+                "name": {
+                  "enum": [
+                    "ynh",
+                    "command"
+                  ]
+                },
+                "detected": {
+                  "type": "boolean"
+                }
+              }
+            },
             "crash": {
               "type": "boolean",
               "description": "make e2e kills ynf (SIGKILL) as this fixture's run starts, starts a fresh ynf, and checks the item was restarted."
+            },
+            "memory": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Text each of the item's failure memories must contain: what the run reported, such as its exit code and message (ADR-008)."
             },
             "signatures": {
               "type": "array",
@@ -192,7 +228,7 @@
       }
     },
     "calibrate": {
-      "description": "What `make calibrate` checks: the fixture, not the factory. One of three forms: sensors (the lane's scoped sensors before and after a known fix), command (a command-runner lane's diff is non-empty and identical across runs), or disabled (the lane is switched off).",
+      "description": "What `make calibrate` checks: the fixture, not the factory. One of five forms: sensors (the lane's scoped sensors before and after a known fix), command (a command-runner lane's diff is non-empty and identical across runs), disabled (the lane is switched off), refused (the lane's scope is not one ynf allows, so it never runs), or skip (a reason: the fixture has no fixed state to calibrate, so calibrate reports it as skipped and says why).",
       "oneOf": [
         {
           "type": "object",
@@ -300,11 +336,37 @@
               "const": true
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "refused"
+          ],
+          "properties": {
+            "refused": {
+              "const": true
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "skip"
+          ],
+          "properties": {
+            "skip": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
         }
       ]
     },
     "state": {
       "enum": [
+        "proposed",
         "in_review",
         "escalated",
         "quarantined",

@@ -59,5 +59,14 @@ make agent-image                                   # once, and after ynh changes
 ANTHROPIC_API_KEY=... make e2e-only LANES=lint-paydown,doc-drift
 ```
 
+With the `gofmt` lane, `make e2e` ends with [shadow mode](measure-a-lane-with-shadow-mode.md): e2e
+merges a human fix for the `fmt-format` issue into the sandbox's `main`, which closes it, then runs
+`ynf shadow run gofmt` on it, grades the attempt with the scripted form, reads the report, and checks
+that nothing outward changed (the issue's comments and labels, the pull requests, the branches, ynf's
+items and its stats). It waits for the sandbox's required checks on the human fix, so it adds a few
+minutes. `make e2e SHADOW=false` leaves it out. `make e2e-only` leaves it out by default, because the
+first run leaves `fmt-format` fixed and closed and a second could not repeat it; `make e2e-only
+SHADOW=true` adds it to a sandbox just reset.
+
 Running `e2e-only` twice against the same sandbox is safe: ynf finds the pull request it already
 opened and reuses it.

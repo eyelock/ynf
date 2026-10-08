@@ -7,20 +7,22 @@ without a human is done.
 
 - Go 1.26, git, and Docker running: unattended lanes run in a container (ADR-007).
 - A GitHub token that can read the repository and push branches to it: `GITHUB_TOKEN`, or a
-  `gh auth login` session, which ynf falls back to.
+  `gh auth login` session, which ynf falls back to. A classic token needs the `repo` scope; the
+  [token scopes](../reference/configuration.md#token-scopes) say what else, and when.
+- CI on the repository. An item reaches `in_review` only when its pull request's checks pass, so a
+  repository with no workflows and no required checks leaves it `proposed`, and ynf escalates it
+  after 30 minutes (`no_ci_after`). `ynf doctor` warns of such a repository.
 - A repository with `.agents/factory/lanes.yaml` on its default branch. The sandbox has one
   ([Test the factory against the sandbox](test-against-the-sandbox.md)).
 
 ## Install
 
 ```bash
-export HOMEBREW_GITHUB_API_TOKEN="$(gh auth token)"   # the repository is private for now
 brew install eyelock/tap/ynf
 ```
 
 The formula installs `ynf`, and keeps the static linux builds the docker executor runs as its
-egress proxy in its `libexec`, off your PATH. The token is only needed while ynf's repository is
-private: its release downloads need one, and the formula sends it.
+egress proxy in its `libexec`, off your PATH.
 
 Or build from source:
 

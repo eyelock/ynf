@@ -51,6 +51,26 @@ type Forge interface {
 	File(ctx context.Context, repo, ref, path string) ([]byte, error)
 }
 
+// ErrNoFix means a closed ticket was not closed by a merged pull request: it was closed by hand,
+// by a commit with no pull request, or by a pull request that was not merged.
+var ErrNoFix = errors.New("forge: no merged pull request closed it")
+
+// ErrRebased means a merged pull request was rebase merged, so its merge commit is only the last of
+// its commits and the commit before the change cannot be taken from it.
+var ErrRebased = errors.New("forge: rebase-merged; base unknown")
+
+// Fix is the merged pull request that closed a ticket (shadow mode).
+type Fix struct {
+	PR       int
+	MergeSHA string // the commit the merge made on the base branch
+}
+
+// Fixes is what a forge that records what closed an issue offers: the merged pull request whose
+// merge closed it, or ErrNoFix. Shadow mode reads it to find the answer a ticket's history holds.
+type Fixes interface {
+	FixFor(ctx context.Context, repo string, number int) (Fix, error)
+}
+
 // Issues is what a forge that also tracks issues offers, keyed by repository and number.
 type Issues interface {
 	Ticket(ctx context.Context, repo string, number int) (facts.Ticket, Text, error)
@@ -105,4 +125,15 @@ func ParseIssueKey(key string) (repo string, number int, err error) {
 		}
 	}
 	return "", 0, fmt.Errorf("%q is not an issue key (owner/name#number)", key)
+}
+
+// WorkflowReader is what a forge offers that can say whether a branch has CI workflow files.
+type WorkflowReader interface {
+	// Workflows counts the workflow files at ref; a repository with none has zero, not an error.
+	Workflows(ctx context.Context, repo, ref string) (int, error)
+}
+
+// RequiredReader is what a forge offers that can say which checks a branch requires.
+type RequiredReader interface {
+	RequiredChecks(ctx context.Context, repo, branch string) Required
 }

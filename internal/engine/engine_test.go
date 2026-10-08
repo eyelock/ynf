@@ -157,6 +157,7 @@ type fakeForge struct {
 	lanes        string
 	nextPR       int
 	files        map[string][]byte // repo:path, overriding lanes
+	fixes        map[int]forge.Fix // issue -> the merged pull request that closed it (shadow mode)
 }
 
 func newForge() *fakeForge {
@@ -650,6 +651,7 @@ case " $* " in *" --focus "*" --task "*|*" --task "*" --focus "*)
 esac
 echo "$*" >> "` + calls + `"
 echo "key=${ANTHROPIC_API_KEY}" >> "` + calls + `"
+echo "home=${YNH_HOME}" >> "` + calls + `"
 while [ $# -gt 0 ]; do [ "$1" = --task ] && cat "${2#@}" >> "` + calls + `"; shift; done
 gofmt -w ./internal/format
 echo '{"exit_code":0,"reason":"converged","session_id":"S-ynh-7","backend":"claude","model":"opus"}'
@@ -686,6 +688,192 @@ func TestYnhRunnerOnTheHost(t *testing.T) {
 		if !strings.Contains(msg, want) {
 			t.Errorf("commit lacks %q:\n%s", want, msg)
 		}
+	}
+}
+
+// installs records what InstallHarness was asked, standing in for `ynh install` into the run's home.
+type installs struct {
+	dirs, homes []string
+	pins        []policy.Pin
+	result      runner.Installed // what a pin installs; the id is local/installed unless it says
+	err         error
+}
+
+func (in *installs) install(_ context.Context, src runner.HarnessSource, home string) (runner.Installed, error) {
+	in.homes = append(in.homes, home)
+	if src.Pin != nil {
+		in.pins = append(in.pins, *src.Pin)
+	} else {
+		in.dirs = append(in.dirs, src.Dir)
+	}
+	if in.err != nil {
+		return runner.Installed{}, in.err
+	}
+	out := in.result
+	if out.ID == "" {
+		out.ID = "local/installed"
+	}
+	return out, nil
+}
+
+// TestHarnessFolderOnTheHostIsInstalledForTheRun: ynh agent run takes a harness id, so a lane whose
+// harness is a folder is installed into a ynh home of the run's own, never the operator's, and runs
+// by the id it gets.
+func TestHarnessFolderOnTheHostIsInstalledForTheRun(t *testing.T) {
+	operator := t.TempDir()
+	t.Setenv("YNH_HOME", operator)
+	h := newHarness(t)
+	calls := fakeYnh(t)
+	in := &installs{}
+	h.e.InstallHarness = in.install
+	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "sk-test"}[k] }
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	it := h.item(t, 1)
+	if it.State != item.Proposed {
+		t.Fatalf("%s %s", it.State, it.Reason)
+	}
+	if len(in.dirs) != 1 || filepath.Base(in.dirs[0]) != "wt" {
+		t.Fatalf("the checkout's harness should be installed once: %v", in.dirs)
+	}
+	home := in.homes[0]
+	if strings.HasPrefix(home, operator) || filepath.Base(home) != "ynh" || filepath.Base(filepath.Dir(home)) != "run" {
+		t.Errorf("the harness was installed into %s, not a home of the run's own (operator's %s)", home, operator)
+	}
+	b, _ := os.ReadFile(calls)
+	if !strings.Contains(string(b), "agent run --harness local/installed --task @") || !strings.Contains(string(b), "home="+home+"\n") {
+		t.Errorf("ynh should run the installed id with the run's home:\n%s", b)
+	}
+	if es, _ := os.ReadDir(operator); len(es) != 0 {
+		t.Errorf("the operator's ynh home was written to: %v", es)
+	}
+}
+
+func callsOf(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// TestHarnessFolderGoesToYnhByPathWhenItCan: a ynh that lists agent-run-harness-path is given the
+// folder, so nothing is installed; it still gets a home of the run's own, which is where it keeps
+// the includes it fetches, and the operator's is never touched.
+func TestHarnessFolderGoesToYnhByPathWhenItCan(t *testing.T) {
+	operator := t.TempDir()
+	t.Setenv("YNH_HOME", operator)
+	h := newHarness(t)
+	calls := fakeYnh(t)
+	in := &installs{}
+	h.e.InstallHarness = in.install
+	h.e.DetectYnh = func(context.Context) runner.Detection {
+		return runner.Detection{Found: true, Version: "0.12.0", Capabilities: "0.9.0", Features: []string{runner.FeatureHarnessPath}}
+	}
+	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "sk-test"}[k] }
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Proposed {
+		t.Fatalf("%s %s", it.State, it.Reason)
+	}
+	if len(in.dirs) != 0 || len(in.pins) != 0 {
+		t.Fatalf("nothing should be installed: %v %v", in.dirs, in.pins)
+	}
+	b := string(callsOf(t, calls))
+	if !strings.Contains(b, "agent run --harness "+string(filepath.Separator)) || !strings.Contains(b, string(filepath.Separator)+"wt --task @") {
+		t.Errorf("ynh should be given the checkout's harness folder by path:\n%s", b)
+	}
+	if !strings.Contains(b, string(filepath.Separator)+"run"+string(filepath.Separator)) || !strings.Contains(b, "ynh\n") {
+		t.Errorf("ynh should run with a home under the run folder:\n%s", b)
+	}
+	if es, _ := os.ReadDir(operator); len(es) != 0 {
+		t.Errorf("the operator's ynh home was written to: %v", es)
+	}
+	rec := runOf(t, h, "1")
+	if rec.RunnerVersion != "0.12.0" || len(rec.RunnerFeatures) != 1 || rec.RunnerFeatures[0] != runner.FeatureHarnessPath {
+		t.Errorf("the run record should say the ynh version and its features: %+v", rec)
+	}
+}
+
+// TestHarnessFolderIsInstalledWhenYnhLacksThePathFeature: a ynh that lists other features, but not
+// agent-run-harness-path, still gets the install step.
+func TestHarnessFolderIsInstalledWhenYnhLacksThePathFeature(t *testing.T) {
+	t.Setenv("YNH_HOME", t.TempDir())
+	h := newHarness(t)
+	calls := fakeYnh(t)
+	in := &installs{}
+	h.e.InstallHarness = in.install
+	h.e.DetectYnh = func(context.Context) runner.Detection {
+		return runner.Detection{Found: true, Version: "0.12.0", Capabilities: "0.9.0", Features: []string{runner.FeatureFetchesIncludes}}
+	}
+	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "sk-test"}[k] }
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Proposed || len(in.dirs) != 1 {
+		t.Fatalf("%s %s installed %v", it.State, it.Reason, in.dirs)
+	}
+	if b := callsOf(t, calls); !strings.Contains(string(b), "agent run --harness local/installed") {
+		t.Errorf("the installed id should run:\n%s", b)
+	}
+}
+
+// TestNamedHarnessOnTheHostIsNotInstalled: a harness id is the operator's installed harness, run
+// as it is, in the operator's own ynh home.
+func TestNamedHarnessOnTheHostIsNotInstalled(t *testing.T) {
+	t.Setenv("YNH_HOME", "")
+	h := newHarness(t)
+	calls := fakeYnh(t)
+	in := &installs{}
+	h.e.InstallHarness = in.install
+	h.f.lanes = strings.Replace(lanesYAML, `      ynh: {harness: ".", focus: tidy}`, `      ynh: {harness: "local/named"}`, 1)
+	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "sk-test"}[k] }
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Proposed {
+		t.Fatalf("%s %s", it.State, it.Reason)
+	}
+	b, _ := os.ReadFile(calls)
+	if len(in.dirs) != 0 || !strings.Contains(string(b), "agent run --harness local/named --task @") || !strings.Contains(string(b), "home=\n") {
+		t.Errorf("a named harness should run as it is: installed %v\n%s", in.dirs, b)
+	}
+}
+
+// TestInlineRunsTheRepositorysHarnessWhenNoneIsInstalled: where the image has no harness installed
+// and the lane names the one the repository carries, the inline run installs it for the run.
+func TestInlineRunsTheRepositorysHarnessWhenNoneIsInstalled(t *testing.T) {
+	if _, err := user.Lookup("nobody"); err != nil {
+		t.Skip("no nobody user here")
+	}
+	h := newHarness(t)
+	calls := fakeYnh(t)
+	in := &installs{}
+	h.e.InstallHarness = in.install
+	h.e.Interactive = false
+	h.e.Executor = func(string) (executor.Executor, error) {
+		return executor.Inline{User: "nobody",
+			Chown:      func(string, int, int) error { return nil },
+			Credential: func(*exec.Cmd, uint32, uint32) {}}, nil
+	}
+	h.e.ImageHarness = func(context.Context, string, string) (runner.Harness, error) {
+		return runner.Harness{}, errors.New("no harness is installed")
+	}
+	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "k"}[k] }
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(calls)
+	if it := h.item(t, 1); it.State != item.Proposed || len(in.dirs) != 1 || !strings.Contains(string(b), "agent run --harness local/installed") || !strings.Contains(string(b), "home="+in.homes[0]) {
+		t.Fatalf("%s installed %v\n%s", it.State, in.dirs, b)
 	}
 }
 
@@ -932,7 +1120,7 @@ func TestQueueDivergenceHoldsNewWork(t *testing.T) {
 	if err := h.e.Sweep(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if it := h.item(t, 2); it.State != item.Ready || !strings.Contains(it.Reason, "eligible") {
+	if it := h.item(t, 2); it.State != item.Ready || !strings.Contains(it.Reason, "1 proposals awaiting review (max 1)") {
 		t.Fatalf("the second item should wait while one proposal is open: %s %s", it.State, it.Reason)
 	}
 	log, _ := h.e.Store.Log(ctx, item.IssueKey("github.com", "o/r", 2))
@@ -1031,7 +1219,7 @@ func TestMemoryIsWrittenNotRelayed(t *testing.T) {
 	f := failures[0]
 	if f.Subject != "sig/ci-diverges/lint" || f.Type != "episodic" || f.Level != "distributed" || f.Namespace != "factory/github.com/o/r" ||
 		!slices.Contains(f.Tags, "ynf.failure.v1") || !slices.Contains(f.Tags, "failure") || !slices.Contains(f.Tags, "occurrence") ||
-		!strings.Contains(f.Content, "occurrence 1") || !strings.Contains(f.Content, "run `") || f.Data["step"] == "" {
+		!strings.Contains(f.Content, "Occurrence 1") || !strings.Contains(f.Content, "failing checks: lint") || f.Data["failed_checks"] == nil || !strings.Contains(f.Content, "run `") || !strings.HasSuffix(f.Content, ".") || f.Data["step"] == "" {
 		t.Fatalf("failure memory: %+v", f)
 	}
 	entries, _ := h.e.Store.Log(ctx, item.IssueKey("github.com", "o/r", 1))
@@ -1045,6 +1233,41 @@ func TestMemoryIsWrittenNotRelayed(t *testing.T) {
 		if err != nil || strings.Contains(string(b), "remembers") {
 			t.Fatalf("memory reached the task: %s %v", b, err)
 		}
+	}
+}
+
+// TestMemoryWritesQueueWhileYnmIsDownAndArriveAfter: a failure written while ynm is down is queued
+// in ynf's store, the step goes on, and the next sweep sends it once ynm is back (ADR-008).
+func TestMemoryWritesQueueWhileYnmIsDownAndArriveAfter(t *testing.T) {
+	h := newHarness(t)
+	mem := &fakeMemory{fail: true}
+	h.e.Memory = mem
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:fmt", "pkg:internal/format"}
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.f.setChecks(101, "failure")
+	h.advance(time.Minute)
+	if _, err := h.e.RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Escalated {
+		t.Fatalf("a down ynm must not stop the step: %s %s", it.State, it.Reason)
+	}
+	n, since, err := h.e.MemoryQueued(ctx)
+	if err != nil || n != 1 || since.IsZero() || len(mem.records) != 0 {
+		t.Fatalf("queued %d since %v (%v), sent %d", n, since, err, len(mem.records))
+	}
+
+	mem.mu.Lock()
+	mem.fail = false
+	mem.mu.Unlock()
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n, _, _ := h.e.MemoryQueued(ctx); n != 0 || len(mem.records) != 1 || mem.records[0].Subject != "sig/ci-diverges/lint" {
+		t.Fatalf("after ynm came back: %d queued, sent %+v", n, mem.records)
 	}
 }
 
@@ -1112,7 +1335,7 @@ func TestRunFinishedCarriesWhatTheRunnerReported(t *testing.T) {
 	h.e.MemoryLevel = "distributed"
 	dir := t.TempDir()
 	script := `#!/bin/sh
-echo '{"exit_code":10,"reason":"turn cap reached","backend":"claude","bound_by":"turns","harness":{"name":"Tidy","version":"1.0.0"},"sensors":[{"name":"Unit Tests","status":"fail"},{"name":"lint","status":"pass"}]}'
+echo '{"exit_code":10,"reason":"turn cap reached; token=sekrit-value-9","backend":"claude","bound_by":"turns","harness":{"name":"Tidy","version":"1.0.0"},"sensors":[{"name":"Unit Tests","status":"fail"},{"name":"lint","status":"pass"}]}'
 exit 10
 `
 	if err := os.WriteFile(filepath.Join(dir, "ynh"), []byte(script), 0o755); err != nil {
@@ -1152,6 +1375,21 @@ exit 10
 	slices.Sort(subjects)
 	if want := []string{"sig/budget/turns/harness:tidy@1.0.0", "sig/stuck/sensor:unit-tests"}; !slices.Equal(subjects, want) {
 		t.Fatalf("memory subjects %v, want %v", subjects, want)
+	}
+	// Each failure memory says what the run reported, scrubbed (ADR-008).
+	for _, r := range mem.records {
+		for _, want := range []string{"the run ended", ", exit 10", "bound by the turns cap", "failing sensors: Unit Tests", "harness Tidy@1.0.0", "turn cap reached"} {
+			if !strings.Contains(r.Content, want) {
+				t.Errorf("%s: content lacks %q: %s", r.Subject, want, r.Content)
+			}
+		}
+		if strings.Contains(r.Content, "sekrit-value-9") || strings.Contains(fmt.Sprint(r.Data), "sekrit-value-9") {
+			t.Errorf("%s: a planted secret reached memory: %s %v", r.Subject, r.Content, r.Data)
+		}
+		if r.Data["exit"] != 10 || r.Data["bound_by"] != "turns" || r.Data["harness"] != "Tidy" || r.Data["harness_version"] != "1.0.0" ||
+			!slices.Equal(r.Data["failed_sensors"].([]string), []string{"Unit Tests"}) || !strings.Contains(r.Data["excerpt"].(string), "turn cap reached") {
+			t.Errorf("%s: data %v", r.Subject, r.Data)
+		}
 	}
 }
 
@@ -1494,7 +1732,7 @@ func TestStartRefusesBeforeCreatingAnything(t *testing.T) {
 		{engine.StartRequest{Ref: gh, Repo: "o/other", Lane: "agent"}, "is an issue in o/r, not o/other"},
 		{engine.StartRequest{Prompt: "p", Lane: "agent"}, "say which repository"},
 		{engine.StartRequest{Prompt: "p", Repo: "x/y", Lane: "agent"}, "github.com/x/y is not an enrolled repository"},
-		{engine.StartRequest{Ref: tracker.Ref{Host: "acme.atlassian.net", Key: "PLAT-1"}, Repo: "o/r", Lane: "agent"}, "no tracker is configured for acme.atlassian.net"},
+		{engine.StartRequest{Ref: tracker.Ref{Host: "example.atlassian.net", Key: "PLAT-1"}, Repo: "o/r", Lane: "agent"}, "no tracker is configured for example.atlassian.net"},
 		{engine.StartRequest{Ref: tracker.Ref{Host: "github.com", Key: "o/r#404"}, Lane: "agent"}, "github.com/o/r#404 cannot be read"},
 		{engine.StartRequest{Ref: gh}, "lanes that take tickets; name one with --lane"},
 		{engine.StartRequest{Ref: gh, Lane: "nope"}, "has no lane nope"},
@@ -1615,9 +1853,9 @@ func TestAConfigurationRepositoryEnrolsAndGivesDefaults(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	h.e.Repos = nil
-	h.e.ConfigRepo = "acme/factory"
-	h.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r, github.com/o/plain]\n"))
-	h.f.setFile("acme/factory", ".agents/factory/lanes.yaml", []byte(`version: 1
+	h.e.ConfigRepo = "example-org/factory"
+	h.f.setFile("example-org/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r, github.com/o/plain]\n"))
+	h.f.setFile("example-org/factory", ".agents/factory/lanes.yaml", []byte(`version: 1
 lanes:
   agent:
     kind: originate
@@ -1655,7 +1893,7 @@ lanes:
 		t.Fatal(err)
 	}
 	entries, _ := h.e.Store.Log(ctx, "item/github.com/o/r/issues/1")
-	if !strings.Contains(string(entries[0].Body), `"sha":"c0ffee","config":"acme/factory","config_sha":"c0ffee"`) {
+	if !strings.Contains(string(entries[0].Body), `"sha":"c0ffee","config":"example-org/factory","config_sha":"c0ffee"`) {
 		t.Fatalf("the decision should record both commits: %s", entries[0].Body)
 	}
 	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "github.com", Key: "x/y#1"}, Lane: "agent"}); err == nil || !strings.Contains(err.Error(), "not an enrolled repository") {
@@ -1663,28 +1901,28 @@ lanes:
 	}
 
 	bad := newHarness(t)
-	bad.e.ConfigRepo = "acme/factory"
-	bad.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [ghe.acme.internal/o/r]\n"))
-	if _, err := bad.e.Enrolled(ctx); err == nil || !strings.Contains(err.Error(), "ghe.acme.internal, which is not a configured forge") {
+	bad.e.ConfigRepo = "example-org/factory"
+	bad.f.setFile("example-org/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [ghe.example.internal/o/r]\n"))
+	if _, err := bad.e.Enrolled(ctx); err == nil || !strings.Contains(err.Error(), "ghe.example.internal, which is not a configured forge") {
 		t.Fatalf("another forge: %v", err)
 	}
 	missing := newHarness(t)
-	missing.e.ConfigRepo = "acme/factory"
-	missing.f.setFile("acme/factory", ".agents/factory/factory.yaml", nil)
-	missing.f.setFile("acme/factory", ".agents/factory/lanes.yaml", nil)
+	missing.e.ConfigRepo = "example-org/factory"
+	missing.f.setFile("example-org/factory", ".agents/factory/factory.yaml", nil)
+	missing.f.setFile("example-org/factory", ".agents/factory/lanes.yaml", nil)
 	if err := missing.e.Sweep(ctx); err == nil || !strings.Contains(err.Error(), "has no factory.yaml") {
 		t.Fatalf("no factory.yaml: %v", err)
 	}
 	invalid := newHarness(t)
-	invalid.e.ConfigRepo = "acme/factory"
-	invalid.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\n"))
+	invalid.e.ConfigRepo = "example-org/factory"
+	invalid.f.setFile("example-org/factory", ".agents/factory/factory.yaml", []byte("version: 1\n"))
 	if _, err := invalid.e.Enrolled(ctx); err == nil || !strings.Contains(err.Error(), "repos") {
 		t.Fatalf("a factory.yaml without repos: %v", err)
 	}
 	none := newHarness(t)
-	none.e.ConfigRepo = "acme/factory"
-	none.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\n"))
-	none.f.setFile("acme/factory", ".agents/factory/lanes.yaml", nil)
+	none.e.ConfigRepo = "example-org/factory"
+	none.f.setFile("example-org/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\n"))
+	none.f.setFile("example-org/factory", ".agents/factory/lanes.yaml", nil)
 	none.f.setFile("o/r", ".agents/factory/lanes.yaml", nil)
 	if _, err := none.e.Policy(ctx, "o/r"); err == nil || !strings.Contains(err.Error(), "no configuration repository gives it lanes") {
 		t.Fatalf("no lanes anywhere: %v", err)
@@ -1700,55 +1938,55 @@ func TestASecondForge(t *testing.T) {
 	ghe := newForge()
 	ghe.labels[1] = []string{"ynf:agent"}
 	h.e.Repos = nil
-	h.e.ConfigRepo = "acme/factory"
-	h.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r, ghe.acme.internal/acme/x]\nforges:\n  ghe: {provider: github, url: https://ghe.acme.internal, token_env: GHE_TOKEN}\n"))
-	h.f.setFile("acme/factory", ".agents/factory/lanes.yaml", nil)
+	h.e.ConfigRepo = "example-org/factory"
+	h.f.setFile("example-org/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r, ghe.example.internal/example-org/x]\nforges:\n  ghe: {provider: github, url: https://ghe.example.internal, token_env: GHE_TOKEN}\n"))
+	h.f.setFile("example-org/factory", ".agents/factory/lanes.yaml", nil)
 	gheGit := workspace.Workspace{Root: filepath.Join(h.e.WorkDir), RemoteURL: func(string) string { return h.remote }}
 	var asked map[string]any
 	h.e.NewForge = func(name string, cfg map[string]any) (engine.ForgeInstance, error) {
 		asked = cfg
-		return engine.ForgeInstance{Host: "ghe.acme.internal", Forge: ghe, Git: gheGit, Tracker: forge.IssueTracker(ghe)}, nil
+		return engine.ForgeInstance{Host: "ghe.example.internal", Forge: ghe, Git: gheGit, Tracker: forge.IssueTracker(ghe)}, nil
 	}
 	enrolled, err := h.e.Enrolled(ctx)
-	if err != nil || strings.Join(enrolled, ",") != "o/r,ghe.acme.internal/acme/x" || asked["token_env"] != "GHE_TOKEN" {
+	if err != nil || strings.Join(enrolled, ",") != "o/r,ghe.example.internal/example-org/x" || asked["token_env"] != "GHE_TOKEN" {
 		t.Fatalf("%v %v %v", enrolled, err, asked)
 	}
-	it, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "ghe.acme.internal", Key: "acme/x#1"}, Lane: "agent"})
-	if err != nil || it.State != item.Proposed || it.Key != "item/ghe.acme.internal/acme/x/issues/1" || it.Forge != "ghe.acme.internal" || it.Repo != "acme/x" {
+	it, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "ghe.example.internal", Key: "example-org/x#1"}, Lane: "agent"})
+	if err != nil || it.State != item.Proposed || it.Key != "item/ghe.example.internal/example-org/x/issues/1" || it.Forge != "ghe.example.internal" || it.Repo != "example-org/x" {
 		t.Fatalf("%+v %v", it, err)
 	}
 	if len(ghe.opened) != 1 || len(h.f.opened) != 0 {
 		t.Fatalf("the pull request belongs on the second forge: there %d, default %d", len(ghe.opened), len(h.f.opened))
 	}
-	if _, err := os.Stat(filepath.Join(h.e.WorkDir, "repos", "ghe.acme.internal", "acme", "x")); err != nil {
+	if _, err := os.Stat(filepath.Join(h.e.WorkDir, "repos", "ghe.example.internal", "example-org", "x")); err != nil {
 		t.Fatalf("the second forge's mirror should be under its host: %v", err)
 	}
 	if strings.Join(ghe.labels[1], ",") != "ynf:proposed" {
 		t.Fatalf("labels go on the second forge's issue: %v", ghe.labels[1])
 	}
-	body := []byte(`{"repository":{"full_name":"acme/x","html_url":"https://ghe.acme.internal/acme/x"},"issue":{"number":1}}`)
+	body := []byte(`{"repository":{"full_name":"example-org/x","html_url":"https://ghe.example.internal/example-org/x"},"issue":{"number":1}}`)
 	touched, err := h.e.HandleGitHubEvent(ctx, "issues", body)
-	if err != nil || touched.Host != "ghe.acme.internal" {
+	if err != nil || touched.Host != "ghe.example.internal" {
 		t.Fatalf("a webhook from the second forge: %+v %v", touched, err)
 	}
-	stranger := []byte(`{"repository":{"full_name":"acme/x","html_url":"https://elsewhere.example/acme/x"},"issue":{"number":1}}`)
+	stranger := []byte(`{"repository":{"full_name":"example-org/x","html_url":"https://elsewhere.example/example-org/x"},"issue":{"number":1}}`)
 	if _, err := h.e.HandleGitHubEvent(ctx, "issues", stranger); err == nil || !strings.Contains(err.Error(), "not a configured forge") {
 		t.Fatalf("a webhook from an unknown forge: %v", err)
 	}
-	if _, err := h.e.Start(ctx, engine.StartRequest{Prompt: "p", Repo: "ghe.acme.internal/acme/x", Lane: "agent"}); err != nil {
+	if _, err := h.e.Start(ctx, engine.StartRequest{Prompt: "p", Repo: "ghe.example.internal/example-org/x", Lane: "agent"}); err != nil {
 		t.Fatalf("a prompt for the second forge's repository: %v", err)
 	}
-	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "ghe.acme.internal", Key: "acme/x#1"}, Repo: "o/r", Lane: "agent"}); err == nil || !strings.Contains(err.Error(), "is an issue in ghe.acme.internal/acme/x") {
+	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "ghe.example.internal", Key: "example-org/x#1"}, Repo: "o/r", Lane: "agent"}); err == nil || !strings.Contains(err.Error(), "is an issue in ghe.example.internal/example-org/x") {
 		t.Fatalf("a forge's issue sent elsewhere: %v", err)
 	}
 	stats, err := h.e.Stats(ctx)
-	if err != nil || !slices.ContainsFunc(stats, func(s engine.Stats) bool { return s.Repo == "ghe.acme.internal/acme/x" && s.Proposed == 2 }) {
+	if err != nil || !slices.ContainsFunc(stats, func(s engine.Stats) bool { return s.Repo == "ghe.example.internal/example-org/x" && s.Proposed == 2 }) {
 		t.Fatalf("stats name the second forge's repository: %+v %v", stats, err)
 	}
 
 	broken := newHarness(t)
-	broken.e.ConfigRepo = "acme/factory"
-	broken.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\nforges:\n  ghe: {provider: github, url: https://ghe.acme.internal, token_env: GHE_TOKEN}\n"))
+	broken.e.ConfigRepo = "example-org/factory"
+	broken.f.setFile("example-org/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\nforges:\n  ghe: {provider: github, url: https://ghe.example.internal, token_env: GHE_TOKEN}\n"))
 	if _, err := broken.e.Enrolled(ctx); err == nil || !strings.Contains(err.Error(), "cannot add forges") {
 		t.Fatalf("no way to add forges: %v", err)
 	}
@@ -1806,27 +2044,27 @@ func TestATicketFromATrackerThatIsNotAForge(t *testing.T) {
 		"PLAT-3": {Key: "PLAT-3", State: "open", Repo: "github.com/o/r"},
 	}}
 	h.e.Repos = nil
-	h.e.ConfigRepo = "acme/factory"
-	h.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\ntrackers:\n  jira:\n    provider: mcp\n    site: https://acme.atlassian.net\n    server: {command: [jira-mcp]}\n    get: {tool: get}\n    comment: {tool: comment}\n    label: {tool: label}\n    fields: {title: result.t, labels: result.l, status: result.s}\n"))
-	h.f.setFile("acme/factory", ".agents/factory/lanes.yaml", nil)
+	h.e.ConfigRepo = "example-org/factory"
+	h.f.setFile("example-org/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\ntrackers:\n  jira:\n    provider: mcp\n    site: https://example.atlassian.net\n    server: {command: [jira-mcp]}\n    get: {tool: get}\n    comment: {tool: comment}\n    label: {tool: label}\n    fields: {title: result.t, labels: result.l, status: result.s}\n"))
+	h.f.setFile("example-org/factory", ".agents/factory/lanes.yaml", nil)
 	h.e.NewTracker = func(name string, cfg map[string]any) (string, tracker.Tracker, error) {
-		return "acme.atlassian.net", jira, nil
+		return "example.atlassian.net", jira, nil
 	}
-	if host, err := h.e.TrackerHost(ctx, "jira"); err != nil || host != "acme.atlassian.net" {
+	if host, err := h.e.TrackerHost(ctx, "jira"); err != nil || host != "example.atlassian.net" {
 		t.Fatalf("%q %v", host, err)
 	}
 	if _, err := h.e.TrackerHost(ctx, "linear"); err == nil {
 		t.Fatal("an unconfigured tracker name")
 	}
-	ref := tracker.Ref{Host: "acme.atlassian.net", Key: "PLAT-1"}
+	ref := tracker.Ref{Host: "example.atlassian.net", Key: "PLAT-1"}
 	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: ref, Lane: "agent"}); err == nil || !strings.Contains(err.Error(), "say which repository") {
 		t.Fatalf("a JIRA ticket needs --repo: %v", err)
 	}
 	it, err := h.e.Start(ctx, engine.StartRequest{Ref: ref, Repo: "o/r", Lane: "agent"})
-	if err != nil || it.State != item.Proposed || it.Key != "item/acme.atlassian.net/PLAT-1" || it.Branch != "ynf/plat-1" {
+	if err != nil || it.State != item.Proposed || it.Key != "item/example.atlassian.net/PLAT-1" || it.Branch != "ynf/plat-1" {
 		t.Fatalf("%+v %v", it, err)
 	}
-	if body := h.f.opened[0].Body; !strings.HasPrefix(body, "For acme.atlassian.net/PLAT-1.") {
+	if body := h.f.opened[0].Body; !strings.HasPrefix(body, "For example.atlassian.net/PLAT-1.") {
 		t.Fatal(body)
 	}
 	if !slices.ContainsFunc(jira.comments, func(c string) bool { return strings.Contains(c, "proposed https://github.com/o/r/pull/") }) {
@@ -1835,16 +2073,16 @@ func TestATicketFromATrackerThatIsNotAForge(t *testing.T) {
 	if got := strings.Join(jira.tickets["PLAT-1"].Labels, ","); got != "ynf:proposed" {
 		t.Fatalf("labels on the ticket: %s", got)
 	}
-	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "acme.atlassian.net", Key: "PLAT-2"}, Repo: "o/r", Lane: "agent"}); err == nil || !strings.Contains(err.Error(), "says its code goes to github.com/o/elsewhere, not o/r") {
+	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "example.atlassian.net", Key: "PLAT-2"}, Repo: "o/r", Lane: "agent"}); err == nil || !strings.Contains(err.Error(), "says its code goes to github.com/o/elsewhere, not o/r") {
 		t.Fatalf("a ticket that names another repository: %v", err)
 	}
-	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "acme.atlassian.net", Key: "PLAT-3"}, Repo: "o/r", Lane: "agent"}); err != nil {
+	if _, err := h.e.Start(ctx, engine.StartRequest{Ref: tracker.Ref{Host: "example.atlassian.net", Key: "PLAT-3"}, Repo: "o/r", Lane: "agent"}); err != nil {
 		t.Fatalf("a ticket that agrees: %v", err)
 	}
 
 	bad := newHarness(t)
-	bad.e.ConfigRepo = "acme/factory"
-	bad.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\ntrackers:\n  jira:\n    provider: mcp\n    site: https://acme.atlassian.net\n    server: {command: [jira-mcp]}\n    get: {tool: get}\n    comment: {tool: comment}\n    label: {tool: label}\n    fields: {title: result.t, labels: result.l, status: result.s}\n"))
+	bad.e.ConfigRepo = "example-org/factory"
+	bad.f.setFile("example-org/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\ntrackers:\n  jira:\n    provider: mcp\n    site: https://example.atlassian.net\n    server: {command: [jira-mcp]}\n    get: {tool: get}\n    comment: {tool: comment}\n    label: {tool: label}\n    fields: {title: result.t, labels: result.l, status: result.s}\n"))
 	if _, err := bad.e.Enrolled(ctx); err == nil || !strings.Contains(err.Error(), "cannot add trackers") {
 		t.Fatalf("no way to add trackers: %v", err)
 	}
@@ -1859,11 +2097,12 @@ func TestATicketFromATrackerThatIsNotAForge(t *testing.T) {
 // inside the image that will run it, never the repository's copy (ADR-006, ADR-012).
 func TestALaneIsHeldToItsImagesHarness(t *testing.T) {
 	for _, c := range []struct{ manifest, want string }{
-		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"p"}},"agent":{"max_turns":12},"sensors":{"lint":{}}}`, "max_turns 20 loosens the harness's 12"},
+		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"p"}},"agent":{"max_turns":12},"sensors":{"lint":{"source":{"command":"golangci-lint run ./..."}}}}`, "max_turns 20 loosens the harness's 12"},
 		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"p"}},"agent":{"max_turns":30},"sensors":{"test":{}}}`, `sensor_scope names "lint"`},
-		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"other":{"prompt":"p"}},"agent":{"max_turns":30},"sensors":{"lint":{}}}`, `has no focus "tidy"`},
-		{`{"env_passthrough":[],"focuses":{"tidy":{"prompt":"p"}},"sensors":{"lint":{}}}`, "does not pass ANTHROPIC_API_KEY"},
-		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"p"}},"agent":{"max_turns":30},"sensors":{"lint":{}}}`, ""},
+		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"p"}},"agent":{"max_turns":30},"sensors":{"lint":{"source":{"command":"golangci-lint run --enable-all ./..."}}}}`, `sensor_scope.lint: "golangci-lint run ./x/..." is not "golangci-lint run --enable-all ./..." narrowed: `},
+		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"other":{"prompt":"p"}},"agent":{"max_turns":30},"sensors":{"lint":{"source":{"command":"golangci-lint run ./..."}}}}`, `has no focus "tidy"`},
+		{`{"env_passthrough":[],"focuses":{"tidy":{"prompt":"p"}},"sensors":{"lint":{"source":{"command":"golangci-lint run ./..."}}}}`, "does not pass ANTHROPIC_API_KEY"},
+		{`{"env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"p"}},"agent":{"max_turns":30},"sensors":{"lint":{"source":{"command":"golangci-lint run ./..."}}}}`, ""},
 	} {
 		h := newHarness(t)
 		h.e.Interactive = false
@@ -2166,9 +2405,9 @@ func TestAFailedTicketCommentIsLogged(t *testing.T) {
 func TestPolicyWithLayer(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	h.e.ConfigRepo = "acme/factory"
-	h.f.setFile("acme/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\n"))
-	h.f.setFile("acme/factory", ".agents/factory/lanes.yaml", []byte(`version: 1
+	h.e.ConfigRepo = "example-org/factory"
+	h.f.setFile("example-org/factory", ".agents/factory/factory.yaml", []byte("version: 1\nrepos: [o/r]\n"))
+	h.f.setFile("example-org/factory", ".agents/factory/lanes.yaml", []byte(`version: 1
 lanes:
   agent:
     kind: originate
@@ -2190,7 +2429,7 @@ lanes:
 	if _, err := none.e.PolicyWithLayer(ctx, "o/r", nil); err == nil {
 		t.Fatal("no lanes anywhere")
 	}
-	h.e.ConfigRepo = "acme/missing"
+	h.e.ConfigRepo = "example-org/missing"
 	h.e.ResetPolicies()
 	if _, err := h.e.PolicyWithLayer(ctx, "o/r", nil); err == nil {
 		t.Fatal("an unreadable configuration repository")
@@ -2215,5 +2454,65 @@ func TestStatsGroupByTheEffortAskedForWhenNoneIsReported(t *testing.T) {
 	i := slices.IndexFunc(stats, func(s engine.Stats) bool { return s.Lane == "agent" })
 	if i < 0 || !slices.ContainsFunc(stats[i].Models, func(m engine.ModelStats) bool { return m.Model == "claude/sonnet" && m.Effort == "low" }) {
 		t.Fatalf("%+v", stats[i].Models)
+	}
+}
+
+// putCounter counts the writes the engine makes to the store.
+type putCounter struct {
+	store.Store
+	puts atomic.Int64
+}
+
+func (c *putCounter) Put(ctx context.Context, key string, doc []byte, v string) (string, error) {
+	c.puts.Add(1)
+	return c.Store.Put(ctx, key, doc, v)
+}
+
+// TestWaitingDecisionUpdatesReason: a decision that keeps an item in its state (CI pending on a
+// timer) still sets the reason items show, and costs no more writes than before: the item is
+// already saved once per decision, under the lease's version.
+func TestWaitingDecisionUpdatesReason(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.f.labels[1] = []string{"ynf:fmt", "pkg:internal/format"}
+	pc := &putCounter{Store: h.e.Store}
+	h.e.Store = pc
+	if err := h.e.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	before := h.item(t, 1)
+	if before.State != item.Proposed || strings.Contains(before.Reason, "CI pending") {
+		t.Fatalf("after sweep: %s (%s)", before.State, before.Reason)
+	}
+
+	var writes []int64
+	for range 2 {
+		h.advance(time.Minute)
+		base := pc.puts.Load()
+		if n, err := h.e.RunDue(ctx); err != nil || n != 1 {
+			t.Fatalf("pending tick: %d stepped, %v", n, err)
+		}
+		writes = append(writes, pc.puts.Load()-base)
+		if it := h.item(t, 1); it.State != item.Proposed || it.Reason != "#101: CI pending" {
+			t.Fatalf("pending tick: %s (%q)", it.State, it.Reason)
+		}
+	}
+	if writes[0] != writes[1] {
+		t.Errorf("a tick with an unchanged reason wrote %d times, the one that changed it %d", writes[1], writes[0])
+	}
+
+	// The same decisions still replay exactly.
+	log, err := h.e.Store.Log(ctx, item.IssueKey("github.com", "o/r", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs, err := engine.Replay(log, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rs {
+		if !r.Same {
+			t.Errorf("decision %s differs on replay", r.EntryID)
+		}
 	}
 }

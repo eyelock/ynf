@@ -109,11 +109,18 @@ func (a *app) harness(ctx context.Context, args []string) error {
 			if !r.On {
 				state = " (off)"
 			}
-			fmt.Fprintf(&b, "  %s  %s%s: %s lane, %s on %s\n", mark(r.Problem == ""), r.Lane, state, r.Kind, r.Runner, r.Executor)
+			rn := r.Runner
+			if r.Resolves != "" {
+				rn = r.Resolves
+			}
+			fmt.Fprintf(&b, "  %s  %s%s: %s lane, %s on %s\n", mark(r.Problem == ""), r.Lane, state, r.Kind, orNone(rn), r.Executor)
 			if r.Harness != "" {
 				fmt.Fprintf(&b, "        harness %s, %s\n", r.Harness, r.Where)
 			} else {
 				fmt.Fprintf(&b, "        %s\n", r.Where)
+			}
+			if r.Resolved != "" {
+				fmt.Fprintf(&b, "        resolves to %s\n", r.Resolved)
 			}
 			if r.Model != "" {
 				fmt.Fprintf(&b, "        model %s\n", r.Model)

@@ -1,0 +1,16 @@
+# ynr conformance for ynf (ynr ADR-008): `make conformance` runs it. ynf launches no vendor, so none
+# is named; ynh does, and the full-chain check covers that. Each scenario runs ynf against
+# .ynr/fakeforge, an offline stand-in for GitHub with its own config and store: no network, no git,
+# no docker, no model. The planted canaries are the ticket text, the file contents and the token.
+service: ynf
+registry: telemetry/registry
+units: [ynf.step]
+scenarios:
+  - name: sweep, a ticket in a lane that is switched off
+    run: fakeforge --ticket-title @canary:ticket --ticket-body @canary:file --token @canary:secret -- ynf sweep
+    expect: { outcome: completed }
+  - name: sweep, the forge fails reading the ticket
+    run: fakeforge --fail-issue --ticket-title @canary:ticket --token @canary:secret -- ynf sweep
+    expect: { outcome: failed }
+  - name: start, refused with a usage exit code
+    run: fakeforge --token @canary:secret -- ynf start --prompt @canary:prompt --repo o/r

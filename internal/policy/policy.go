@@ -37,6 +37,7 @@ type Defaults struct {
 	Executor  string  `yaml:"executor" json:"executor,omitempty"`
 	Attempts  int     `yaml:"attempts" json:"attempts,omitempty"`
 	Retention string  `yaml:"retention" json:"retention,omitempty"`
+	NoCIAfter string  `yaml:"no_ci_after" json:"no_ci_after,omitempty"`
 	Egress    *Egress `yaml:"egress" json:"egress,omitempty"`
 	Stop      *Stop   `yaml:"stop" json:"stop,omitempty"`
 	PR        *PR     `yaml:"pr" json:"pr,omitempty"`
@@ -60,7 +61,10 @@ type LabelChange struct {
 
 // Lane is one lane, with defaults applied after Load.
 type Lane struct {
-	Name      string              `yaml:"-" json:"name"`
+	Name string `yaml:"-" json:"name"`
+	// ID is the lane's own id for telemetry, when it declares one; otherwise the id is where the
+	// lane is defined plus its name (ADR-006).
+	ID        string              `yaml:"id" json:"id,omitempty"`
 	Kind      string              `yaml:"kind" json:"kind"`
 	Enabled   *bool               `yaml:"enabled" json:"enabled,omitempty"`
 	Intake    []Intake            `yaml:"intake" json:"intake"`
@@ -72,7 +76,10 @@ type Lane struct {
 	Executor  string              `yaml:"executor" json:"executor,omitempty"`
 	Attempts  int                 `yaml:"attempts" json:"attempts,omitempty"`
 	Retention string              `yaml:"retention" json:"retention,omitempty"`
-	Labels    *Labels             `yaml:"labels" json:"labels,omitempty"`
+	// NoCIAfter is how long a proposed head commit may have no check or status at all before the
+	// item reacts (when: no_ci). Empty means DefaultNoCIAfter; 0s switches it off.
+	NoCIAfter string  `yaml:"no_ci_after" json:"no_ci_after,omitempty"`
+	Labels    *Labels `yaml:"labels" json:"labels,omitempty"`
 }
 
 // On reports whether the lane is enabled.
@@ -104,6 +111,15 @@ type Run struct {
 	Command  *Command `yaml:"command" json:"command,omitempty"`
 }
 
+// ImageFor is the image a run of the named runner uses: the command's own image when the command
+// runner runs and names one, else run.image.
+func (r Run) ImageFor(runner string) string {
+	if runner == "command" && r.Command != nil && r.Command.Image != "" {
+		return r.Command.Image
+	}
+	return r.Image
+}
+
 // Egress is what a run may reach (ADR-007).
 type Egress struct {
 	Allow []string `yaml:"allow" json:"allow"`
@@ -129,6 +145,9 @@ type Ynh struct {
 	AutoApprove string            `yaml:"auto_approve" json:"auto_approve,omitempty"`
 	Budgets     *Budgets          `yaml:"budgets" json:"budgets,omitempty"`
 	SensorScope map[string]string `yaml:"sensor_scope" json:"sensor_scope,omitempty"`
+	// TelemetryRelay sets YNH_TELEMETRY_RELAY=1 for the lane's runs, so ynh agent run starts ynr
+	// relay beside the vendor CLI and the vendor's telemetry reaches the run's spool folder.
+	TelemetryRelay bool `yaml:"telemetry_relay" json:"telemetry_relay,omitempty"`
 }
 
 // Budgets may only tighten the harness's own.
@@ -140,8 +159,15 @@ type Budgets struct {
 
 // Command is the command runner's settings.
 type Command struct {
-	Argv       []string `yaml:"argv" json:"argv"`
-	ResultFile string   `yaml:"result_file" json:"result_file,omitempty"`
+	Argv []string `yaml:"argv" json:"argv"`
+	// Image is the image the command runs in on a container executor. When the lane resolves to
+	// the command runner it wins over run.image; when it resolves to ynh it is ignored.
+	Image string `yaml:"image" json:"image,omitempty"`
+	// ImageUser keeps the image's own user and home, as a ynh-built agent image does, instead of
+	// running as ynf's user. It is for an image whose command needs its own user; a docker executor
+	// only.
+	ImageUser  bool   `yaml:"image_user" json:"image_user,omitempty"`
+	ResultFile string `yaml:"result_file" json:"result_file,omitempty"`
 }
 
 // PR is how changes are proposed.
@@ -204,6 +230,9 @@ func Load(doc []byte) (*File, error) {
 		l.Name = name
 		f.Lanes[name] = f.Defaults.apply(l)
 	}
+	if err := f.checkHarnesses(); err != nil {
+		return nil, err
+	}
 	return &f, nil
 }
 
@@ -225,6 +254,9 @@ func (d Defaults) apply(l Lane) Lane {
 	}
 	if l.Retention == "" {
 		l.Retention = d.Retention
+	}
+	if l.NoCIAfter == "" {
+		l.NoCIAfter = d.NoCIAfter
 	}
 	if l.Run.Egress == nil {
 		l.Run.Egress = d.Egress
@@ -303,6 +335,12 @@ func Expand(tmpl string, labels []string) (string, error) {
 	return out, bad
 }
 
+// ExpandShape fills every {label.<prefix>} placeholder with a safe dummy path segment, to check
+// the shape of a template before any item's labels are known.
+func ExpandShape(tmpl string) string {
+	return placeholder.ReplaceAllString(tmpl, "x")
+}
+
 // LabelValue returns the value of the first '<prefix>:<value>' label.
 func LabelValue(labels []string, prefix string) (string, bool) {
 	for _, l := range labels {
@@ -311,6 +349,22 @@ func LabelValue(labels []string, prefix string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// DefaultNoCIAfter is how long a proposed commit may report no check or status at all before the
+// item escalates, when a lane does not say.
+const DefaultNoCIAfter = 30 * time.Minute
+
+// NoCIWait is the lane's no_ci_after as a duration; zero means the reaction is off.
+func (l Lane) NoCIWait() time.Duration {
+	if l.NoCIAfter == "" {
+		return DefaultNoCIAfter
+	}
+	d, err := ParseDuration(l.NoCIAfter)
+	if err != nil || d < 0 {
+		return DefaultNoCIAfter
+	}
+	return d
 }
 
 // ParseDuration accepts the schema's durations, including days.

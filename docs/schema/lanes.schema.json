@@ -84,6 +84,10 @@
         "retention": {
           "$ref": "#/$defs/duration"
         },
+        "no_ci_after": {
+          "$ref": "#/$defs/duration",
+          "description": "How long a proposed head commit may have no check or status at all before the item reacts (when: no_ci). Default 30m; 0s switches it off."
+        },
         "egress": {
           "$ref": "#/$defs/egress"
         },
@@ -124,6 +128,11 @@
         "when"
       ],
       "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._~:@/#-]+$",
+          "description": "The lane's own id for telemetry, which stays fixed if the repository that defines it moves. Without one the id is where the lane is defined, host first, then its name: github.com/example-org/factory-config#lint-paydown (ADR-006)."
+        },
         "kind": {
           "enum": [
             "originate",
@@ -173,6 +182,10 @@
         },
         "retention": {
           "$ref": "#/$defs/duration"
+        },
+        "no_ci_after": {
+          "$ref": "#/$defs/duration",
+          "description": "How long a proposed head commit may have no check or status at all before the item reacts (when: no_ci). Default 30m; 0s switches it off."
         },
         "labels": {
           "$ref": "#/$defs/labels"
@@ -303,7 +316,7 @@
             "ynh",
             "command"
           ],
-          "description": "Omit to use the detected runner (ADR-012). Naming a runner the host cannot provide fails the lane at load."
+          "description": "Omit to let ynf choose (ADR-012): ynh when the lane has a ynh block and ynh is detected on the host, else its command block. A lane that omits it needs a ynh block, a command block or both. Naming a runner the host cannot provide fails the lane; it never falls back."
         },
         "executor": {
           "$ref": "#/$defs/executor"
@@ -311,7 +324,7 @@
         "image": {
           "type": "string",
           "minLength": 1,
-          "description": "The container image a docker, ecs or k8s-job executor runs the command runner in, pinned by tag or digest. The ynh runner builds its own with `ynh image`."
+          "description": "The container image a docker, ecs or k8s-job executor runs the runner in, pinned by tag or digest. The ynh runner builds its own with `ynh image` when this is omitted. For the command runner, command.image wins when set."
         },
         "egress": {
           "$ref": "#/$defs/egress"
@@ -331,7 +344,7 @@
           "properties": {
             "harness": {
               "type": "string",
-              "description": "A path to a harness folder in the repository ('.' for its own .agents/harness), from which ynf builds the run's image with `ynh image --entrypoint agent` when the lane names no published image. With run.image it is optional: the image carries its harness, and this picks one by id or name when it carries several."
+              "description": "A path to a harness folder in the repository ('.' for its own .agents/harness), from which ynf builds the run's image with `ynh image --entrypoint agent` when the lane names no published image. With run.image it is optional: the image carries its harness, and this picks one by id or name when it carries several. On the host executors it may instead be <repository>@<tag-or-commit>, a harness pinned from git, which ynf has ynh install into the run's own home before the run starts."
             },
             "focus": {
               "type": "string"
@@ -381,7 +394,7 @@
             },
             "sensor_scope": {
               "type": "object",
-              "description": "Narrow a sensor the harness declares to the item, through ynh's --sensor-overlay. Cannot add, remove or relax a sensor.",
+              "description": "Narrow a sensor the harness declares to the item, through ynh's --sensor-overlay, which substitutes the command. A scope may only be the declared command narrowed: the same words in the same order, except that a path word (`.`, `./...`, a directory) may be replaced by one or more relative paths beneath it (no `..`, no leading dash), or, when the declared command has no path word, relative paths may be appended. A different program, flag or environment assignment, or any shell operator or expansion, is refused before the run. Cannot add, remove or relax a sensor.",
               "additionalProperties": {
                 "$ref": "#/$defs/template"
               }
@@ -398,6 +411,10 @@
             "base": {
               "type": "string",
               "description": "The base image `ynh image --base` builds the harness image on, for lanes whose sensors need tools the default ynh image lacks."
+            },
+            "telemetry_relay": {
+              "type": "boolean",
+              "description": "Turn on ynh's telemetry relay for this lane's runs, by setting YNH_TELEMETRY_RELAY=1: ynh agent run starts ynr relay beside the vendor CLI, which exports only over the network, and the relay writes what it receives into the run's own spool folder (ynr ADR-004). It needs a spool root in ynf's configuration, ynr in the run's image or on its PATH, and a lane that runs ynh: a lane that runs the command runner refuses it. Default false."
             }
           }
         },
@@ -416,6 +433,15 @@
               },
               "description": "Run without a shell. Exit 0 is 'converged', anything else 'error', unless result_file says more."
             },
+            "image": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The container image the command runner runs in on a docker, ecs or k8s-job executor, pinned by tag or digest. When the lane resolves to the command runner it wins over run.image; when it resolves to ynh it is ignored, so a lane with both blocks can name each one's image."
+            },
+            "image_user": {
+              "type": "boolean",
+              "description": "Keep the image's own user and home on a docker executor, as a ynh-built agent image does, instead of running as ynf's user. Default false. ynf names that user in the run's spool manifest so ynr serve reads what it writes there."
+            },
             "result_file": {
               "type": "string",
               "description": "Where the command writes a ynf RunResult, if it does."
@@ -424,6 +450,29 @@
         }
       },
       "allOf": [
+        {
+          "if": {
+            "not": {
+              "required": [
+                "runner"
+              ]
+            }
+          },
+          "then": {
+            "anyOf": [
+              {
+                "required": [
+                  "ynh"
+                ]
+              },
+              {
+                "required": [
+                  "command"
+                ]
+              }
+            ]
+          }
+        },
         {
           "if": {
             "properties": {
@@ -455,7 +504,14 @@
           "then": {
             "required": [
               "command"
-            ]
+            ],
+            "properties": {
+              "ynh": {
+                "properties": {
+                  "telemetry_relay": false
+                }
+              }
+            }
           }
         }
       ],
@@ -497,7 +553,7 @@
       "description": "Named 'when', not 'on', because YAML 1.1 parsers read a bare on as the boolean true. What to do for each outcome and external fact. Outcomes are ynf's vocabulary (ADR-012), never a runner's exit codes.",
       "additionalProperties": false,
       "patternProperties": {
-        "^(converged|ci_failed|changes_requested|outcome\\.(budget|stuck|tamper|operator_error|error|aborted))$": {
+        "^(converged|ci_failed|no_ci|changes_requested|outcome\\.(budget|stuck|tamper|operator_error|error|aborted))$": {
           "$ref": "#/$defs/reaction"
         }
       },

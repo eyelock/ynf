@@ -6,11 +6,24 @@
 #   make reset   delete it and create it again from scratch
 #   make down    delete it
 #   make calibrate  prove every fixture can still tell a fixed state from an unfixed one (tests
-#                   the fixtures, not the factory; needs ynh with .agents/harness support,
-#                   YNH=/path/to/ynh to choose one)
+#                   the fixtures, not the factory; needs ynh with .agents/harness support on PATH)
 #   make e2e        rebuild the sandbox, run ynf against it until everything settles, and check
-#                   each fixture's expect block (tests the factory; LANES=gofmt,deps,reclaim by default)
-#   make e2e-only   the same, without the rebuild
+#                   each fixture's expect block (tests the factory; LANES=gofmt,deps,reclaim,detect,spool,spool-image,spool-flood by default; ynh is hidden from ynf
+#                   so the detect lane proves its fallback to the command: HIDE_YNH=false to unhide it).
+#                   With ynr it also runs ynf as a factory job with a spool and the collector on, and
+#                   checks manifests, run folders, the run quota and what ynr shipped, using
+#                   ynr on PATH. Without one, those checks are skipped, and it says why.
+#   make e2e-only  the same, without the rebuild. Without a reset it leaves out shadow mode, whose
+#                   stage merges a human fix for fmt-format into the sandbox main and so cannot
+#                   run twice; SHADOW=true adds it. make e2e (and e2e-factory) reset first, so
+#                   they run it with the gofmt lane; SHADOW=false skips it there. The same goes for
+#                   the required-checks stage (the gate lane adopts a pull request whose base
+#                   branch has a ruleset requiring a check nothing reports, and ynf may push to
+#                   it once): GATE=true adds it to e2e-only, GATE=false skips it after a reset.
+#                   e2e-factory never runs it
+#   make e2e-memory-outage  e2e-only with ynm unreachable for the whole run, then brought back: the
+#                   memory writes must queue in ynf's store, show in `ynf doctor`, and arrive
+#                   after (ADR-008); it costs no more than e2e
 #   make e2e-factory  the same with ynf inside the factory image, as a job runner would run it
 #                   (ADR-009, shape B): the sandbox's harness built on ynf's factory image
 #                   (make -C .. factory-image first; FACTORY_BASE names it)
@@ -43,7 +56,7 @@ endif
 TF := terraform -chdir=terraform
 export GITHUB_TOKEN ?= $(shell gh auth token)
 
-.PHONY: settings init validate up down reset plan calibrate e2e e2e-only e2e-factory agent-image
+.PHONY: settings init validate up down reset plan calibrate e2e e2e-only e2e-memory-outage e2e-factory agent-image
 
 settings:
 	@[ -n "$(SANDBOX_OWNER)" ] || { echo "sandbox: no SANDBOX_OWNER. Copy sandbox.env.example to sandbox.env and set it (and the rest, if you want)."; exit 2; }
@@ -78,14 +91,21 @@ reset: down up
 calibrate: settings
 	cd calibrate && go run . -root .. -repo $(SANDBOX_REPO)
 
-LANES ?= gofmt,deps,reclaim
+LANES ?= gofmt,deps,reclaim,detect,spool,spool-image,spool-flood
+HIDE_YNH ?= true
+SHADOW ?= false
+GATE ?= false
+# make e2e and e2e-factory reset first, so they run shadow mode unless told not to.
+SHADOW_AFTER_RESET = $(if $(filter command line,$(origin SHADOW)),$(SHADOW),true)
+GATE_AFTER_RESET = $(if $(filter command line,$(origin GATE)),$(GATE),true)
 
-e2e: reset e2e-only
+e2e: reset
+	$(MAKE) e2e-only SHADOW=$(SHADOW_AFTER_RESET) GATE=$(GATE_AFTER_RESET)
 
 e2e-only: settings
-	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(LANES)
+	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(LANES) -hide-ynh=$(HIDE_YNH) -shadow=$(SHADOW) -gate=$(GATE)
 
-YNH_BASE ?= ghcr.io/eyelock/ynh:0.10.0
+YNH_BASE ?= ghcr.io/eyelock/ynh:0.12.0
 YNH_SRC ?=
 AGENT_IMAGE ?= ynf-sandbox-agent:latest
 
@@ -107,10 +127,16 @@ FACTORY_LANES   ?= gofmt,deps
 
 # Shape B: the sandbox's agent tools on the factory image, its harness in the factory flavour, and
 # the acceptance test with ynf running inside that image, every run inline beside it.
+# The outage lane's command always fails, so its item leaves a failure memory to queue, with no model.
+OUTAGE_LANES ?= outage
+
+e2e-memory-outage: reset settings
+	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(OUTAGE_LANES) -memory-outage -shadow=false -gate=false
+
 e2e-factory: reset
 	@set -e; ctx=$$(mktemp -d); trap 'rm -rf "$$ctx"' EXIT; \
 	cp images/agent/Dockerfile "$$ctx/"; mkdir -p "$$ctx/ynh"; \
 	docker build -q --build-arg YNH_BASE=$(FACTORY_BASE) -t ynf-sandbox-agent:factory "$$ctx" >/dev/null; \
 	ynh image ynf-sandbox --from seed --base ynf-sandbox-agent:factory --entrypoint agent --tag $(FACTORY_HARNESS) >/dev/null; \
 	echo "built $(FACTORY_HARNESS) on $(FACTORY_BASE)"
-	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(FACTORY_LANES) -image $(FACTORY_HARNESS)
+	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(FACTORY_LANES) -shadow=$(SHADOW_AFTER_RESET) -gate=false -image $(FACTORY_HARNESS)

@@ -21,9 +21,12 @@ import (
 	"github.com/eyelock/ynf/internal/decide"
 	"github.com/eyelock/ynf/internal/engine"
 	"github.com/eyelock/ynf/internal/forge"
+	"github.com/eyelock/ynf/internal/runner"
+	"github.com/eyelock/ynf/internal/spool"
 	"github.com/eyelock/ynf/internal/store"
 	"github.com/eyelock/ynf/internal/store/s3store"
 	"github.com/eyelock/ynf/internal/store/sqlite"
+	"github.com/eyelock/ynf/internal/telemetry"
 	"github.com/eyelock/ynf/internal/tracker"
 	"github.com/eyelock/ynf/internal/tracker/mcptracker"
 	"github.com/eyelock/ynf/internal/workspace"
@@ -58,10 +61,15 @@ Usage:
   ynf replay <owner/name#number | key> [--policy lanes.yaml]
   ynf pause|resume <lane> --reason <text> [--repo owner/name]
   ynf stats [--lane name]...
+  ynf shadow run <lane> [--repo owner/name]... [--since 90d] [--limit 20] [--ticket <ref>]... [--auto-approve edits|all]
+  ynf shadow ls
+  ynf shadow grade [<shadow run id>] [--attempt <id> --a <grade> --b <grade>] [--regrade]
+  ynf shadow report [<shadow run id> | --lane name]
   ynf forges                    the forges ynf works with, each checked
   ynf trackers                  the trackers ynf works with, each checked
   ynf ticket <ref>              read a ticket as start would, without starting it
   ynf harness [repo]...         how each lane runs, and the harness it is held to
+  ynf telemetry registry [--format json]   the names ynf emits in OpenTelemetry (ynr ADR-007)
   ynf egress-proxy --allow host,*.domain [--listen :3128] [--log file]   (run inside a container)
 
 Global flags (before the command):
@@ -71,9 +79,11 @@ Global flags (before the command):
   --log-file <path> also write the log to this file (YNF_LOG_FILE)
   --log-format text|json   (YNF_LOG_FORMAT)
   -v                debug logging
+  --version         the same as the version command
 `
 
 type app struct {
+	stdin          io.Reader
 	stdout, stderr io.Writer
 	cfgPath        string
 	format         string
@@ -83,9 +93,18 @@ type app struct {
 	logFormat      string
 	lanes          multi
 	logClose       func()
+	tel            *telemetry.T
 
 	cfg *config.Config
 	eng *engine.Engine
+
+	// The spool and the collector (ADR-009, ADR-011): job is set for a factory job.
+	job       bool
+	tsettings config.TelemetrySettings
+	spool     *spool.Spool
+	spoolErr  error
+	serve     *spool.Serve
+	capture   string // the job's capture folder for spool files, once named
 }
 
 type multi []string
@@ -95,7 +114,12 @@ func (m *multi) Set(v string) error { *m = append(*m, v); return nil }
 
 // Run runs the command line and returns the exit code.
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	a := &app{stdout: stdout, stderr: stderr}
+	return RunIn(ctx, args, os.Stdin, stdout, stderr)
+}
+
+// RunIn is Run with the input a command may read, such as the grades a person types.
+func RunIn(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	a := &app{stdin: stdin, stdout: stdout, stderr: stderr}
 	fs := flag.NewFlagSet("ynf", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() { _, _ = fmt.Fprint(stderr, usage) }
@@ -103,18 +127,31 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&a.format, "format", envOr("YNF_FORMAT", "text"), "")
 	fs.BoolVar(&a.interactive, "interactive", false, "")
 	fs.BoolVar(&a.verbose, "v", false, "")
+	showVersion := fs.Bool("version", false, "")
 	fs.StringVar(&a.logFile, "log-file", os.Getenv("YNF_LOG_FILE"), "")
 	fs.StringVar(&a.logFormat, "log-format", envOr("YNF_LOG_FORMAT", "text"), "")
 	if err := fs.Parse(args); err != nil {
 		return ExitUsage
 	}
 	rest := fs.Args()
+	if *showVersion && len(rest) == 0 {
+		rest = []string{"version"} // ynf --version is ynf version
+	}
 	if len(rest) == 0 {
 		fs.Usage()
 		return ExitUsage
 	}
 	cmd, rest := rest[0], rest[1:]
 	var err error
+	switch cmd {
+	case "version", "help", "-h", "--help", "telemetry", "egress-proxy":
+		// These do no work to trace, and egress-proxy runs in a container of a run's.
+	default:
+		// Telemetry is set up once, here, before anything that logs or spawns (ADR-011). It never
+		// changes output or exit codes: a serve looks for a spool again once a minute.
+		a.tel = telemetry.Setup(ctx, telemetry.Options{Version: ynf.Version, Watch: cmd == "serve", Spool: a.telemetrySettings(cmd, rest)})
+		ctx = a.tel.Context(ctx)
+	}
 	switch cmd {
 	case "version":
 		err = a.out(map[string]string{"version": ynf.Version}, "ynf "+ynf.Version)
@@ -136,6 +173,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = a.handle(ctx, rest)
 	case "pause", "resume":
 		err = a.pause(ctx, cmd, rest)
+	case "shadow":
+		err = a.shadowCmd(ctx, rest)
 	case "stats":
 		err = a.stats(ctx, rest)
 	case "forges":
@@ -146,6 +185,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = a.ticket(ctx, rest)
 	case "harness":
 		err = a.harness(ctx, rest)
+	case "telemetry":
+		err = a.telemetryCmd(rest)
 	case "egress-proxy":
 		err = a.egressProxy(ctx, rest)
 	case "help", "-h", "--help":
@@ -159,6 +200,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		a.eng.CloseTrackers()
 		_ = a.eng.Store.Close()
 	}
+	// The flush is bounded and swallows its errors, so it never changes the exit code. It comes
+	// first, so ynf's own files are closed when ynr serve is given its archive time.
+	a.tel.Shutdown(context.Background())
+	a.endJob()
 	if a.logClose != nil {
 		a.logClose()
 	}
@@ -257,11 +302,13 @@ func (a *app) logger() (*slog.Logger, error) {
 		w = io.MultiWriter(a.stderr, f)
 	}
 	opts := &slog.HandlerOptions{Level: level}
+	// What people read is the same with telemetry on or off: the OpenTelemetry bridge gets a copy
+	// of each record after the handler has written it.
 	switch a.logFormat {
 	case "text":
-		return slog.New(slog.NewTextHandler(w, opts)), nil
+		return slog.New(telemetry.Tee(slog.NewTextHandler(w, opts), a.tel)), nil
 	case "json":
-		return slog.New(slog.NewJSONHandler(w, opts)), nil
+		return slog.New(telemetry.Tee(slog.NewJSONHandler(w, opts), a.tel)), nil
 	}
 	return nil, fmt.Errorf("--log-format %q: want text or json", a.logFormat)
 }
@@ -314,6 +361,7 @@ func (a *app) engine() (*engine.Engine, error) {
 		_ = st.Close()
 		return nil, withCode(ExitUsage, err)
 	}
+	fg.Log = logger
 	var mu sync.Mutex
 	entropy := ulid.Monotonic(cryptoReader{}, 0)
 	mem, ns, level, err := memoryFor(c)
@@ -333,8 +381,10 @@ func (a *app) engine() (*engine.Engine, error) {
 		Executor:          a.executor,
 		BuildImage:        imageBuilder(c.Images.Build == nil || *c.Images.Build),
 		ImageHarness:      imageHarness,
+		InstallHarness:    runner.InstallHarness,
 		ImageCapabilities: imageCapabilities,
 		HostCapabilities:  hostCapabilities,
+		DetectYnh:         runner.DetectedYnh,
 		Repos:             c.Repos,
 		ConfigRepo:        configRepo(c),
 		Lanes:             a.lanes,
@@ -351,8 +401,10 @@ func (a *app) engine() (*engine.Engine, error) {
 			defer mu.Unlock()
 			return ulid.MustNew(ulid.Now(), entropy).String()
 		},
-		Log: logger,
+		Log:       logger,
+		Telemetry: a.tel,
 	}
+	a.startJob(logger)
 	return a.eng, nil
 }
 

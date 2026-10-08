@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/eyelock/ynf/internal/telemetry"
 )
 
 // Author is the git identity of ynf's commits.
@@ -70,6 +72,14 @@ func (w Workspace) Checkout(ctx context.Context, mirror, ref, dir string) (strin
 		_ = os.RemoveAll(dir)
 		return "", err
 	}
+	if isSHA(ref) {
+		// A commit, as shadow mode checks out a fix's base: the clone has the mirror's objects.
+		if _, err := w.git(ctx, dir, "checkout", "-q", "--detach", ref); err != nil {
+			_ = os.RemoveAll(dir)
+			return "", err
+		}
+		return dir, nil
+	}
 	// A clone copies the mirror's branches; the mirror keeps the forge's as remote-tracking refs.
 	remote := "refs/remotes/origin/" + ref
 	for _, args := range [][]string{
@@ -82,6 +92,43 @@ func (w Workspace) Checkout(ctx context.Context, mirror, ref, dir string) (strin
 		}
 	}
 	return dir, nil
+}
+
+// isSHA reports whether ref is a full commit id rather than a branch name.
+func isSHA(ref string) bool {
+	if len(ref) != 40 {
+		return false
+	}
+	for _, c := range ref {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// FirstParent is the commit before a merge: the first parent of sha in the mirror. For a squash
+// merge it is the base branch as it was; for a merge commit, the same, with the branch merged in.
+func (w Workspace) FirstParent(ctx context.Context, mirror, sha string) (string, error) {
+	out, err := w.git(ctx, mirror, "rev-parse", "--verify", "-q", sha+"^1")
+	if err != nil {
+		return "", fmt.Errorf("%s has no parent in the mirror: %w", sha, err)
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// RangeDiff is the change from one commit to another in the mirror: the human patch.
+func (w Workspace) RangeDiff(ctx context.Context, mirror, from, to string) (string, error) {
+	return w.git(ctx, mirror, "diff", "--no-color", "--no-ext-diff", from, to)
+}
+
+// Diff is everything the checkout differs from base by, new files included: the agent's patch.
+// It stages the change, as Changed does.
+func (w Workspace) Diff(ctx context.Context, wt, base string) (string, error) {
+	if _, err := w.git(ctx, wt, "add", "-A"); err != nil {
+		return "", err
+	}
+	return w.git(ctx, wt, "diff", "--cached", "--no-color", "--no-ext-diff", base)
 }
 
 // RemoveCheckout deletes a checkout. It is a whole repository, so there is no registration to undo.
@@ -164,6 +211,7 @@ func (w Workspace) gitIn(ctx context.Context, dir string, stdin *strings.Reader,
 	c := exec.CommandContext(ctx, "git", args...)
 	c.Dir = dir
 	c.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	telemetry.Command(ctx, c)
 	if w.Token != "" {
 		auth := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + w.Token))
 		c.Env = append(c.Env,

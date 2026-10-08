@@ -58,6 +58,9 @@ func (in Inline) Run(ctx context.Context, j Job) (Output, error) {
 		return Output{}, fmt.Errorf("inline: ynf runs as %s, the run user: run ynf as another user, or the run could read its credentials", name)
 	}
 	owned := append([]string{j.Worktree, j.RunDir}, j.Share...)
+	if j.Spool != "" {
+		owned = append(owned, j.Spool) // the run's own folder, and only that one
+	}
 	if err := in.chownAll(owned, uid, gid); err != nil {
 		return Output{}, fmt.Errorf("inline: hand the run's folders to %s: %w", name, err)
 	}
@@ -78,11 +81,7 @@ func (in Inline) Run(ctx context.Context, j Job) (Output, error) {
 			env = append(env, k+"="+v)
 		}
 	}
-	for _, m := range []map[string]string{j.Env, j.Secrets} {
-		for _, k := range sortedKeys(m) {
-			env = append(env, k+"="+m[k])
-		}
-	}
+	env = appendJobEnv(env, j)
 	set := in.Credential
 	if set == nil {
 		set = func(c *exec.Cmd, uid, gid uint32) {

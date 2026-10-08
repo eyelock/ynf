@@ -6,6 +6,9 @@
 // the fixture's known fix only those in `after` may. A fixture that cannot produce that
 // reproducible negative cannot tell a good agent run from a bad one, which is what an end-to-end
 // test of the factory relies on. The idea is ynh's `ynh check --calibrate`, applied to fixtures.
+//
+// Every fixture is calibrated from the sandbox's seed commit, not from whatever main has become,
+// so a sandbox that e2e has merged into (its shadow stage does) calibrates as it did when new.
 package main
 
 import (
@@ -46,6 +49,8 @@ type calibration struct {
 	Flaky    *flaky                        `yaml:"flaky"`
 	Command  *struct{ Deterministic bool } `yaml:"command"`
 	Disabled bool                          `yaml:"disabled"`
+	Refused  bool                          `yaml:"refused"`
+	Skip     string                        `yaml:"skip"`
 }
 
 type flaky struct {
@@ -76,11 +81,10 @@ var safeValue = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 func main() {
 	root := flag.String("root", ".", "the sandbox/ directory")
 	repo := flag.String("repo", "eyelock/ynf-sandbox", "the sandbox repository")
-	ynh := flag.String("ynh", envOr("YNH", "ynh"), "the ynh binary (needs .agents/harness support)")
 	only := flag.String("only", "", "calibrate only this fixture id")
 	flag.Parse()
 
-	if err := run(*root, *repo, *ynh, *only); err != nil {
+	if err := run(*root, *repo, "ynh", *only); err != nil {
 		fmt.Fprintln(os.Stderr, "calibrate:", err)
 		os.Exit(1)
 	}
@@ -115,6 +119,15 @@ func run(root, repo, ynh, only string) error {
 	if _, err := cmd(origin, "git", "fetch", "-q", "origin", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
 		return err
 	}
+	// The fixtures' unfixed state is the seed: the one commit scripts/seed.sh pushed to main. What
+	// has been merged since (e2e's shadow stage merges a human fix) is not the fixtures' to depend on.
+	seed, err := seedCommit(origin)
+	if err != nil {
+		return err
+	}
+	if _, err := cmd(origin, "git", "checkout", "-q", "--detach", seed); err != nil {
+		return err
+	}
 	if err := preflight(ynh, origin); err != nil {
 		return err
 	}
@@ -129,10 +142,14 @@ func run(root, repo, ynh, only string) error {
 		if only != "" && f.ID != only {
 			continue
 		}
-		v := calibrator{root: root, origin: origin, tmp: tmp, ynh: ynh}
+		v := calibrator{root: root, origin: origin, tmp: tmp, ynh: ynh, seed: seed}
 		detail, err := v.fixture(f, lf.Lanes[f.Lane])
 		mark := "ok  "
-		if err != nil {
+		var skip skipped
+		switch {
+		case errors.As(err, &skip):
+			mark, detail = "skip", "skipped: "+string(skip)
+		case err != nil:
 			mark, detail = "FAIL", err.Error()
 			failed++
 		}
@@ -147,19 +164,37 @@ func run(root, repo, ynh, only string) error {
 // preflight fails early, and legibly, when ynh cannot read the sandbox's harness.
 func preflight(ynh, dir string) error {
 	if _, err := exec.LookPath(ynh); err != nil {
-		return fmt.Errorf("ynh not found (%s); set YNH=/path/to/ynh", ynh)
+		return fmt.Errorf("ynh is not on PATH (%s)", ynh)
 	}
 	_, err := cmd(dir, ynh, "check", dir, "--cwd", dir, "--no-baseline", "--only", "docs", "--format", "json")
 	var exit *exec.ExitError
 	if err != nil && (!errors.As(err, &exit) || exit.ExitCode() == 2) {
-		return fmt.Errorf("%s cannot run the sandbox harness at .agents/harness/; it needs ynh from develop 027dc19 or later (set YNH=...): %w", ynh, err)
+		return fmt.Errorf("%s cannot run the sandbox harness at .agents/harness/; it needs ynh from develop 027dc19 or later, first on PATH: %w", ynh, err)
 	}
 	return nil
 }
 
 type calibrator struct {
-	root, origin, tmp, ynh string
+	root, origin, tmp, ynh, seed string
 }
+
+// seedCommit is the commit that seeded the sandbox's main: its only root.
+func seedCommit(origin string) (string, error) {
+	out, err := cmd(origin, "git", "rev-list", "--max-parents=0", "origin/main")
+	if err != nil {
+		return "", err
+	}
+	roots := strings.Fields(out)
+	if len(roots) != 1 {
+		return "", fmt.Errorf("origin/main has %d root commits, expected the one seed commit; run make reset", len(roots))
+	}
+	return roots[0], nil
+}
+
+// skipped is the result of a fixture that declares calibrate.skip. It is not a failure.
+type skipped string
+
+func (s skipped) Error() string { return string(s) }
 
 func (v calibrator) fixture(f fixture, l lane) (string, error) {
 	switch {
@@ -168,6 +203,15 @@ func (v calibrator) fixture(f fixture, l lane) (string, error) {
 			return "", fmt.Errorf("lane %s is enabled; expected it switched off", f.Lane)
 		}
 		return fmt.Sprintf("lane %s is switched off", f.Lane), nil
+	case f.Calibrate.Skip != "":
+		// A fixture with no fixed state: the lane is on, but nothing it does has a fixed and an unfixed side.
+		return "", skipped(f.Calibrate.Skip)
+	case f.Calibrate.Refused:
+		// ynf refuses the lane's scope before any run (ADR-006); `make e2e` watches it do so.
+		if len(l.Run.Ynh.SensorScope) == 0 {
+			return "", fmt.Errorf("lane %s has no sensor_scope, so there is nothing for ynf to refuse", f.Lane)
+		}
+		return fmt.Sprintf("lane %s is refused before any run; nothing to calibrate", f.Lane), nil
 	case f.Calibrate.Command != nil:
 		return v.command(f, l)
 	default:
@@ -275,7 +319,7 @@ func (v calibrator) command(f fixture, l lane) (string, error) {
 }
 
 func (v calibrator) worktree(f fixture, suffix string) (string, error) {
-	ref := "origin/main"
+	ref := v.seed
 	if f.Kind == "pull_request" && f.PullRequest != nil {
 		ref = "origin/" + f.PullRequest.Branch
 	}
@@ -355,11 +399,4 @@ func readYAML(path string, v any) error {
 		return fmt.Errorf("%s: %w", path, err)
 	}
 	return nil
-}
-
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
 }

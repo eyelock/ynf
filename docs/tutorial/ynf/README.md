@@ -5,8 +5,8 @@ your own on GitHub, point ynf at it, and watch tickets become draft pull request
 what ynf decided and why, run it unattended, break it on purpose, and bring in tickets from a
 tracker that isn't GitHub.
 
-Every lane in this track is a command lane: `gofmt`, run in a container. There is no model, no API
-key and no agent, and runs take seconds. ynf doesn't need ynh or ynm to do any of this: it detects
+Every lane this track runs is a command lane: `gofmt`, run in a container. There is no model, no API
+key and no agent, and runs take seconds. ynf doesn't need ynh, ynm or ynr to do any of this: it detects
 them and never requires them (ADR-012). [The factory track](../factory/README.md) adds them, once you know
 how the loop behaves.
 
@@ -33,7 +33,7 @@ Timestamps, ids, issue and pull request numbers will differ from the ones shown.
   `gh auth refresh -s delete_repo`. ynf uses its token when `GITHUB_TOKEN` isn't set.
 - **About an hour.** Most of it is waiting for the sandbox's CI.
 
-No AWS account, no API key, no ynh and no ynm.
+No AWS account, no API key, no ynh, no ynm and no ynr.
 
 ## Afterwards
 

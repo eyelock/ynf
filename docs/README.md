@@ -23,7 +23,7 @@ each with one job.
 | | |
 |---|---|
 | [Tutorials](tutorial/README.md) | Two tracks of lessons on a sandbox of your own: ynf on its own, then ynh, ynm and ynf together as a factory. |
-| [How-to guides](how-to/README.md) | Run ynf locally; connect a tracker; run the factory image; test it against the sandbox. |
+| [How-to guides](how-to/README.md) | Run ynf locally; connect a tracker; run the factory image; measure a lane with shadow mode; test it against the sandbox. |
 | [Reference](reference/README.md) | The CLI, the configuration, and the lanes file. |
 | [Explanation](explanation/README.md) | Why ynf is shaped the way it is, starting with the outer loop. |
 | [Architecture decisions](adr/README.md) | Each decision, its alternatives and its consequences, with the requirements they cite. |
@@ -33,7 +33,7 @@ each with one job.
 - **A loop around a loop.** ynh runs the inner loop for minutes; ynf runs a durable state machine
   per work item for days.
 - **Intake** from webhooks (GitHub, JIRA), message topics, scheduled searches, and ynf's own run,
-  timer and lease events. Webhooks are hints; facts are re-probed before every decision.
+  timer and lease events. Webhooks are hints; facts are re-probed before every live decision and recorded with it, and `ynf replay` re-runs decisions on those recorded facts without probing again.
 - **Lanes** are versioned YAML with CEL guards. A lane says whether, when and with which ynh
   harness and focus; the harness says how.
 - **One claim at a time.** Leases with an epoch, heartbeats and fencing, over a store that can be

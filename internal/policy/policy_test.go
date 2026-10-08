@@ -38,11 +38,17 @@ func TestSandboxLanesLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(f.Names(), ",")
-	if got != "deps,doc-drift,fix-ci,gofmt,lint-paydown,reclaim" {
+	if got != "deps,detect,doc-drift,fix-ci,gate,gofmt,lint-paydown,outage,reclaim,relaxed,spool,spool-flood,spool-image" {
 		t.Fatalf("lanes %s", got)
 	}
 	if d := f.Lanes["deps"]; d.On() || d.Kind != "originate" || len(d.Intake) != 1 {
 		t.Fatalf("deps comes from the configuration repository and is switched off here: %+v", d)
+	}
+	if d := f.Lanes["detect"]; d.Run.Runner != "" || d.Run.Ynh == nil || d.Run.Command == nil {
+		t.Fatalf("detect names no runner and offers both: %+v", d.Run)
+	}
+	if s := f.Lanes["spool-image"]; s.Run.Command == nil || !s.Run.Command.ImageUser || s.Run.Command.Image == "" || f.Lanes["spool"].Run.Command.ImageUser {
+		t.Fatalf("spool-image keeps its image's user, and spool does not: %+v", s.Run.Command)
 	}
 	g := f.Lanes["gofmt"]
 	if g.Run.Runner != "command" || g.Run.Executor != "docker" || g.Attempts != 3 {
@@ -67,12 +73,26 @@ func TestSandboxLanesLoad(t *testing.T) {
 
 func TestSchemaRejectsHandEditingMistakes(t *testing.T) {
 	for name, doc := range map[string]string{
-		"bare on key":     "version: 1\nlanes:\n  x:\n    kind: originate\n    intake: [{github.search: q, every: 5m}]\n    run: {runner: command, command: {argv: [true]}}\n    on: {converged: open_pr}\n",
-		"unknown action":  "version: 1\nlanes:\n  x:\n    kind: originate\n    intake: [{github.search: q, every: 5m}]\n    run: {runner: command, command: {argv: [true]}}\n    when: {converged: merge_it}\n",
-		"runner no block": "version: 1\nlanes:\n  x:\n    kind: originate\n    intake: [{github.search: q, every: 5m}]\n    run: {runner: ynh}\n    when: {converged: open_pr}\n",
+		"bare on key":         "version: 1\nlanes:\n  x:\n    kind: originate\n    intake: [{github.search: q, every: 5m}]\n    run: {runner: command, command: {argv: [true]}}\n    on: {converged: open_pr}\n",
+		"unknown action":      "version: 1\nlanes:\n  x:\n    kind: originate\n    intake: [{github.search: q, every: 5m}]\n    run: {runner: command, command: {argv: [true]}}\n    when: {converged: merge_it}\n",
+		"no runner, no block": "version: 1\nlanes:\n  x:\n    kind: originate\n    intake: [{github.search: q, every: 5m}]\n    run: {executor: docker}\n    when: {converged: open_pr}\n",
+		"runner no block":     "version: 1\nlanes:\n  x:\n    kind: originate\n    intake: [{github.search: q, every: 5m}]\n    run: {runner: ynh}\n    when: {converged: open_pr}\n",
 	} {
 		if _, err := policy.Load([]byte(doc)); err == nil {
 			t.Errorf("%s: loaded, want a schema error", name)
+		}
+	}
+}
+
+func TestALaneMayOmitItsRunnerWithABlockToUse(t *testing.T) {
+	for name, run := range map[string]string{
+		"command": "{command: {argv: [x]}}",
+		"ynh":     "{ynh: {harness: .}}",
+		"both":    "{ynh: {harness: .}, command: {argv: [x]}}",
+	} {
+		doc := "version: 1\nlanes:\n  x:\n    kind: originate\n    intake: [{github.search: q, every: 5m}]\n    run: " + run + "\n    when: {converged: open_pr}\n"
+		if _, err := policy.Load([]byte(doc)); err != nil {
+			t.Errorf("%s: %v", name, err)
 		}
 	}
 }
@@ -261,9 +281,9 @@ lanes:
 }
 
 func TestLoadFactory(t *testing.T) {
-	f, err := policy.LoadFactory([]byte("version: 1\nrepos: [o/r, github.acme.internal/acme/x]\n" +
-		"forges:\n  ghe: {provider: github, url: https://github.acme.internal, token_env: GHE_TOKEN}\n" +
-		"trackers:\n  jira:\n    provider: mcp\n    site: https://acme.atlassian.net\n    server: {command: [jira-mcp], env: [JIRA_TOKEN]}\n" +
+	f, err := policy.LoadFactory([]byte("version: 1\nrepos: [o/r, github.example.internal/example-org/x]\n" +
+		"forges:\n  ghe: {provider: github, url: https://github.example.internal, token_env: GHE_TOKEN}\n" +
+		"trackers:\n  jira:\n    provider: mcp\n    site: https://example.atlassian.net\n    server: {command: [jira-mcp], env: [JIRA_TOKEN]}\n" +
 		"    get: {tool: get, args: {issueKey: \"{key}\"}}\n    comment: {tool: comment}\n    label: {tool: label}\n" +
 		"    fields: {title: result.t, labels: result.l, status: result.s}\n"))
 	if err != nil || len(f.Repos) != 2 || f.Trackers["jira"]["provider"] != "mcp" {
@@ -333,5 +353,19 @@ func TestYnhEffortLevels(t *testing.T) {
 		if _, err := policy.Load(lane(bad)); err == nil {
 			t.Errorf("%s: loaded, want a schema error", bad)
 		}
+	}
+}
+
+func TestACommandsImageWinsOnlyForTheCommandRunner(t *testing.T) {
+	r := policy.Run{Image: "agent:1", Command: &policy.Command{Argv: []string{"x"}, Image: "golang:1"}}
+	if r.ImageFor("command") != "golang:1" || r.ImageFor("ynh") != "agent:1" {
+		t.Fatalf("%q %q", r.ImageFor("command"), r.ImageFor("ynh"))
+	}
+	r.Command.Image = ""
+	if r.ImageFor("command") != "agent:1" {
+		t.Fatal("run.image is the default")
+	}
+	if (policy.Run{Image: "a"}).ImageFor("command") != "a" {
+		t.Fatal("no command block")
 	}
 }

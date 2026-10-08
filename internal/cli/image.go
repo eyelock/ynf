@@ -15,6 +15,7 @@ import (
 
 	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/runner"
+	"github.com/eyelock/ynf/internal/telemetry"
 )
 
 // imageBuilder returns the engine's agent image builder when building is allowed (images.build)
@@ -23,7 +24,7 @@ func imageBuilder(allowed bool) func(context.Context, string, policy.Ynh) (strin
 	if !allowed {
 		return nil
 	}
-	if _, err := exec.LookPath("ynh"); err != nil {
+	if _, err := exec.LookPath(runner.Ynh); err != nil {
 		return nil
 	}
 	return buildHarnessImage
@@ -56,7 +57,7 @@ func buildHarnessImage(ctx context.Context, wt string, cfg policy.Ynh) (string, 
 	if cfg.Base != "" {
 		args = append(args, "--base", cfg.Base)
 	}
-	if out, err := output(ctx, "", "ynh", args...); err != nil {
+	if out, err := output(ctx, "", runner.Ynh, args...); err != nil {
 		return "", fmt.Errorf("ynh image: %w\n%s", err, tailLines(out, 10))
 	}
 	return tag, nil
@@ -79,7 +80,7 @@ func imageHarness(ctx context.Context, image, want string) (runner.Harness, erro
 	}
 	ynh := func(args ...string) (string, error) {
 		if image == "" { // the ynh installed here: an inline run in the factory image
-			return stdoutOf(ctx, "ynh", args...)
+			return stdoutOf(ctx, runner.Ynh, args...)
 		}
 		return stdoutOf(ctx, "docker", append([]string{"run", "--rm", "--network", "none", "--entrypoint", "ynh", image}, args...)...)
 	}
@@ -144,7 +145,7 @@ func pickHarness(hs []listed, want string) (string, error) {
 
 // hostCapabilities asks this machine's ynh for its capabilities version.
 func hostCapabilities(ctx context.Context) (string, error) {
-	out, err := stdoutOf(ctx, "ynh", "version", "--format", "json")
+	out, err := stdoutOf(ctx, runner.Ynh, "version", "--format", "json")
 	if err != nil {
 		return "", err
 	}
@@ -160,6 +161,7 @@ func hostCapabilities(ctx context.Context) (string, error) {
 // stdoutOf runs a command for its standard output only, so warnings on stderr cannot corrupt it.
 func stdoutOf(ctx context.Context, name string, args ...string) (string, error) {
 	c := exec.CommandContext(ctx, name, args...)
+	telemetry.Command(ctx, c)
 	var out, errb bytes.Buffer
 	c.Stdout, c.Stderr = &out, &errb
 	if err := c.Run(); err != nil {
@@ -201,6 +203,7 @@ func isHarness(dir string) bool {
 
 func output(ctx context.Context, dir, name string, args ...string) (string, error) {
 	c := exec.CommandContext(ctx, name, args...)
+	telemetry.Command(ctx, c)
 	c.Dir = dir
 	var b bytes.Buffer
 	c.Stdout, c.Stderr = &b, &b

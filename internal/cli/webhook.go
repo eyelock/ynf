@@ -15,6 +15,7 @@ import (
 
 	"github.com/eyelock/ynf/internal/engine"
 	"github.com/eyelock/ynf/internal/store"
+	"github.com/eyelock/ynf/internal/telemetry"
 )
 
 // handle handles one GitHub webhook event from a file: the CI-native host (ADR-009), where the
@@ -96,13 +97,16 @@ func (w *webhooks) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		http.Error(rw, "body too large", http.StatusRequestEntityTooLarge)
 		return
 	}
+	name, id := r.Header.Get("X-GitHub-Event"), r.Header.Get("X-GitHub-Delivery")
+	ctx := w.e.Telemetry.Context(r.Context())
 	if err := engine.VerifyGitHubSignature(w.secret, r.Header.Get("X-Hub-Signature-256"), body); err != nil {
+		w.e.MirrorDelivery(ctx, name, id, "", telemetry.OutcomeRejected)
 		http.Error(rw, err.Error(), http.StatusUnauthorized)
 		return
 	}
-	name, id := r.Header.Get("X-GitHub-Event"), r.Header.Get("X-GitHub-Delivery")
 	if id != "" {
 		if _, err := w.e.Store.Put(r.Context(), "seen/github/"+id, []byte("{}"), ""); errors.Is(err, store.ErrConflict) {
+			w.e.MirrorDelivery(ctx, name, id, "", telemetry.OutcomeDeduplicated)
 			_, _ = io.WriteString(rw, "duplicate\n")
 			return
 		}
@@ -112,6 +116,7 @@ func (w *webhooks) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		rw.WriteHeader(http.StatusAccepted)
 		_, _ = io.WriteString(rw, "queued\n")
 	default:
+		w.e.MirrorDelivery(ctx, name, id, "", telemetry.OutcomeRejected)
 		http.Error(rw, "busy; the next sweep will catch up", http.StatusServiceUnavailable)
 	}
 }
@@ -141,7 +146,7 @@ func (w *webhooks) start(rw http.ResponseWriter, r *http.Request) {
 		http.Error(rw, err.Error(), http.StatusBadRequest)
 		return
 	}
-	it, err := w.e.Start(r.Context(), req)
+	it, err := w.e.Start(telemetry.FromHeaders(w.e.Telemetry.Context(r.Context()), r.Header), req)
 	var refused *engine.RefusedError
 	switch {
 	case errors.As(err, &refused):

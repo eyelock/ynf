@@ -194,3 +194,69 @@ func TestFastForwardOnly(t *testing.T) {
 		t.Fatal("missing branch")
 	}
 }
+
+// TestBaseOfAMerge: a fix's base is the first parent of its merge commit, whether the fix was
+// squashed (one commit) or merged (two parents); the base checks out by commit, and the human
+// patch and the agent's are both diffs against it.
+func TestBaseOfAMerge(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	bare := filepath.Join(dir, "remote.git")
+	src := filepath.Join(dir, "src")
+	run(t, "", "git", "init", "-q", "--bare", "-b", "main", bare)
+	run(t, "", "git", "init", "-q", "-b", "main", src)
+	commit := func(msg string) string {
+		run(t, src, "git", "add", "-A")
+		run(t, src, "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", msg)
+		return strings.TrimSpace(run(t, src, "git", "rev-parse", "HEAD"))
+	}
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(src, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("a.go", "package a\n")
+	base := commit("seed")
+	write("a.go", "package a\n\nvar X = 1\n") // the squashed fix: one parent
+	squash := commit("fix (#1)")
+	run(t, src, "git", "checkout", "-q", "-b", "side", base)
+	write("side.go", "package a\n")
+	commit("side")
+	run(t, src, "git", "checkout", "-q", "main")
+	run(t, src, "git", "-c", "user.name=t", "-c", "user.email=t@t", "merge", "-q", "--no-ff", "-m", "Merge side", "side")
+	merge := strings.TrimSpace(run(t, src, "git", "rev-parse", "HEAD"))
+	run(t, src, "git", "push", "-q", bare, "main")
+
+	w := workspace.Workspace{Root: t.TempDir(), RemoteURL: func(string) string { return bare }}
+	mirror, err := w.Mirror(ctx, "o/r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := w.FirstParent(ctx, mirror, squash); err != nil || got != base {
+		t.Fatalf("squash base %s %v, want %s", got, err, base)
+	}
+	if got, err := w.FirstParent(ctx, mirror, merge); err != nil || got != squash {
+		t.Fatalf("merge base %s %v, want %s", got, err, squash)
+	}
+	if _, err := w.FirstParent(ctx, mirror, strings.Repeat("0", 40)); err == nil {
+		t.Fatal("an unknown commit has no parent")
+	}
+	human, err := w.RangeDiff(ctx, mirror, base, squash)
+	if err != nil || !strings.Contains(human, "+var X = 1") {
+		t.Fatalf("human patch: %q %v", human, err)
+	}
+	wt, err := w.Checkout(ctx, mirror, base, filepath.Join(t.TempDir(), "wt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if head, _ := w.Head(ctx, wt); head != base {
+		t.Fatalf("checked out %s, want the base %s", head, base)
+	}
+	if err := os.WriteFile(filepath.Join(wt, "new.go"), []byte("package a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agent, err := w.Diff(ctx, wt, base)
+	if err != nil || !strings.Contains(agent, "b/new.go") {
+		t.Fatalf("agent patch should include a new file: %q %v", agent, err)
+	}
+}

@@ -72,7 +72,7 @@ The lint lane runs ynh, and names a harness rather than a command:
     "auto_approve": "edits",
     "sensor_scope": {
       "docs": "sh scripts/check-docs.sh {label.pkg}",
-      "lint": "GOLANGCI_LINT_CACHE=\"$PWD/.cache/golangci-lint\" golangci-lint run ./{label.pkg}/...",
+      "lint": "golangci-lint run ./{label.pkg}/...",
       "test": "go test -count=1 ./{label.pkg}/..."
     }
   }
@@ -127,6 +127,8 @@ Expected:
 <you>/ynf-sandbox
   ok    deps (off): originate lane, ynh on docker
         harness ., carried in the repository at ., read when a run checks it out
+  ok    detect: originate lane, ynh (detected <version>) on docker
+        harness ., carried in the repository at ., read when a run checks it out
   ok    doc-drift: originate lane, ynh on docker
         harness ., carried in the repository at ., read when a run checks it out
   ok    fix-ci: adopt lane, ynh on docker
@@ -135,9 +137,24 @@ Expected:
         a command, not a harness
   ok    lint-paydown: originate lane, ynh on docker
         harness ., carried in the repository at ., read when a run checks it out
+  ok    outage: originate lane, command on docker
+        a command, not a harness
   ok    reclaim: originate lane, command on docker
         a command, not a harness
+  ok    relaxed: originate lane, ynh on docker
+        harness ., carried in the repository at ., read when a run checks it out
+  ok    spool: originate lane, command on docker
+        a command, not a harness
+  ok    spool-flood: originate lane, command on docker
+        a command, not a harness
+  ok    spool-image: originate lane, command on docker
+        a command, not a harness
 ```
+
+`detect` names no runner, so ynf says what it resolves to here. With your ynh detected it is
+`ynh (detected <version>)`, as above; on a machine with no ynh it reads `command (ynh not found)`,
+and the lane runs its `gofmt` command. The fixture lanes (`outage`, `spool`, `spool-image` and
+`spool-flood`) are command lanes for the sandbox's acceptance test, and nothing here starts them.
 
 ## The agent image
 
@@ -149,7 +166,8 @@ the tools its sensors run. Build it once:
 make -C "$YNF_SRC/sandbox" agent-image
 ```
 
-Expected: the image's ynh answering its version as the last line, `0.9.0` or later. The image is
+Expected: the image's ynh answering its version as the last line, `0.12.0` for the ynh release the
+base image is built on (the `--auto-approve` the lanes use needs 0.9.0 or later). The image is
 `ynf-sandbox-agent:latest`, which is the lint lane's `base`.
 
 ## Loosen a budget, and be refused
@@ -206,7 +224,10 @@ operator_error the lane does not fit its harness: max_turns 20 loosens the harne
 
 ynh never started an agent, so this cost nothing. The same check refuses a `sensor_scope` that
 names a sensor the harness doesn't declare: `sensor_scope names "security", which the harness does
-not declare`. A lane scopes the harness's sensors; it can't invent new ones.
+not declare`. A lane scopes the harness's sensors; it can't invent new ones. Nor can it redefine
+one: a scope may only narrow the declared command, `golangci-lint run ./...` to `golangci-lint run
+./{label.pkg}/...`. A scope of `true`, an added flag or a different program is refused the same
+way, before the run, with the sensor, the declared command, the scope and why.
 
 Put the lane back, and the item with it:
 

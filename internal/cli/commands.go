@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"slices"
@@ -19,8 +20,11 @@ import (
 	"github.com/eyelock/ynf/internal/forge"
 	"github.com/eyelock/ynf/internal/item"
 	"github.com/eyelock/ynf/internal/lease"
+	"github.com/eyelock/ynf/internal/memory"
 	"github.com/eyelock/ynf/internal/policy"
+	"github.com/eyelock/ynf/internal/runner"
 	"github.com/eyelock/ynf/internal/store"
+	"github.com/eyelock/ynf/internal/telemetry"
 	"github.com/eyelock/ynf/internal/tracker"
 	"gopkg.in/yaml.v3"
 )
@@ -43,6 +47,7 @@ func (a *app) doctor(ctx context.Context) error {
 		Detail string `json:"detail"`
 	}
 	var checks []check
+	unreadable := map[string]bool{}
 	add := func(name string, ok bool, detail string) { checks = append(checks, check{name, ok, detail}) }
 	// Docker is needed only when a lane runs in it; inside the factory image every run is inline.
 	// Until the lanes are read, assume it is.
@@ -56,6 +61,9 @@ func (a *app) doctor(ctx context.Context) error {
 			detail += " (shadows " + strings.Join(a.cfg.Shadowed, ", ") + ")"
 		}
 		add("config", true, detail)
+		if ok, detail := a.spoolCheck(); detail != "" {
+			add("telemetry", ok, detail)
+		}
 		if _, err := a.engine(); err != nil {
 			add("engine", false, err.Error())
 		} else {
@@ -91,6 +99,27 @@ func (a *app) doctor(ctx context.Context) error {
 				}
 				add("lanes "+r, true, detail)
 			}
+			// Which checks gate a pull request comes from branch protection and the rulesets. When
+			// neither can be read, every check gates instead; ynf still works, so it is not a failure.
+			if reps, err := a.eng.RequiredChecks(ctx); err != nil {
+				add("required checks", false, err.Error())
+			} else {
+				for _, rp := range reps {
+					name := "required checks " + rp.Repo
+					switch {
+					case rp.Known:
+						add(name, true, fmt.Sprintf("%s: %s", rp.Branch, strings.Join(rp.Checks, ", ")))
+						if len(rp.Checks) == 0 && rp.Workflows != nil && *rp.Workflows == 0 {
+							// Nothing will report on a pull request, so no item reaches in_review.
+							add("ci "+rp.Repo, false, fmt.Sprintf("no workflow files and no required checks on %s: no CI will report on a pull request, so an item stays proposed and escalates after the lane's no_ci_after (unless an outside CI reports statuses)", rp.Branch))
+							unreadable["ci "+rp.Repo] = true
+						}
+					default:
+						add(name, false, fmt.Sprintf("not readable on %s, so every check gates a pull request: %s", rp.Branch, rp.Detail))
+						unreadable[name] = true
+					}
+				}
+			}
 			if conns, err := a.eng.Connections(ctx); err != nil {
 				add("connections", false, err.Error())
 			} else {
@@ -103,9 +132,37 @@ func (a *app) doctor(ctx context.Context) error {
 			}
 		}
 	}
-	optional := map[string]bool{"ynh": true, "ynm": true} // ADR-012
-	for _, tool := range []struct{ name, args string }{{"git", "--version"}, {"docker", "version --format {{.Server.Version}}"}, {"ynh", "version"}, {"ynm", "--version"}} {
-		out, err := exec.CommandContext(ctx, tool.name, strings.Fields(tool.args)...).Output()
+	optional := map[string]bool{"ynh": true, "ynm": true, "ynr": true, "memory queue": true} // ADR-012
+	maps.Copy(optional, unreadable)
+	if a.eng != nil {
+		// Writes ynm could not take wait in ynf's store: worth saying, not a failure.
+		if n, since, err := a.eng.MemoryQueued(ctx); err == nil && n > 0 {
+			add("memory queue", false, fmt.Sprintf("%d memory writes queued since %s", n, since.Local().Format(time.RFC3339)))
+		}
+	}
+	for _, tool := range []struct{ name, args string }{{"git", "--version"}, {"docker", "version --format {{.Server.Version}}"}, {"ynh", "version"}, {"ynm", "--version"}, {"ynr", ""}} {
+		if tool.name == "ynh" {
+			// The same detection a lane with no runner uses (ADR-012), so doctor and a run agree.
+			d := runner.DetectedYnh(ctx)
+			detail := "not found or not working (" + d.Detail + ")"
+			switch {
+			case d.Found:
+				detail = fmt.Sprintf("%s, capabilities %s, features %s: detected, used by a lane with no runner and a ynh block", d.Version, d.Capabilities, featureList(d.Features))
+			case d.Capabilities != "":
+				detail = "found but not supported (" + d.Detail + ")"
+			}
+			add("ynh", d.Found, detail)
+			continue
+		}
+		if tool.name == "ynr" {
+			// Detected like ynh, and unlike it nothing uses it by being found (ADR-012).
+			ok, detail := ynrCheck(ctx, a.cfg)
+			add("ynr", ok, detail)
+			continue
+		}
+		c := exec.CommandContext(ctx, tool.name, strings.Fields(tool.args)...)
+		telemetry.Command(ctx, c)
+		out, err := c.Output()
 		detail := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
 		if err != nil {
 			detail = "not found or not working (" + err.Error() + ")"
@@ -115,6 +172,12 @@ func (a *app) doctor(ctx context.Context) error {
 			}
 		}
 		add(tool.name, err == nil, detail)
+	}
+	if a.cfg != nil {
+		if line, ok := a.memoryLine(); line != "" {
+			add("memory", ok, line)
+			optional["memory"] = true
+		}
 	}
 	var b strings.Builder
 	ok := true
@@ -137,6 +200,26 @@ func (a *app) doctor(ctx context.Context) error {
 		return withCode(ExitPolicy, errors.New("doctor found problems"))
 	}
 	return nil
+}
+
+// memoryLine says whether memory is on and why, for doctor: explicit settings, or detection
+// (ADR-012), which needs ynm on PATH and a store.
+func (a *app) memoryLine() (string, bool) {
+	enabled, _, cwd := a.cfg.MemorySettings()
+	transport, _, _, _ := a.cfg.MemoryTransport()
+	switch {
+	case enabled != nil && !*enabled:
+		return "off: memory.provider is none", true
+	case transport == "http":
+		return "on: hosted ynm, memory.transport http", true
+	case enabled != nil:
+		return "on: memory.provider ynm", true
+	}
+	m, why := memory.Detect(cwd)
+	if m == nil {
+		return "off: " + why, false
+	}
+	return "on: " + why, true
 }
 
 func (a *app) lanesCmd(ctx context.Context, args []string) error {
@@ -162,8 +245,8 @@ func (a *app) lanesCmd(ctx context.Context, args []string) error {
 		if err != nil {
 			return withCode(ExitPolicy, err)
 		}
-		return a.out(map[string]any{"valid": true, "file": *file, "lanes": f.Names()},
-			fmt.Sprintf("%s: valid, %d lanes (%s)", *file, len(f.Lanes), strings.Join(f.Names(), ", ")))
+		out := withPins(map[string]any{"valid": true, "file": *file, "lanes": f.Names()}, f.Pins())
+		return a.out(out, fmt.Sprintf("%s: valid, %d lanes (%s)", *file, len(f.Lanes), strings.Join(f.Names(), ", "))+pinLines(f.Pins()))
 	case "show":
 		fs := a.flags("lanes show")
 		repo := fs.String("repo", "", "")
@@ -192,6 +275,22 @@ func (a *app) lanesCmd(ctx context.Context, args []string) error {
 			lanes = map[string]policy.Lane{name: l}
 		}
 		shown := map[string]any{"repo": rp.Repo, "dir": rp.Dir, "ref": rp.Base, "sha": rp.SHA, "lanes": lanes}
+		// What a lane that names no runner resolves to on this host (ADR-012), which no lane says.
+		resolves := map[string]string{}
+		for name, l := range lanes {
+			if l.Run.Runner != "" {
+				continue
+			}
+			if res, err := runner.Resolve(l, e.HostYnh(ctx)); err != nil {
+				resolves[name] = "none: " + err.Error()
+			} else {
+				resolves[name] = res.Note
+			}
+		}
+		if len(resolves) > 0 {
+			shown["resolves"] = resolves
+		}
+		withPins(shown, (&policy.File{Lanes: lanes}).Pins())
 		if rp.Config != nil {
 			// Which layer set each value (ADR-006): the configuration repository or the repository.
 			shown["config"] = map[string]string{"repo": rp.Config.Repo, "sha": rp.Config.SHA}
@@ -337,6 +436,28 @@ func key(s, defaultHost string, resolve func(name string) (string, error)) (stri
 	return item.Key(ref), nil
 }
 
+// itemKey is key for a command that acts on a stored item. A GitHub number may be an issue or an
+// adopted pull request, and the forge numbers both from one sequence, so at most one is stored:
+// the short form finds the pull request's item when there is no issue's.
+func itemKey(ctx context.Context, st store.Store, s, defaultHost string, resolve func(name string) (string, error)) (string, error) {
+	k, err := key(s, defaultHost, resolve)
+	if err != nil {
+		return "", err
+	}
+	base, n, ok := strings.Cut(k, "/issues/")
+	if !ok || strings.Contains(n, "/") || strings.HasPrefix(s, "item/") {
+		return k, nil
+	}
+	if _, _, err := st.Get(ctx, k); !errors.Is(err, store.ErrNotFound) {
+		return k, nil
+	}
+	pr := base + "/pulls/" + n
+	if _, _, err := st.Get(ctx, pr); err == nil {
+		return pr, nil
+	}
+	return k, nil
+}
+
 // parseRef resolves a reference to a tracker host and the tracker's own key.
 func parseRef(s, defaultHost string, resolve func(name string) (string, error)) (tracker.Ref, error) {
 	if repoPart, num, ok := strings.Cut(s, "#"); ok {
@@ -380,7 +501,7 @@ func (a *app) items(ctx context.Context, args []string) error {
 	if len(args) < 2 {
 		return withCode(ExitUsage, fmt.Errorf("items %s needs an item", args[0]))
 	}
-	k, err := key(args[1], e.ForgeHost, trackerNames(ctx, e))
+	k, err := itemKey(ctx, e.Store, args[1], e.ForgeHost, trackerNames(ctx, e))
 	if err != nil {
 		return err
 	}
@@ -469,8 +590,20 @@ func summarise(en store.LogEntry) string {
 		var r engine.RunRecord
 		if json.Unmarshal(en.Body, &r) == nil {
 			via := ""
+			if r.RunnerDetected {
+				via = " (detected"
+				if r.RunnerVersion != "" {
+					via += " " + r.RunnerVersion
+				}
+				if len(r.RunnerFeatures) > 0 {
+					via += "; features " + strings.Join(r.RunnerFeatures, ", ")
+				}
+				via += ")"
+			} else if len(r.RunnerFeatures) > 0 {
+				via = " (" + r.RunnerVersion + "; features " + strings.Join(r.RunnerFeatures, ", ") + ")"
+			}
 			if r.Executor != "" {
-				via = " via " + r.Executor
+				via += " via " + r.Executor
 			}
 			return fmt.Sprintf("%s %s%s: %s, %d changed (%s)", r.RunID, r.Runner, via, strings.TrimSpace(r.Outcome+" "+r.Detail), len(r.Changed), r.Duration)
 		}
@@ -481,6 +614,24 @@ func summarise(en store.LogEntry) string {
 		}
 	}
 	return string(en.Body)
+}
+
+// withPins adds the harnesses lanes pin from a repository to out, if any do. This says what a pin
+// names without installing it: `ynf harness` installs it and says what it resolves to.
+func withPins(out map[string]any, pins map[string]policy.Pin) map[string]any {
+	if len(pins) > 0 {
+		out["pinned_harnesses"] = pins
+	}
+	return out
+}
+
+// pinLines says, for each lane that pins its harness, which repository and tag or commit it takes.
+func pinLines(pins map[string]policy.Pin) string {
+	var b strings.Builder
+	for _, name := range slices.Sorted(maps.Keys(pins)) {
+		fmt.Fprintf(&b, "\nlane %s pins its harness from %s at %s (installed for each run on the host; `ynf harness` resolves it)", name, pins[name].CloneURL(), pins[name].Ref)
+	}
+	return b.String()
 }
 
 // validateMerged checks a repository's lanes.yaml as ynf would use it: laid over the configuration
@@ -495,8 +646,8 @@ func (a *app) validateMerged(ctx context.Context, repo, file string, doc []byte)
 		return withCode(ExitPolicy, err)
 	}
 	names := rp.File.Names()
-	out := map[string]any{"valid": true, "file": file, "repo": repo, "lanes": names}
-	text := fmt.Sprintf("%s: valid, %d lanes (%s)", file, len(names), strings.Join(names, ", "))
+	out := withPins(map[string]any{"valid": true, "file": file, "repo": repo, "lanes": names}, rp.File.Pins())
+	text := fmt.Sprintf("%s: valid, %d lanes (%s)", file, len(names), strings.Join(names, ", ")) + pinLines(rp.File.Pins())
 	if rp.Config != nil {
 		out["config"] = map[string]string{"repo": rp.Config.Repo, "sha": rp.Config.SHA}
 		text += fmt.Sprintf("\nmerged over config@%s of %s", short(rp.Config.SHA), rp.Config.Repo)
@@ -517,7 +668,7 @@ func (a *app) replay(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	k, err := key(args[0], e.ForgeHost, trackerNames(ctx, e))
+	k, err := itemKey(ctx, e.Store, args[0], e.ForgeHost, trackerNames(ctx, e))
 	if err != nil {
 		return err
 	}
@@ -598,4 +749,12 @@ func short(sha string) string { return sha[:min(7, len(sha))] }
 // trackerNames resolves a configured tracker's name to its host, for references.
 func trackerNames(ctx context.Context, e *engine.Engine) func(string) (string, error) {
 	return func(name string) (string, error) { return e.TrackerHost(ctx, name) }
+}
+
+// featureList says the features a ynh listed, or "none" for one that listed no features.
+func featureList(f []string) string {
+	if len(f) == 0 {
+		return "none"
+	}
+	return strings.Join(f, ", ")
 }

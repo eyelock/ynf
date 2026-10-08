@@ -23,7 +23,9 @@ import (
 	"github.com/eyelock/ynf/internal/memory"
 	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/runner"
+	"github.com/eyelock/ynf/internal/spool"
 	"github.com/eyelock/ynf/internal/store"
+	"github.com/eyelock/ynf/internal/telemetry"
 	"github.com/eyelock/ynf/internal/tracker"
 )
 
@@ -85,9 +87,17 @@ type Engine struct {
 	// ImageHarness reads what the harness inside an agent image declares, by asking the image's
 	// own ynh; harness picks one when the image carries several. nil skips reading it.
 	ImageHarness func(ctx context.Context, image, harness string) (runner.Harness, error)
+	// InstallHarness installs a harness, a folder or a pin from a repository, into the ynh home
+	// ynhHome, which is the run's own, and says what was installed, including the id `ynh agent
+	// run` takes for it. nil runs the lane's harness value as it is, which a pin cannot be.
+	InstallHarness func(ctx context.Context, src runner.HarnessSource, ynhHome string) (runner.Installed, error)
 	// ImageCapabilities reports the capabilities version of the ynh inside an agent image; nil
 	// skips the check.
 	ImageCapabilities func(ctx context.Context, image string) (string, error)
+	// DetectYnh reports whether the host's ynh is there and supported, for a lane that names no
+	// runner (ADR-012); the CLI passes runner.DetectedYnh, which asks once per process. Nil means
+	// ynh is not detected, and a lane that names ynh is not checked against it.
+	DetectYnh func(ctx context.Context) runner.Detection
 	// Getenv reads the variables a lane passes into its runs (run.env). Default os.Getenv.
 	Getenv func(string) string
 
@@ -99,20 +109,40 @@ type Engine struct {
 	// MemoryLevel is the ynm level ynf writes at: empty or personal for one person's store,
 	// distributed for a shared one (ADR-008).
 	MemoryLevel string
+	// Spool is the spool root, when one is configured: each run gets a folder and a manifest in
+	// it (ynr ADR-003). SpoolCollector is true when ynf starts ynr serve for the job, so runs
+	// start without the operator's OTEL_EXPORTER_OTLP_*.
+	Spool          *spool.Spool
+	SpoolCollector bool
 	// ProgressEvery is how often a run in progress is logged; default 30s, negative for never.
 	ProgressEvery time.Duration
 
 	Now   func() time.Time
 	NewID func() string
 	Log   *slog.Logger
+	// Telemetry is ynf's OpenTelemetry (ADR-011); nil writes none and changes nothing. It is
+	// write-only: nothing in the engine reads it back.
+	Telemetry *telemetry.T
 
 	mu       sync.Mutex
 	policies map[string]*RepoPolicy
-	factory  *FactoryPolicy
+	// emptySaid holds the lanes whose empty search was already reported, so a serve says it once
+	// until the search finds something again.
+	emptySaid map[string]bool
+	memq      *memory.Queue
+	factory   *FactoryPolicy
 	// trackerHosts maps a configured tracker's name to its host, for shorthand references.
 	trackerHosts map[string]string
 	// forgeNames maps a declared forge's name to its host, for listing.
 	forgeNames map[string]string
+}
+
+// HostYnh is what detecting ynh on the host found: nothing when no detection is wired.
+func (e *Engine) HostYnh(ctx context.Context) runner.Detection {
+	if e.DetectYnh == nil {
+		return runner.Detection{Detail: "ynh detection is not wired"}
+	}
+	return e.DetectYnh(ctx)
 }
 
 // RepoPolicy is a repository's lane policy, read from its default branch.
@@ -340,6 +370,7 @@ func (e *Engine) wantLane(name string) bool {
 
 // Sweep runs every enrolled repository's lane searches and starts a step for each new ticket.
 func (e *Engine) Sweep(ctx context.Context) error {
+	e.FlushMemory(ctx)
 	repos, err := e.Enrolled(ctx)
 	if err != nil {
 		return err
@@ -376,6 +407,12 @@ func (e *Engine) SweepRepos(ctx context.Context, repos []string) error {
 }
 
 func (e *Engine) sweepLane(ctx context.Context, repo string, lane policy.Lane) error {
+	searched, matched := false, false
+	defer func() {
+		if searched {
+			e.reportEmpty(ctx, repo, lane, matched)
+		}
+	}()
 	for _, in := range lane.Intake {
 		if in.GitHubSearch == "" {
 			e.log().Warn("intake not supported yet", "lane", lane.Name, "intake", in)
@@ -391,16 +428,42 @@ func (e *Engine) sweepLane(ctx context.Context, repo string, lane policy.Lane) e
 		if err != nil {
 			return err
 		}
+		searched = true
 		for _, h := range hits {
 			if h.Repo != name || h.IsPR != (lane.Kind == "adopt") {
 				continue
 			}
+			matched = true
 			if err := e.track(ctx, lane, host, h); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// reportEmpty says, once, that a lane's search found nothing: the forge's search can take a minute
+// to show a label just added, and a silent sweep looks like ynf ignoring the ticket. A lane that
+// is off or paused is not looking, so it is not reported.
+func (e *Engine) reportEmpty(ctx context.Context, repo string, lane policy.Lane, matched bool) {
+	key := repo + "/" + lane.Name
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if matched {
+		delete(e.emptySaid, key)
+		return
+	}
+	if e.emptySaid[key] || !lane.On() {
+		return
+	}
+	if s, _, err := e.LaneState(ctx, repo, lane.Name); err != nil || s.Paused {
+		return
+	}
+	if e.emptySaid == nil {
+		e.emptySaid = map[string]bool{}
+	}
+	e.emptySaid[key] = true
+	e.log().Info("lane "+lane.Name+": no matching items (GitHub search can lag a newly added label by a minute)", "repo", repo)
 }
 
 // track creates the item for a new ticket and steps it; a ticket already tracked is left alone.
@@ -423,7 +486,7 @@ func (e *Engine) track(ctx context.Context, lane policy.Lane, host string, h for
 	}
 	e.log().Info("tracking", "item", it.Key, "lane", lane.Name)
 	ev := event.New(e.NewID(), "ynf/search", event.TicketMatched, it.Subject(), now, map[string]any{"lane": lane.Name})
-	return e.Handle(ctx, it.Key, ev)
+	return e.Handle(e.MirrorIntake(ctx, ev, it.Key, telemetry.OutcomeAccepted), it.Key, ev)
 }
 
 // RunDue steps every item whose timer has passed, and returns how many it stepped.
@@ -444,7 +507,7 @@ func (e *Engine) RunDue(ctx context.Context) (int, error) {
 			continue
 		}
 		ev := event.New(e.NewID(), "ynf/timer", event.TimerDue, it.Subject(), e.Now(), nil)
-		if err := e.Handle(ctx, k, ev); err != nil {
+		if err := e.Handle(e.MirrorIntake(ctx, ev, k, telemetry.OutcomeAccepted), k, ev); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", k, err))
 		}
 		n++
@@ -499,7 +562,7 @@ func (e *Engine) tracker(t tracker.Ref) (tracker.Tracker, error) {
 	tr, ok := e.Trackers[t.Host]
 	e.mu.Unlock()
 	if ok {
-		return tr, nil
+		return e.traceTracker(tr), nil
 	}
 	if t.Host == AdhocHost {
 		return AdhocTracker(e.Store), nil
@@ -539,7 +602,7 @@ func (e *Engine) repoOf(it item.Item) string { return e.qualify(it.Forge, it.Rep
 func (e *Engine) forgeFor(repo string) (forge.Forge, string, error) {
 	host, name := e.splitRepo(repo)
 	if host == e.forgeHost() {
-		return e.Forge, name, nil
+		return e.traceForge(e.Forge), name, nil
 	}
 	e.mu.Lock()
 	inst, ok := e.Forges[host]
@@ -547,7 +610,7 @@ func (e *Engine) forgeFor(repo string) (forge.Forge, string, error) {
 	if !ok {
 		return nil, "", fmt.Errorf("%s is on %s, which is not a configured forge", repo, host)
 	}
-	return inst.Forge, name, nil
+	return e.traceForge(inst.Forge), name, nil
 }
 
 // gitFor is the git workspace for a repository's forge. It takes the qualified name, so mirrors
@@ -557,9 +620,9 @@ func (e *Engine) gitFor(repo string) Git {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if inst, ok := e.Forges[host]; ok && host != e.forgeHost() {
-		return inst.Git
+		return e.traceGit(inst.Git)
 	}
-	return e.Git
+	return e.traceGit(e.Git)
 }
 
 // addForges registers the forge instances a configuration repository declares.

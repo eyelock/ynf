@@ -1,0 +1,10 @@
+title = "ynf gitleaks config"
+
+[extend]
+useDefault = true
+
+# TestScrub holds fake AWS keys and JWTs to check that telemetry scrubs them. They are not
+# credentials. A path allowlist, not fingerprints, so this survives a history rewrite.
+[[allowlists]]
+description = "Fake tokens in the telemetry scrub test"
+paths = ['''internal/telemetry/telemetry_test\.go''']

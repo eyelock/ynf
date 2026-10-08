@@ -59,7 +59,10 @@ type Item struct {
 	// CICountedSHA is the head commit whose failing CI the failure counters already include, so a
 	// failure that stays failed across polls is counted once. Empty until a failure is counted.
 	CICountedSHA string `json:"ci_counted_sha,omitempty"`
-	Attempts     int    `json:"attempts"`
+	// NoCI is when ynf first saw the head commit with no check or status at all, kept only while
+	// that is true: the decision to escalate reads it.
+	NoCI     *NoCI `json:"no_ci,omitempty"`
+	Attempts int   `json:"attempts"`
 	// Counters are the deterministic counters decisions read (ADR-008): reaction retries and
 	// per-signature failures.
 	Counters map[string]int `json:"counters,omitempty"`
@@ -67,8 +70,33 @@ type Item struct {
 	Feedback string         `json:"feedback,omitempty"` // what the next run is told, e.g. CI output
 	NextDue  *time.Time     `json:"next_due,omitempty"`
 	Lease    *Lease         `json:"lease,omitempty"`
-	Created  time.Time      `json:"created"`
-	Updated  time.Time      `json:"updated"`
+	// Trace is where the item's history can be followed in telemetry (ynr ADR-002).
+	Trace   *Trace    `json:"trace,omitempty"`
+	Created time.Time `json:"created"`
+	Updated time.Time `json:"updated"`
+}
+
+// NoCI marks a head commit that has had no check or status of any kind since Since.
+type NoCI struct {
+	SHA   string    `json:"sha"`
+	Since time.Time `json:"since"`
+}
+
+// Trace holds the span ids that link an item's history across steps and processes, kept in the
+// store beside the item so it works on every provider. Nothing in ynf reads telemetry back: these
+// are ids ynf wrote, used only to make span links.
+type Trace struct {
+	// Step is the last step's span, which the next step links to.
+	Step *SpanRef `json:"step,omitempty"`
+	// Intake is the ynf.intake span of an event recorded for the item that no step has linked to
+	// yet, such as a detached start's, which a later step in another process picks up.
+	Intake *SpanRef `json:"intake,omitempty"`
+}
+
+// SpanRef names a span by its trace id and span id, as lowercase hex.
+type SpanRef struct {
+	TraceID string `json:"trace_id"`
+	SpanID  string `json:"span_id"`
 }
 
 // Run is the last run's result, as the decider needs it.

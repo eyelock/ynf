@@ -89,20 +89,20 @@ Until then, the item is still someone else's.
 
 ## Another ynf takes over
 
-Try to put the item back by hand while the lease is live:
+Try to put the item back by hand while it is still `running`:
 
 ```bash
 ynf items retry <you>/ynf-sandbox#$R
 ```
 
-Expected:
+Expected, with exit code 2:
 
 ```text
-ynf: item/github.com/<you>/ynf-sandbox/issues/10 is being worked on by ynf@your-laptop.local/48213; release it first if that is stale
+ynf: item/github.com/<you>/ynf-sandbox/issues/10 is running; retry is only for escalated or quarantined items
 ```
 
-ynf won't take the item out from under a holder it thinks is alive. You don't need to do anything:
-start a fresh ynf, as a restarted machine would:
+ynf won't take a running item out from under the process that holds it. You don't need to do
+anything: start a fresh ynf, as a restarted machine would:
 
 ```bash
 ynf sweep --until-settled --timeout 15m --lane reclaim
@@ -135,11 +135,11 @@ A lane allows three attempts by default (`attempts`). An item whose runs keep dy
 Two commands put a person in charge of one item:
 
 - **`ynf items retry <item>`** sends an escalated or quarantined item back to `ready`, with its
-  attempts and failure counts cleared, to be run again on the next sweep. It's refused while
-  another ynf holds the item, as you saw.
-- **`ynf items release <item>`** clears a lease left by a ynf that died, without waiting for it to
-  run out, so a `retry` is accepted at once. With a thirty-second lease you'd rarely bother; with a
-  deployed factory's longer one, you might.
+  attempts and failure counts cleared, to be run again on the next sweep. It's refused for an item
+  in any other state, as you saw, and while another ynf holds the item.
+- **`ynf items release <item>`** clears a lease left by a ynf that died, and makes the item due
+  now, so another ynf restarts its work at once instead of waiting for the lease to run out. With a
+  thirty-second lease you'd rarely bother; with a deployed factory's longer one, you might.
 
 Both are recorded in the item's log as a `note`:
 

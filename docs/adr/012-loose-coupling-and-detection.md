@@ -60,7 +60,7 @@ ynh info <harness id> --format json   its manifest: focuses (prompt, profile), e
 ```
 
 ynf resolves a lane's focus to its prompt and profile, checks the harness passes the variables the
-lane gives it, and checks the lane only tightens budgets and scopes declared sensors (ADR-006), all
+lane gives it, and checks the lane only tightens budgets and narrows declared sensors (ADR-006), all
 against that answer and never against the repository's working copy, which may differ from what
 the image carries or not contain the harness at all. ynf asks the image's ynh rather than the
 host's, because the image's runs the agent.
@@ -76,7 +76,8 @@ with the runner:
 ```yaml
 run:
   runner: ynh                      # or: command
-  image: ghcr.io/eyelock/ynh-lint@sha256:…   # or ynh.harness: <folder>, built when unpublished
+  image: ghcr.io/eyelock/ynh-lint@sha256:…   # or ynh.harness: <folder>, built when unpublished;
+                                             # on the host, ynh.harness: <repository>@<tag-or-commit>
   ynh:
     focus: tidy
     budgets: { max_turns: 20 }     # may only tighten (ADR-006)
@@ -85,19 +86,44 @@ run:
   #   result_file: "{run_dir}/result.json"
 ```
 
-**Zero config: detect, then record what was detected.** With no explicit setting, ynf detects:
+**Zero config: detect, then record what was detected.** With no explicit setting, ynf detects.
+It finds another tool only as a shell would: the first `ynh`, `ynm` or `ynr` on the `PATH` it is
+given. No variable or flag names a binary, and ynf never builds one; where a tool lives is the
+environment's business, and a second way to say it is a second thing to get wrong.
 
 | Provider | Detected when |
 |---|---|
-| runner `ynh` | `ynh` is on `PATH` (or `YNF_YNH_BIN`) and `ynh version --format json` is in the supported range |
-| memory `ynm` | `ynm` is on `PATH`, and the repository has `.ynm/` or the user has `~/.ynm/`; or a `YNM_URL` endpoint answers |
+| runner `ynh` | `ynh` is on `PATH` and `ynh version --format json` is in the supported range |
+| memory `ynm` | `ynm` is on `PATH`, and a store is present: ynf looks where ynm itself writes, in ynm's order: the project store, a `.ynm/` at the root of the git repository the directory ynm runs from (`memory.cwd`, else where ynf runs) is in, or at the main repository's root for a linked worktree; then the user's store, `$YNM_HOME` when that is set and `~/.ynm/` only when it is not. The search never walks above the repository root, outside a repository there is no project store, and `~/.ynm/` is never found as a project store, nor consulted when `YNM_HOME` is set, even if that folder is missing. With the binary but no store, memory stays off and `ynf doctor` says why. A hosted ynm is configured (`memory.transport: http`), never detected |
+| `ynr` (optional) | `ynr` is on `PATH` and `ynr info --format json` answers with a version. Detecting it starts nothing: `ynf doctor` shows it, and only the telemetry configuration starts `ynr serve` (ADR-009, ADR-011) |
 | tracker and forge `github` for github.com | always available; any other instance, GitHub Enterprise Server or an `mcp` tracker, is configured, never detected |
 
+Detection decides what ynf may use; configuration decides what runs. ynr is the case that shows
+it: it is detected the way ynh is, and unlike ynh nothing uses it by being found, because a
+collector is a background process, and an unattended factory must not start one because someone
+installed a binary. Without it, every run and every job does what it did.
+
 Precedence is explicit config, then detection, then the built-in fallback (`command` for the
-runner, `none` for memory). A lane that names a provider explicitly and cannot get it fails to
-load. A lane that relies on detection runs with whatever was detected. Every step records the
+runner, `none` for memory). An explicit `memory.provider: ynm` turns memory on without the store
+check. A lane that names a provider explicitly and cannot get it is refused
+before anything runs, and never falls back. A lane that relies on detection runs with whatever was
+detected: with no runner named, a lane with a `ynh` block runs as ynh when ynh is detected and
+otherwise as its `command` block, and a lane with neither is refused. Every step records the
 providers it used and their versions, so a run on one machine is explainable on another, and
 `ynf doctor` prints which providers are installed and their versions.
+
+**Detected features, gated by name.** Besides its version and capabilities, ynh lists `features` in
+`ynh version --format json`: names that only ever get added, which a consumer gates on instead of
+comparing versions. ynf reads them, an absent list meaning none, and shows them in `ynf doctor` and
+in the run record (`runner_features`). Two are used. `agent-run-harness-path` means
+`ynh agent run --harness` takes a folder, so a harness folder on the host executors (`process`, and
+`inline` when the image carries no harness) is passed as a path with no install step; without it
+ynf installs the folder into a ynh home of the run's own, as it always does for a harness pinned from
+git. `agent-run-fetches-includes` means the run fetches the harness's git includes at setup. Either
+way the run's ynh home is its own, under the run folder, because a path run still writes there (the
+include clones and a schema marker), so the operator's home is never read or written. The fetch is
+network access inside the run, under the executor's own containment: the host's network on
+`process`, the job runner's policy on `inline`.
 
 **ynh-only features stay in the ynh provider.** Budget tightening, sensor overlays, the control
 channel, checkpoint paths, and the `YNH-Session` trailer exist only when the runner is `ynh`.

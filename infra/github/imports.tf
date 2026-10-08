@@ -1,6 +1,12 @@
 # Adopt the live repository into state. On a fresh state these import; once imported they are
 # no-ops. To set the repository up from nothing (a new owner or name), delete this file first.
-# main has no protection to import yet; the first apply creates it.
+# The develop and main rulesets (branches.tf) are not imported: the first apply creates them. The
+# "Never Delete Main or Develop" ruleset was created by hand, so it is adopted below.
+
+import {
+  to = github_repository_ruleset.never_delete
+  id = "ynf:24699969"
+}
 
 import {
   to = github_repository.ynf

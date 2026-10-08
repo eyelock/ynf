@@ -9,10 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/eyelock/ynf/internal/decide"
 	"github.com/eyelock/ynf/internal/event"
@@ -24,7 +26,9 @@ import (
 	"github.com/eyelock/ynf/internal/lease"
 	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/runner"
+	"github.com/eyelock/ynf/internal/spool"
 	"github.com/eyelock/ynf/internal/store"
+	"github.com/eyelock/ynf/internal/telemetry"
 	"github.com/eyelock/ynf/internal/tracker"
 )
 
@@ -66,18 +70,30 @@ func configSHA(rp *RepoPolicy) string {
 
 // RunRecord is the log entry for a run.
 type RunRecord struct {
-	RunID    string   `json:"run_id"`
-	Runner   string   `json:"runner"`
-	Executor string   `json:"executor"`
-	Argv     []string `json:"argv"`
-	Base     string   `json:"base"`
-	Exit     int      `json:"exit"`
-	Outcome  string   `json:"outcome"`
-	Detail   string   `json:"detail,omitempty"`
-	Changed  []string `json:"changed,omitempty"`
-	Denied   []string `json:"denied,omitempty"` // hosts the egress proxy refused
-	StepDir  string   `json:"step_dir"`
-	Duration string   `json:"duration"`
+	RunID  string `json:"run_id"`
+	Runner string `json:"runner"`
+	// RunnerDetected is set when the lane named no runner and detection chose this one, so the
+	// log and stats can tell a named runner from a detected one (ADR-012).
+	RunnerDetected bool `json:"runner_detected,omitempty"`
+	// RunnerFeatures are the features the host's ynh listed, for a run that was detected or ran a
+	// harness folder by path, so the record says what the run could rely on.
+	RunnerFeatures []string `json:"runner_features,omitempty"`
+	Executor       string   `json:"executor"`
+	Argv           []string `json:"argv"`
+	Base           string   `json:"base"`
+	Exit           int      `json:"exit"`
+	Outcome        string   `json:"outcome"`
+	Detail         string   `json:"detail,omitempty"`
+	Changed        []string `json:"changed,omitempty"`
+	Denied         []string `json:"denied,omitempty"` // hosts the egress proxy refused
+	StepDir        string   `json:"step_dir"`
+	Duration       string   `json:"duration"`
+	// HarnessPin is the repository and ref a pinned harness was installed from, as the lane wrote
+	// it; Harness and HarnessSHA say which harness and commit that gave.
+	HarnessPin string `json:"harness_pin,omitempty"`
+	// HarnessPinURL is the same pin as ynh was given it, set only when it differs: a bare host and
+	// path (github.com/org/harness@v1) is cloned from https://github.com/org/harness.
+	HarnessPinURL string `json:"harness_pin_url,omitempty"`
 	// Model and Usage are what the runner reports, for comparing outcomes and cost by model and
 	// effort (ADR-011). ynf's own store is the run history; memory holds only failure patterns.
 	Model string `json:"model,omitempty"`
@@ -95,18 +111,53 @@ type ActionRecord struct {
 
 // Handle runs one step for the item at key, starting from ev. A held lease means another instance
 // is working on it, which is not an error.
-func (e *Engine) Handle(ctx context.Context, key string, ev event.Event) error {
+//
+// The step is one trace (ADR-011): its span has the claim, and for each decision a probe, a decide
+// and an act, with the run and every call out to another system beneath them. It links to the
+// item's previous step and to the intake of the event that started it, and leaves its own span on
+// the item for the next step to link to.
+func (e *Engine) Handle(ctx context.Context, key string, ev event.Event) (err error) {
 	stepID := e.NewID()
-	h, err := lease.Claim(ctx, e.Store, key, e.Owner, stepID, e.LeaseTTL, e.Now)
+	itemKey := attribute.String(telemetry.AttrItemKey, key)
+	var links []trace.Link
+	if sc, ok := telemetry.Intake(ctx); ok {
+		links = append(links, trace.Link{SpanContext: sc})
+	}
+	ctx, span := e.tracer().Start(ctx, telemetry.SpanStep, trace.WithLinks(links...), trace.WithAttributes(
+		itemKey, attribute.String(telemetry.AttrStepID, stepID), attribute.String(telemetry.AttrCloudeventsEventType, ev.Type)))
+	var lost atomic.Bool
+	outcome := telemetry.OutcomeCompleted
+	defer func() {
+		switch {
+		case lost.Load():
+			outcome = telemetry.OutcomeLost
+		case err != nil && outcome == telemetry.OutcomeCompleted:
+			outcome = telemetry.OutcomeFailed
+		}
+		telemetry.Finish(span, outcome)
+	}()
+	e.Telemetry.Event(ctx, telemetry.EventStepStarted, itemKey,
+		attribute.String(telemetry.AttrStepID, stepID), attribute.String(telemetry.AttrCloudeventsEventType, ev.Type))
+
+	claimCtx, claim := e.tracer().Start(ctx, telemetry.SpanClaim, trace.WithAttributes(itemKey))
+	h, err := lease.Claim(claimCtx, e.Store, key, e.Owner, stepID, e.LeaseTTL, e.Now)
 	if errors.Is(err, lease.ErrHeld) {
+		telemetry.Finish(claim, telemetry.OutcomeHeld)
+		outcome = telemetry.OutcomeHeld
 		e.log().Debug("held elsewhere", "item", key)
 		return nil
 	}
 	if err != nil {
+		telemetry.Finish(claim, telemetry.OutcomeFailed)
 		return err
 	}
+	epoch := attribute.Int64(telemetry.AttrLeaseEpoch, h.Epoch())
+	telemetry.Finish(claim, telemetry.OutcomeClaimed, epoch)
+	span.SetAttributes(epoch)
+	for _, l := range historyLinks(h.Item()) {
+		span.AddLink(l)
+	}
 	runCtx, cancel := context.WithCancel(ctx)
-	var lost atomic.Bool
 	go h.Heartbeat(runCtx, e.Heartbeat, func(it item.Item) {
 		if err := e.schedule(runCtx, it); err != nil && runCtx.Err() == nil {
 			e.log().Warn("reschedule on heartbeat", "item", key, "err", err)
@@ -116,7 +167,7 @@ func (e *Engine) Handle(ctx context.Context, key string, ev event.Event) error {
 		e.log().Error("lease lost; stopping", "item", key, "err", err)
 		cancel()
 	})
-	s := &step{e: e, h: h, id: stepID, ctx: runCtx, g: e.gitFor(e.repoOf(h.Item()))}
+	s := &step{e: e, h: h, id: stepID, ctx: runCtx, g: e.gitFor(e.repoOf(h.Item())), span: span, expired: h.Expired()}
 	defer func() {
 		s.cleanup()
 		cancel()
@@ -150,12 +201,27 @@ type step struct {
 	ctx context.Context
 	n   int // runs in this step
 
+	span    trace.Span // the step's own span; nil in shadow mode, which has no step
+	laneID  string     // the lane's id in telemetry, once the policy is read
+	expired bool       // the claim took over an expired lease, counted once the lane is known
+
 	mirror string
 	wt     string
 	base   string // the commit the run started from
 	run    *RunRecord
 	result runner.Result
 	text   forge.Text
+
+	// Shadow mode runs a lane as the factory would, minus everything outward (FR-26): quiet keeps
+	// the run out of the item's log, and the rest stand in for what a real step reads from the
+	// ticket and the lane.
+	quiet bool
+	// labels, when labelsSet, are the ticket's labels the run reads, instead of the tracker's.
+	labels    []string
+	labelsSet bool
+	// imageBuilt means the lane's run.image is one ynf built for this run's pin, not one the
+	// lane names, so the harness in it is whatever the folder carried.
+	imageBuilt bool
 }
 
 // schedule sets the item's timer: what its decision asked for, or, while a lease is held, no later
@@ -192,19 +258,32 @@ func (s *step) decideAndAct(ev event.Event) (*event.Event, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.describe(it, rp, lane)
+	itemKey := attribute.String(telemetry.AttrItemKey, it.Key)
+	_, endProbe := s.phase(telemetry.SpanProbe, itemKey)
 	f, err := s.probe(it)
+	endProbe(telemetry.Result(err))
 	if err != nil {
 		return nil, err
 	}
+	it.NoCI = noCI(it, f, e.Now())
 	in := decide.Input{Lane: lane, Item: it, Facts: f, Event: ev, Poll: e.Poll}
 	in.Item.Lease = nil // not an input to the decision; keeps replay exact
+	in.Item.Trace = nil // nor is where the item's history is in telemetry
+	_, endDecide := s.phase(telemetry.SpanDecide, itemKey)
 	d := decide.Decide(in)
+	e.Telemetry.Event(s.ctx, telemetry.EventDecisionMade, itemKey, attribute.String(telemetry.AttrStepID, s.id),
+		attribute.String(telemetry.AttrItemState, string(d.Item.State)), attribute.String(telemetry.AttrCloudeventsEventType, ev.Type))
 
 	rec := DecisionRecord{Input: in, Decision: d, Policy: PolicyRef{Repo: rp.Repo, Dir: rp.Dir, Ref: rp.Base, SHA: rp.SHA, Config: configRepo(rp), ConfigSHA: configSHA(rp), Hash: lane.Hash()}}
 	if err := s.record(it.Key, "decision", rec); err != nil {
+		endDecide(telemetry.OutcomeFailed)
 		return nil, err
 	}
+	d.Item.Trace = itemTrace(it.Trace, s.span) // after the record, which replay compares
+	d.Item.Reason = latestReason(it, d)        // likewise: the record is the decider's own output
 	if err := s.h.Save(ctx, d.Item); err != nil {
+		endDecide(telemetry.OutcomeFailed)
 		return nil, err
 	}
 	due := time.Time{}
@@ -212,16 +291,20 @@ func (s *step) decideAndAct(ev event.Event) (*event.Event, error) {
 		due = *d.Item.NextDue
 	}
 	if err := e.schedule(ctx, s.h.Item()); err != nil {
+		endDecide(telemetry.OutcomeFailed)
 		return nil, err
 	}
 	s.remember(in, d)
+	endDecide(telemetry.OutcomeOk, attribute.String(telemetry.AttrItemState, string(d.Item.State)))
 	e.log().Info("decided", "item", it.Key, "event", ev.Type, "state", d.Item.State, "reason", d.Reason)
 	if d.Item.State != it.State {
 		s.label(d.Item, lane)
 	}
 
 	for _, a := range d.Actions {
+		_, endAct := s.phase(telemetry.SpanAct, itemKey, attribute.String(telemetry.AttrAction, a.Kind))
 		next, err := s.act(a, d.Item, rp, lane)
+		endAct(actOutcome(next, err))
 		if err != nil {
 			return nil, err
 		}
@@ -234,6 +317,55 @@ func (s *step) decideAndAct(ev event.Event) (*event.Event, error) {
 		return &ev, nil
 	}
 	return nil, nil
+}
+
+// noCI keeps when a proposed head commit was first seen with no check or status of any kind, so a
+// decision can tell a commit nothing has reported on for a long time from one whose CI has not
+// started yet. It is a fact about the pull request, noted by the engine and recorded with the
+// decision; the decider only reads it. It is dropped as soon as anything reports, or the head moves.
+func noCI(it item.Item, f facts.Facts, now time.Time) *item.NoCI {
+	pr := f.PR
+	if pr == nil || it.State != item.Proposed || len(pr.Checks) > 0 || pr.State != "open" {
+		return nil
+	}
+	if it.NoCI != nil && it.NoCI.SHA == pr.HeadSHA {
+		return it.NoCI
+	}
+	return &item.NoCI{SHA: pr.HeadSHA, Since: now}
+}
+
+// latestReason is the reason the item shows after a decision. A decision that moves the item sets
+// its reason itself; one that keeps it waiting (CI pending, a paused lane) only reports one, so
+// the item takes it. This rides the save every decision already makes, so it costs no write. A
+// settled item that is only being told something keeps the reason it was settled for.
+func latestReason(it item.Item, d decide.Decision) string {
+	if d.Reason == "" || d.Item.State == it.State && it.State.Settled() && it.State != item.InReview {
+		return d.Item.Reason
+	}
+	return d.Reason
+}
+
+// actOutcome is how an action ended: failed when it errored, or when the action it asked of the
+// forge was refused; ok otherwise. A run's own outcome is on its run span.
+func actOutcome(next *event.Event, err error) string {
+	if err != nil || next != nil && next.Type == event.ActionDone && !next.Bool("ok") {
+		return telemetry.OutcomeFailed
+	}
+	return telemetry.OutcomeOk
+}
+
+// describe puts on the step's span what is known once its lane is: the lane's id, the policy hash
+// and the repository. It also counts an expired lease the claim took over, once.
+func (s *step) describe(it item.Item, rp *RepoPolicy, lane policy.Lane) {
+	s.laneID = s.e.LaneID(rp, lane)
+	if s.span != nil {
+		s.span.SetAttributes(append(repoAttrs(hostRepo(it)),
+			attribute.String(telemetry.AttrLane, s.laneID), attribute.String(telemetry.AttrPolicyHash, lane.Hash()))...)
+	}
+	if s.expired {
+		s.expired = false
+		s.e.Telemetry.LeaseExpired(s.ctx, s.laneID)
+	}
 }
 
 func (s *step) event(typ string, it item.Item, data map[string]any) event.Event {
@@ -300,10 +432,44 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	e := s.e
 	s.n++
 	runID := fmt.Sprintf("%s-%d", s.id, s.n)
+	laneID := e.LaneID(rp, lane)
+	runAttrs := []attribute.KeyValue{
+		attribute.String(telemetry.AttrItemKey, it.Key), attribute.String(telemetry.AttrStepID, s.id),
+		attribute.String(telemetry.AttrRunID, runID), attribute.String(telemetry.AttrLane, laneID),
+	}
+	_, endRun := s.phase(telemetry.SpanRun, runAttrs...)
+	e.Telemetry.Event(s.ctx, telemetry.EventRunStarted, runAttrs...)
+	// usedHarness and usedFocus are what the run actually used, known once the harness is read.
+	var usedHarness, usedFocus string
+	var installed *runner.Installed // the harness installed into this run's own ynh home, if one was
+	viaPath := false                // the harness folder was passed to ynh by path, with no install
 	finished := func(rec RunRecord) event.Event {
 		rec.RunID = runID
+		if installed != nil {
+			// What ynh installed, for a run that did not get as far as reporting its own.
+			if rec.Harness == "" {
+				rec.Harness = installed.Label()
+			}
+			if rec.HarnessSHA == "" {
+				rec.HarnessSHA = installed.Commit
+			}
+			rec.HarnessPin = installed.Pin
+			if installed.PinURL != installed.Pin {
+				rec.HarnessPinURL = installed.PinURL
+			}
+		}
 		s.run = &rec
 		s.recordRun(it.Key, rec)
+		done := []attribute.KeyValue{attribute.String(telemetry.AttrGenAiResponseModel, telemetry.Scrub(rec.Model))}
+		if usedHarness != "" {
+			done = append(done, attribute.String(telemetry.AttrLaneHarness, usedHarness))
+		}
+		if usedFocus != "" {
+			done = append(done, attribute.String(telemetry.AttrLaneFocus, usedFocus))
+		}
+		e.Telemetry.RunFinished(s.ctx, rec.Outcome, laneID, rec.Model, telemetry.Usage{
+			InputTokens: rec.InputTokens, OutputTokens: rec.OutputTokens, CacheReadTokens: rec.CacheReadTokens, CostUSD: rec.CostUSD})
+		endRun(rec.Outcome, done...)
 		return s.event(event.RunFinished, it, map[string]any{
 			"run_id": runID, "outcome": rec.Outcome, "detail": rec.Detail, "changed": anyList(rec.Changed), "denied": anyList(rec.Denied),
 			// What the runner reported, for the decider's failure signatures. Empty means the
@@ -313,15 +479,18 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	}
 	// A run refused or broken before it starts still says what it would have used: the lane's
 	// runner and executor, until the executor is built and names itself.
-	runnerName, executorName := lane.Run.Runner, lane.Run.Executor
+	runnerName, executorName, detected := lane.Run.Runner, lane.Run.Executor, false
 	fail := func(outcome string, err error) event.Event {
-		return finished(RunRecord{Runner: runnerName, Executor: executorName, Outcome: outcome, Detail: err.Error()})
+		return finished(RunRecord{Runner: runnerName, RunnerDetected: detected, Executor: executorName, Outcome: outcome, Detail: err.Error()})
 	}
 
-	r, err := runner.For(lane)
+	ynhHost := e.HostYnh(s.ctx)
+	res, err := runner.Resolve(lane, ynhHost)
 	if err != nil {
 		return fail(runner.OperatorError, err)
 	}
+	r, detected := res.Runner, res.Detected
+	runnerName = r.Name()
 	ex, err := e.Executor(lane.Run.Executor)
 	if err != nil {
 		return fail(runner.OperatorError, err)
@@ -366,10 +535,13 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		return fail(runner.Error, err)
 	}
 
-	job, inImage, err := s.job(lane, r, ex, wt, runDir)
+	job, inImage, err := s.job(lane, r, ex, ynhHost, wt, runDir)
 	if err != nil {
 		return fail(runner.OperatorError, err)
 	}
+	// The run joins this step's trace: its process gets the run span's context (ynr ADR-006,
+	// rule 4). It has no spool folder of its own yet.
+	telemetry.Inject(s.ctx, job.Env)
 	inline := ex.Name() == "inline"
 	if inline {
 		job.Image = "" // the run is in this image, whatever the lane names for a container
@@ -380,14 +552,67 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	// The harness the lane is held to is the one that will run: inside the image, or in the
 	// folder ynh runs on the host (ADR-012).
 	var focus *runner.Focus
+	var harness runner.Harness
+	harnessKnown := false
 	if y, ok := r.(runner.YnhRunner); ok {
-		h, known, err := s.harness(y, job.Image, inImage, lane.Run.Image == "", inline, wt)
-		if err != nil {
-			return fail(runner.OperatorError, err)
-		}
-		if inline && h.ID != "" {
-			y.Cfg.Harness = h.ID // run the harness installed here, by its id
+		var h runner.Harness
+		var known bool
+		pin, pinned, _ := policy.ParsePin(y.Cfg.Harness) // the lane was validated when it was loaded
+		if pinned {
+			// A harness pinned from a repository: installed into a ynh home of this run's own
+			// before the run starts, then read from what ynh installed, so the lane is held to
+			// exactly the harness that runs, and nothing is copied into the checkout.
+			inst, err := s.installFor(runner.HarnessSource{Pin: &pin}, y.Cfg.Harness, runDir)
+			if err != nil {
+				return fail(runner.OperatorError, err)
+			}
+			installed = &inst
+			if h, err = runner.ReadHarness(inst.Path); err != nil {
+				return fail(runner.OperatorError, fmt.Errorf("read the harness %s installed for this run: %w", pin, err))
+			}
+			h.ID, known = inst.ID, true
+			usedHarness = inst.ID
+			y.Cfg.Harness = inst.ID
+			job.Env["YNH_HOME"] = filepath.Join(runDir, "ynh")
 			r = y
+		} else {
+			var err error
+			if h, known, err = s.harness(y, job.Image, inImage, lane.Run.Image == "" || s.imageBuilt, inline, wt); err != nil {
+				return fail(runner.OperatorError, err)
+			}
+			usedHarness = y.Cfg.Harness
+			switch {
+			case inline && h.ID != "":
+				y.Cfg.Harness = h.ID // run the harness installed here, by its id
+				usedHarness = h.ID
+				r = y
+			case known && h.ID == "" && !inImage && ynhHost.Found && ynhHost.Has(runner.FeatureHarnessPath):
+				// A harness folder on the host, and a ynh that runs a folder itself: pass the
+				// folder, with no install. ynh fetches the harness's includes at run setup and
+				// keeps them, and the run's sessions, in its home, so the run still gets a home
+				// of its own under the run folder and the operator's is never touched.
+				y.Cfg.Harness = harnessDir(wt, y.Cfg.Harness)
+				job.Env["YNH_HOME"] = filepath.Join(runDir, "ynh")
+				viaPath = true
+				r = y
+			case known && h.ID == "" && !inImage && e.InstallHarness != nil:
+				// A harness folder on the host, and a ynh that takes only an id: install the
+				// folder into a ynh home of this run's own, and run with that home. The operator's
+				// is never touched, and the run record and telemetry keep the folder the lane names.
+				inst, err := s.installFor(runner.HarnessSource{Dir: harnessDir(wt, y.Cfg.Harness)}, y.Cfg.Harness, runDir)
+				if err != nil {
+					return fail(runner.OperatorError, err)
+				}
+				installed = &inst
+				y.Cfg.Harness = inst.ID
+				job.Env["YNH_HOME"] = filepath.Join(runDir, "ynh")
+				r = y
+			}
+		}
+		harness, harnessKnown = h, known
+		usedFocus = y.Cfg.Focus
+		if usedHarness == "" {
+			usedHarness = h.ID
 		}
 		if known {
 			if err := s.checkPassthrough(lane, y, h, ex.Name() == "docker" && len(job.Egress) > 0); err != nil {
@@ -416,10 +641,17 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		return fail(runner.Error, err)
 	}
 	_, cr := ex.Paths(job)
-	labels := []string(nil)
-	if tr, err := e.tracker(it.Ticket); err == nil {
+	labels := s.labels
+	if tr, err := e.tracker(it.Ticket); err == nil && !s.labelsSet {
 		if t, _, err := tr.Get(s.ctx, it.Ticket.Key); err == nil {
 			labels = t.Labels
+		}
+	}
+	// The scopes were checked above without labels; now with this item's, so what runs is what was
+	// narrowed.
+	if y, ok := r.(runner.YnhRunner); ok && harnessKnown {
+		if err := harness.CheckScopes(y.Cfg, labels); err != nil {
+			return fail(runner.OperatorError, err)
 		}
 	}
 	argv, err := r.Command(runner.Spec{Lane: lane, Labels: labels, TaskFile: cr + "/task.md", RunDir: cr, Feedback: feedback, InImage: inImage, Contained: ex.Contained(), Focus: focus, HostAutoApprove: e.HostAutoApprove})
@@ -427,14 +659,25 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		return fail(runner.OperatorError, err)
 	}
 	job.Argv = argv
+	if y, ok := r.(runner.YnhRunner); ok && y.Cfg.TelemetryRelay {
+		// ynh agent run starts ynr relay for the vendor CLI, which writes into the run's folder.
+		job.Env["YNH_TELEMETRY_RELAY"] = "1"
+		if e.Spool == nil {
+			e.log().Warn("telemetry_relay is on, and there is no spool root to relay into: set telemetry.spool", "item", it.Key, "lane", lane.Name)
+		}
+	}
+	spoolRun := s.beginSpool(&job, ex, spool.Manifest{Run: runID, Lane: laneID, Harness: usedHarness, Focus: usedFocus, Item: it.Key, Step: s.id})
 
 	log := e.log().With("item", it.Key, "run", runID)
 	log.Info("run started", "lane", lane.Name, "runner", r.Name(), "executor", ex.Name(), "image", job.Image, "base", base, "attempt", it.Attempts)
 	start := e.Now()
 	stop := s.progress(log, filepath.Join(runDir, "trajectory.jsonl"))
-	out, err := ex.Run(s.ctx, job)
+	out, err := telemetry.Call(s.ctx, e.Telemetry, telemetry.CallSystemExecutor, ex.Name(), func(ctx context.Context) (executor.Output, error) {
+		return ex.Run(ctx, job)
+	})
 	stop()
-	rec := RunRecord{Runner: r.Name(), Executor: ex.Name(), Argv: argv, Base: base, StepDir: stepDir, Denied: out.Denied}
+	s.endSpool(spoolRun, stepDir)
+	rec := RunRecord{Runner: r.Name(), RunnerDetected: detected, Executor: ex.Name(), Argv: argv, Base: base, StepDir: stepDir, Denied: out.Denied}
 	_ = os.WriteFile(filepath.Join(runDir, "stdout"), out.Stdout, 0o644)
 	_ = os.WriteFile(filepath.Join(runDir, "stderr"), out.Stderr, 0o644)
 	switch {
@@ -450,6 +693,12 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 			rec.Detail += ": " + tail(string(out.Stderr))
 		}
 	}
+	if (detected || viaPath) && r.Name() == "ynh" {
+		if rec.RunnerVersion == "" {
+			rec.RunnerVersion = ynhHost.Version // the detected version, when the run did not report its own
+		}
+		rec.RunnerFeatures = ynhHost.Features
+	}
 	rec.Duration = e.Now().Sub(start).Round(time.Millisecond).String()
 	if rec.Changed, err = s.g.Changed(s.ctx, wt); err != nil {
 		rec.Outcome, rec.Detail = runner.Error, err.Error()
@@ -463,9 +712,9 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 // job describes the run for the executor. A ynh lane on a contained executor runs in an agent
 // image ynf builds from the harness (or the lane's run.image), as the image's own user, with the
 // vendor's API host allowed through the egress proxy (ADR-007, ADR-012).
-func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, wt, runDir string) (executor.Job, bool, error) {
+func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, ynhHost runner.Detection, wt, runDir string) (executor.Job, bool, error) {
 	e := s.e
-	job := executor.Job{Worktree: wt, RunDir: runDir, Image: lane.Run.Image, Timeout: e.RunTimeout, Env: map[string]string{}, Secrets: map[string]string{}}
+	job := executor.Job{Worktree: wt, RunDir: runDir, Image: lane.Run.ImageFor(r.Name()), Timeout: e.RunTimeout, Env: map[string]string{}, Secrets: map[string]string{}}
 	if lane.Run.Egress != nil {
 		job.Egress = append([]string(nil), lane.Run.Egress.Allow...)
 	}
@@ -480,7 +729,14 @@ func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, wt, 
 	}
 	y, isYnh := r.(runner.YnhRunner)
 	if !isYnh {
+		job.ImageUser = r.Name() == "command" && lane.Run.Command != nil && lane.Run.Command.ImageUser
 		return job, false, nil
+	}
+	// A lane that names ynh never falls back, and never runs without it: where ynh runs on this
+	// host (inline, the process executor, or an image built here), a missing or unsupported ynh
+	// refuses the run before anything starts. A published image carries its own ynh.
+	if e.DetectYnh != nil && lane.Run.Runner == "ynh" && !ynhHost.Found && (ex.Name() == "inline" || !ex.Contained() || job.Image == "") {
+		return job, false, fmt.Errorf("lane %s names runner ynh, and %s", lane.Name, ynhUnusable(ynhHost))
 	}
 	if ex.Name() == "inline" {
 		// The factory image: ynh is installed here and the job runner contains it (ADR-007), so a
@@ -514,11 +770,18 @@ func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, wt, 
 		}
 		return job, false, nil
 	}
+	if pin, ok, _ := policy.ParsePin(y.Cfg.Harness); ok {
+		// ynf builds an image from a folder, not from a repository, and a published image carries
+		// its own harness: neither is a place to install a pin for one run.
+		return job, false, fmt.Errorf("lane %s pins harness %s from a repository, which only the host executors (process, inline) run: on %s, use a harness folder in the repository or run.image", lane.Name, pin, ex.Name())
+	}
 	if job.Image == "" {
 		if e.BuildImage == nil {
 			return job, false, fmt.Errorf("lane %s names no published image (run.image), and this instance does not build one: that needs ynh on PATH and images.build not false", lane.Name)
 		}
-		img, err := e.BuildImage(s.ctx, wt, y.Cfg)
+		img, err := telemetry.Call(s.ctx, e.Telemetry, telemetry.CallSystemYnh, "image", func(ctx context.Context) (string, error) {
+			return e.BuildImage(ctx, wt, y.Cfg)
+		})
 		if err != nil {
 			return job, false, fmt.Errorf("build agent image: %w", err)
 		}
@@ -552,27 +815,18 @@ func withModelHosts(hosts []string, y runner.YnhRunner) []string {
 	return hosts
 }
 
+func ynhUnusable(d runner.Detection) string {
+	if d.Detail != "" {
+		return "ynh is not usable on this host: " + d.Detail
+	}
+	return "ynh was not found on this host"
+}
+
 // autoApproveCapabilities is the first ynh capabilities version with --auto-approve.
 const autoApproveCapabilities = "0.9.0"
 
 // atLeast compares dotted versions numerically; anything unparseable is too old.
-func atLeast(have, want string) bool {
-	h, w := strings.Split(have, "."), strings.Split(want, ".")
-	for i := range w {
-		if i >= len(h) {
-			return false
-		}
-		hn, err1 := strconv.Atoi(h[i])
-		wn, err2 := strconv.Atoi(w[i])
-		if err1 != nil || err2 != nil {
-			return false
-		}
-		if hn != wn {
-			return hn > wn
-		}
-	}
-	return true
-}
+func atLeast(have, want string) bool { return runner.AtLeast(have, want) }
 
 // proxyVars are what a worker behind the egress proxy needs to reach it.
 var proxyVars = []string{"HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"}
@@ -607,6 +861,13 @@ func (s *step) harness(y runner.YnhRunner, image string, inImage, built, inline 
 			want = ""
 		}
 		if h, err = s.e.ImageHarness(s.ctx, "", want); err != nil {
+			// Nothing installed here for a lane that names the repository's harness: run the
+			// one the repository carries, as the process executor does.
+			if y.Cfg.Harness != "" && isFolder(wt, y.Cfg.Harness) {
+				if hf, rerr := runner.ReadHarness(harnessDir(wt, y.Cfg.Harness)); rerr == nil {
+					return hf, true, nil
+				}
+			}
 			return h, false, fmt.Errorf("read the harness installed here: %w", err)
 		}
 		return h, true, nil
@@ -630,8 +891,43 @@ func (s *step) harness(y runner.YnhRunner, image string, inImage, built, inline 
 	if y.Cfg.Harness == "" {
 		return h, false, errors.New("a ynh lane on the host needs ynh.harness, the harness to run")
 	}
-	h, err = runner.ReadHarness(filepath.Join(wt, filepath.FromSlash(y.Cfg.Harness)))
-	return h, err == nil, nil
+	if !isFolder(wt, y.Cfg.Harness) {
+		return h, false, nil // an installed harness id, which ynh reads and reports on itself
+	}
+	// A folder that is there and cannot be read is the lane's mistake, not an installed id: the
+	// lane is checked against it, or the run is refused.
+	if h, err = runner.ReadHarness(harnessDir(wt, y.Cfg.Harness)); err != nil {
+		return h, false, err
+	}
+	return h, true, nil
+}
+
+// installFor installs src into a ynh home of this run's own, <run>/ynh, and says what was
+// installed. It is the one step that can reach the network (a pin is cloned), and it runs here, on
+// the host, before the run's containment starts, so the run's egress is never asked for it.
+//
+// A pin always comes through here. A folder does too, unless the host's ynh lists
+// agent-run-harness-path, in which case runLane passes the folder by path and installs nothing.
+func (s *step) installFor(src runner.HarnessSource, named, runDir string) (runner.Installed, error) {
+	if s.e.InstallHarness == nil {
+		return runner.Installed{}, fmt.Errorf("harness %s cannot be installed for this run: this instance has no ynh to install it with", named)
+	}
+	inst, err := telemetry.Call(s.ctx, s.e.Telemetry, telemetry.CallSystemYnh, "install", func(ctx context.Context) (runner.Installed, error) {
+		return s.e.InstallHarness(ctx, src, filepath.Join(runDir, "ynh"))
+	})
+	if err != nil {
+		return inst, fmt.Errorf("install the harness %s for this run: %w", named, err)
+	}
+	return inst, nil
+}
+
+// harnessDir is the folder a lane's harness value names: in the checkout, or absolute (shadow mode
+// pins a harness folder outside the checkout).
+func harnessDir(wt, harness string) string {
+	if filepath.IsAbs(harness) {
+		return harness
+	}
+	return filepath.Join(wt, filepath.FromSlash(harness))
 }
 
 // isFolder reports whether name is a folder in the worktree, rather than an installed harness id.
@@ -639,7 +935,7 @@ func isFolder(wt, name string) bool {
 	if name == "" || strings.Contains(name, "@") {
 		return false
 	}
-	fi, err := os.Stat(filepath.Join(wt, filepath.FromSlash(name)))
+	fi, err := os.Stat(harnessDir(wt, name))
 	return err == nil && fi.IsDir()
 }
 
@@ -761,6 +1057,9 @@ func (s *step) record(key, kind string, body any) error {
 }
 
 func (s *step) recordRun(key string, r RunRecord) {
+	if s.quiet {
+		return
+	}
 	if err := s.record(key, "run", r); err != nil {
 		s.e.log().Error("record run", "item", key, "err", err)
 	}
@@ -836,6 +1135,7 @@ func (s *step) progress(log *slog.Logger, trajectory string) func() {
 	}
 	start := time.Now()
 	done := make(chan struct{})
+	ctx := s.ctx // phases swap s.ctx while this runs
 	go func() {
 		tick := time.NewTicker(every)
 		defer tick.Stop()
@@ -843,7 +1143,7 @@ func (s *step) progress(log *slog.Logger, trajectory string) func() {
 			select {
 			case <-done:
 				return
-			case <-s.ctx.Done():
+			case <-ctx.Done():
 				return
 			case <-tick.C:
 				turns, last := trajectorySoFar(trajectory)

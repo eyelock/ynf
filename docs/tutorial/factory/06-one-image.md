@@ -37,14 +37,14 @@ Expected, after a few minutes the first time:
 ```text
 built ynf-factory:dev:
   ynf <version>
-  ynh 0.10.0
+  ynh 0.12.0
   ynm <version>
 ```
 
 The versions of ynh and ynm come from `images/factory/versions.env` in your ynf checkout: the
 pair this ynf was tested with. The ynm release is downloaded with `gh`, so for now this needs read
-access to `eyelock/ynm`. Once ynf is released, the same image is published as
-`ghcr.io/eyelock/ynf-factory:<version>` and you can pull it instead.
+access to `eyelock/ynm`. Each release also publishes the same image, as
+`ghcr.io/eyelock/ynf-factory:<version>`, which you can pull instead once you have access to it.
 
 The factory image has no harness of its own. It's a base, as ynh's own image was for lesson 1's
 agent image.
@@ -137,13 +137,15 @@ ok    config                   /etc/ynf/config.yaml
 ok    store                    sqlite:///work/ynf.db
 ok    factory                  <you>/ynf-sandbox-factory at <sha> (.agents/factory)
 ok    repos                    <you>/ynf-sandbox
-ok    lanes <you>/ynf-sandbox .agents/factory on main at <sha>: deps, doc-drift, fix-ci, gofmt, lint-paydown, reclaim
+ok    lanes <you>/ynf-sandbox .agents/factory on main at <sha>: deps, detect, doc-drift, fix-ci, gofmt, lint-paydown, outage, reclaim, relaxed, spool, spool-flood, spool-image
 ok    forge default            github.com: reached <you>/ynf-sandbox
 ok    tracker tracker          tracker.ynf-sandbox.invalid: its server has the tools it is configured to call
 ok    git                      git version <version>
 --    docker                   not needed: no lane runs in docker here
-ok    ynh                      0.10.0
+ok    ynh                      0.12.0, capabilities 0.9.0, features agent-run-fetches-includes, agent-run-harness-path: detected, used by a lane with no runner and a ynh block
 ok    ynm                      @ynm/cli/<version> linux-<arch> node-<version>
+--    ynr                      not found or not working (ynr: exec: "ynr": executable file not found in $PATH)
+ok    memory                   off: memory.provider is none
 ```
 
 No Docker inside, and none needed: every lane runs inline. Now the join from lesson 1, from the
@@ -163,6 +165,12 @@ Expected, for each ynh lane:
         sensors: docs, lint, test
         focuses: docs, fix-ci, tidy
 ```
+
+`detect`, which names no runner, reads `ynh (detected 0.12.0) on inline` here, since the image's
+ynh answers. `relaxed` is the exception: it is wrong on purpose, so its entry ends in a `FAIL` and a
+`problem:` line saying its `sensor_scope.lint` of `"true"` is not the harness's `golangci-lint run
+./...` narrowed, and `ynf harness` exits 30. That refusal is what the sandbox's acceptance test
+checks for.
 
 On your laptop, ynf couldn't read a harness that was still in the repository. Here it's installed,
 so ynf asks the image's ynh for it, reads its budgets, sensors and focuses, and holds every lane to

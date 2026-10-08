@@ -13,7 +13,7 @@ import (
 var ErrNotFound = errors.New("tracker: not found")
 
 // Ref names a ticket: the tracker instance's host and the tracker's own key, such as
-// {github.com, eyelock/ynh#77} or {acme.atlassian.net, PLAT-881} (ADR-002).
+// {github.com, eyelock/ynh#77} or {example.atlassian.net, PLAT-881} (ADR-002).
 type Ref struct {
 	Host string `json:"host"`
 	Key  string `json:"key"`

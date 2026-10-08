@@ -1,12 +1,14 @@
 # 1. A sandbox and what ynf can see
 
-Build a sandbox of your own on GitHub, install ynf, write its config, and ask it what it can see.
+Build a sandbox of your own on GitHub, build ynf, write its config, and ask it what it can see.
 Nothing runs yet: this lesson is about the pieces ynf works with, and how it tells you whether each
 one is there.
 
-## Install ynf
+## Build ynf
 
-ynf's repository holds the sandbox too, so start from a clone:
+ynf's repository holds the sandbox too, so start from a clone, and build ynf from it. Installing
+with Homebrew (`brew install eyelock/tap/ynf`) gives you the binary but not the sandbox, so build
+from the clone, which needs only Go.
 
 ```bash
 gh repo clone eyelock/ynf
@@ -20,13 +22,13 @@ ynf version
 Expected:
 
 ```text
-ynf dev-main-e9bb008
+ynf dev-develop-<sha>
 ```
 
 `make install` puts three files in `~/.ynf/bin`: `ynf` itself, and two static Linux builds of it,
 `ynf-linux-amd64` and `ynf-linux-arm64`. When a run happens in a container, ynf starts one of those
-inside it as the container's egress proxy, the only way out to the network. Once ynf is released,
-`brew install eyelock/tap/ynf` does the same.
+inside it as the container's egress proxy, the only way out to the network. ynf finds the tools it
+works with, ynh, ynm and ynr, only on your `PATH`, as it finds any other command.
 
 ## Build the sandbox
 
@@ -55,7 +57,7 @@ make -C sandbox up
 gh issue list -R <you>/ynf-sandbox
 ```
 
-Expected: eleven open issues, among them:
+Expected: sixteen open issues, among them:
 
 ```text
 internal/format is not gofmt-clean, started by hand
@@ -67,8 +69,10 @@ Unchecked errors in internal/store
 ```
 
 Each issue describes one problem in the code, and its labels say what kind of work it is
-(`ynf:fmt`, `ynf:lint`, `ynf:deps`) and which package it's about (`pkg:internal/format`). This
-track only works the `gofmt` ones. The rest are for agents, in the factory track.
+(`ynf:fmt`, `ynf:lint`, `ynf:deps` and others) and which package it's about
+(`pkg:internal/format`). This track only works the `gofmt` ones, and one `reclaim` one in lesson 6.
+The lint and docs ones are for agents, in the factory track. The rest are fixtures for the
+sandbox's acceptance test, `make e2e`, which you don't need here.
 
 ## The tracker stand-in
 
@@ -119,7 +123,8 @@ Each line, in order:
 - **`poll`** is how often ynf checks a pull request's CI, and its review. Shorter than the
   defaults, so you wait less.
 - **`memory: {provider: none}`** switches memory off. Without it, ynf would use ynm if it found it
-  installed. This track doesn't need memory, so it says so.
+  on your `PATH` and a store, a `.ynm/` or `~/.ynm/`, to write to. This track doesn't need memory,
+  so it says so.
 
 State goes to `state.db` beside the config, and repository clones and run folders to `work/`.
 
@@ -136,13 +141,15 @@ ok    config                   /Users/you/ynf-tutorial/config.yaml
 ok    store                    sqlite://state.db
 ok    factory                  <you>/ynf-sandbox-factory at 998570c (.agents/factory)
 ok    repos                    <you>/ynf-sandbox
-ok    lanes <you>/ynf-sandbox .agents/factory on main at 43e2224: deps, doc-drift, fix-ci, gofmt, lint-paydown, reclaim
+ok    lanes <you>/ynf-sandbox .agents/factory on main at 43e2224: deps, detect, doc-drift, fix-ci, gofmt, lint-paydown, outage, reclaim, relaxed, spool, spool-flood, spool-image
 ok    forge default            github.com: reached <you>/ynf-sandbox
 ok    tracker tracker          tracker.ynf-sandbox.invalid: its server has the tools it is configured to call
 ok    git                      git version 2.54.0
 ok    docker                   27.4.0
 --    ynh                      not found or not working (exec: "ynh": executable file not found in $PATH)
 --    ynm                      not found or not working (exec: "ynm": executable file not found in $PATH)
+--    ynr                      not found or not working (ynr: exec: "ynr": executable file not found in $PATH)
+ok    memory                   off: memory.provider is none
 ```
 
 ### What just happened
@@ -153,12 +160,14 @@ ok    docker                   27.4.0
   records the commit its configuration was read at.
 - **The repositories it enrols:** one, your sandbox.
 - **That repository's lanes,** read from its default branch at a commit (`43e2224`). Lanes are the
-  rules for what ynf does with a ticket. There are six; lesson 2 is about them.
+  rules for what ynf does with a ticket. There are twelve; lesson 2 is about them.
 - **The forge,** GitHub, reached with your token.
 - **The tracker,** by starting its MCP server and checking it has every tool the configuration
   names.
-- **The tools on this machine.** ynh and ynm are marked `--`, not `FAIL`: they're optional. If you
-  have them installed, those lines say `ok` with their versions; that's fine too.
+- **The tools on this machine.** ynh, ynm and ynr are marked `--`, not `FAIL`: they're optional. If
+  you have them installed, those lines say `ok` with their versions; that's fine too. The `memory`
+  line says memory is off because your config says so. (A line for the memory queue appears only
+  when memory writes are waiting to be sent, which this track never has.)
 
 Docker is needed because the sandbox's lanes run in containers. If it weren't running, its line
 would say `FAIL` and `doctor` would exit non-zero.
@@ -200,6 +209,8 @@ Expected:
 <you>/ynf-sandbox
   ok    deps (off): originate lane, ynh on docker
         harness ., carried in the repository at ., read when a run checks it out
+  ok    detect: originate lane, command (ynh not found) on docker
+        a command, not a harness
   ok    doc-drift: originate lane, ynh on docker
         harness ., carried in the repository at ., read when a run checks it out
   ok    fix-ci: adopt lane, ynh on docker
@@ -208,7 +219,17 @@ Expected:
         a command, not a harness
   ok    lint-paydown: originate lane, ynh on docker
         harness ., carried in the repository at ., read when a run checks it out
+  ok    outage: originate lane, command on docker
+        a command, not a harness
   ok    reclaim: originate lane, command on docker
+        a command, not a harness
+  ok    relaxed: originate lane, ynh on docker
+        harness ., carried in the repository at ., read when a run checks it out
+  ok    spool: originate lane, command on docker
+        a command, not a harness
+  ok    spool-flood: originate lane, command on docker
+        a command, not a harness
+  ok    spool-image: originate lane, command on docker
         a command, not a harness
 ```
 
@@ -218,19 +239,26 @@ Each lane runs work with a **runner**, on an **executor**. Two runners appear he
 - **`ynh`:** an agent, run by ynh with a harness of instructions and checks. That's the factory
   track.
 
-All six run on the `docker` executor: in a container, with a fresh copy of the repository, and no
+All twelve run on the `docker` executor: in a container, with a fresh copy of the repository, and no
 network beyond what the lane allows.
+
+`detect` names no runner. It has both a `ynh` block and a `command` block, and ynf chooses: ynh when
+it finds a usable one on your `PATH`, otherwise the command. With no ynh here it says `command (ynh
+not found)`. If you do have ynh installed, it says `ynh (detected <version>)` instead, and the lane
+would run an agent, which is why it is paused below.
 
 ## Keep the agents out of this track
 
-Three lanes run agents: `doc-drift`, `fix-ci` and `lint-paydown`. Pause them, so nothing in this
-track starts one even if it finds their tickets. Pause `reclaim` too until lesson 6, which is about
-it:
+Three lanes run agents: `doc-drift`, `fix-ci` and `lint-paydown`. A fourth, `detect`, runs one when
+ynh is detected on your machine. A fifth, `relaxed`, is refused before it starts one (the sandbox
+README says why). Pause the four that can run one, so nothing in this track starts an agent even if
+it finds their tickets. Pause `reclaim` too until lesson 6, which is about it:
 
 ```bash
 ynf pause lint-paydown --reason "the ynf track runs no agents"
 ynf pause doc-drift --reason "the ynf track runs no agents"
 ynf pause fix-ci --reason "the ynf track runs no agents"
+ynf pause detect --reason "the ynf track runs no agents"
 ynf pause reclaim --reason "until lesson 6"
 ```
 
@@ -240,13 +268,19 @@ Expected, one line each:
 <you>/ynf-sandbox/lint-paydown: paused (the ynf track runs no agents)
 <you>/ynf-sandbox/doc-drift: paused (the ynf track runs no agents)
 <you>/ynf-sandbox/fix-ci: paused (the ynf track runs no agents)
+<you>/ynf-sandbox/detect: paused (the ynf track runs no agents)
 <you>/ynf-sandbox/reclaim: paused (until lesson 6)
 ```
 
 A paused lane still notices its tickets, but nothing new starts in it. The reason is required:
-pausing is recorded, with who did it and why, and `ynf stats` shows it. The fourth lane with agent
+pausing is recorded, with who did it and why, and `ynf stats` shows it. Another lane with agent
 work, `deps`, is already off, as `harness` showed: the sandbox switches it off in its own lanes.
 Lesson 2 shows how.
+
+That leaves `outage`, `spool`, `spool-image` and `spool-flood`. They are fixtures for `make e2e`, the
+sandbox's acceptance test: command lanes, with no model, that exercise a failing run and a run's
+own telemetry. This track never starts them. Every sweep in it names `--lane gofmt` (or `reclaim`),
+so they stay out of the way, and `spool-image` needs an image that only `make e2e` builds.
 
 ## What you know now
 
@@ -256,6 +290,6 @@ Lesson 2 shows how.
   them.
 - Each lane runs work with a **runner** on an **executor**. In this track every runner is a command
   in a container.
-- ynh and ynm are optional.
+- ynh, ynm and ynr are optional.
 
 Next: [2. Lanes](02-lanes.md).

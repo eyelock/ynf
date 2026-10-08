@@ -38,11 +38,22 @@ GitHub Enterprise Server, JIRA Cloud or JIRA Data Center.
 `ynf.timer.*`, `ynf.lease.*`), not from the provider's own event names. `data` is minimal and
 normalised; the raw payload is stored once and referenced. `subject` is a reference, below.
 
+**CloudEvents are the control plane, and telemetry mirrors them one way.** ynf records every
+CloudEvent it receives as a short `ynf.intake` span holding one `ynf.intake.received` event, with
+the standard `cloudevents.event_id`, `cloudevents.event_source`, `cloudevents.event_type` and
+`cloudevents.event_subject` attributes and what ynf did with it: accepted, deduplicated or
+rejected. A webhook delivery already received, or refused before it becomes an event, is recorded
+the same way. The events a step makes within itself to carry a run's or an action's result are not
+received, and show as the step's decisions. The mirror is write-only: nothing in ynf reads
+telemetry, and no component turns observation into a CloudEvent, so an agent that can write
+telemetry cannot steer the factory with a forged event (ynr ADR-003). The `ynf.intake` span is
+what a step's span links to, so an item's history can be followed across steps (ADR-011).
+
 **A work item has two references.** One document per unit of work holds:
 
 | Reference | Says | Example |
 |---|---|---|
-| Ticket | what the work is: a tracker instance (ADR-003) and that tracker's own key | `{host: acme.atlassian.net, key: PLAT-881}` |
+| Ticket | what the work is: a tracker instance (ADR-003) and that tracker's own key | `{host: example.atlassian.net, key: PLAT-881}` |
 | Code | where the change goes: a forge instance, a repository, and once there is one, the branch and pull request | `{host: github.com, repo: eyelock/ynh, pr: 412}` |
 
 It also holds the lane, the state (ADR-006), counters (attempts, per-signature failure counts),
@@ -55,9 +66,9 @@ configuration:
 | Work | Key | Reference |
 |---|---|---|
 | A GitHub issue | `item/github.com/eyelock/ynh/issues/77` | `github.com/eyelock/ynh#77` |
-| The same on GitHub Enterprise Server | `item/github.acme.internal/acme/x/issues/77` | `github.acme.internal/acme/x#77` |
+| The same on GitHub Enterprise Server | `item/github.example.internal/example-org/x/issues/77` | `github.example.internal/example-org/x#77` |
 | An adopted pull request (ADR-007) | `item/github.com/eyelock/ynh/pulls/412` | `github.com/eyelock/ynh#412` |
-| A JIRA ticket, Cloud or Data Center | `item/acme.atlassian.net/PLAT-881` | `acme.atlassian.net/PLAT-881` |
+| A JIRA ticket, Cloud or Data Center | `item/example.atlassian.net/PLAT-881` | `example.atlassian.net/PLAT-881` |
 | Work started from a prompt | `item/adhoc/<ulid>` | `adhoc/<ulid>` |
 
 Identity therefore comes from the system that holds the work: a store and its log mean the same
@@ -77,18 +88,18 @@ repository is given, never inferred from prose:
    in that lane is a search for that repository's work.
 
 If the tracker is configured with a structured field that names a repository (a label such as
-`repo:github.com/acme/x`, a component or a custom field, matched by a configured pattern), the
+`repo:github.com/example-org/x`, a component or a custom field, matched by a configured pattern), the
 ticket must agree with that repository, which catches the wrong ticket or a typo before any run.
 Free text is never consulted. The repository must be on a configured forge instance, enrolled,
 and reachable with ynf's own credentials. Any failure stops intake before the item is created,
 saying which check failed and what it found.
 
 **Alias keys for correlation.** Every external identity that refers to an item gets a create-only
-alias: `alias/github.com/eyelock/ynh#412 → item/acme.atlassian.net/PLAT-881`. Correlation
+alias: `alias/github.com/eyelock/ynh#412 → item/example.atlassian.net/PLAT-881`. Correlation
 resolves the event's `subject` through aliases. A new alias is written when ynf learns a link from:
 
 1. its own actions (it named the branch and opened the pull request), which is authoritative
-2. a `YNF-Item: acme.atlassian.net/PLAT-881` trailer or a ticket key in the pull request title,
+2. a `YNF-Item: example.atlassian.net/PLAT-881` trailer or a ticket key in the pull request title,
    for pull requests opened by others
 
 Aliases are create-only, so two instances racing to link the same pull request agree on one item.

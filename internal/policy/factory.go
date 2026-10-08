@@ -34,6 +34,19 @@ func LoadFactory(doc []byte) (*Factory, error) {
 	return &f, nil
 }
 
+// DefinesLane reports whether a lanes.yaml document declares a lane called name. A document that
+// does not parse declares none.
+func DefinesLane(doc []byte, name string) bool {
+	var d struct {
+		Lanes map[string]any `yaml:"lanes"`
+	}
+	if yaml.Unmarshal(doc, &d) != nil {
+		return false
+	}
+	_, ok := d.Lanes[name]
+	return ok
+}
+
 // MergeLanes lays a target repository's lanes over a configuration repository's, key by key: the
 // target repository wins (ADR-006). Maps merge; anything else in the repository replaces the
 // configuration's, lists included, so a repository can narrow a list as well as extend it. Either

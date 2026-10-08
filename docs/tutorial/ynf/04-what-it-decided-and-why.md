@@ -18,7 +18,7 @@ Expected:
 2026-10-04T12:07:53Z  decision ynf.ticket.matched -> ready: eligible for lane gofmt
 2026-10-04T12:07:55Z  action   label ok=true 
 2026-10-04T12:07:55Z  decision ynf.timer.due -> running: ready: starting run (attempt 1) [run]
-2026-10-04T12:07:57Z  run      01M43G7FJ1F1PMAHZS33Q6N945-1 command via docker: converged , 1 changed (1.2s)
+2026-10-04T12:07:57Z  run      01M43G7FJ1F1PMAHZS33Q6N945-1 command via docker: converged, 1 changed (1.2s)
 2026-10-04T12:07:57Z  decision ynf.run.finished -> running: converged: proposing the change [open_pr]
 2026-10-04T12:08:00Z  action   open_pr ok=true 
 2026-10-04T12:08:01Z  decision ynf.action.done -> proposed: proposed as #13

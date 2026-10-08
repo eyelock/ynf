@@ -1,0 +1,139 @@
+groups:
+  - id: registry.ynf
+    type: attribute_group
+    stability: development
+    brief: Attributes ynf sets on its own spans, events and metrics.
+    attributes:
+      - id: ynf.item.key
+        type: string
+        stability: development
+        brief: The work item's store key (ADR-002). Never on a metric.
+        examples: ["item/github.com/eyelock/ynh/issues/77"]
+      - id: ynf.step.id
+        type: string
+        stability: development
+        brief: The step's id, which names its side effects (ADR-005). Never on a metric.
+        examples: ["01K9Z3M7Q8V5X2N4R6T8W0Y1A3"]
+      - id: ynf.run.id
+        type: string
+        stability: development
+        brief: The run's id, the step id and the run's number within the step. Never on a metric.
+        examples: ["01K9Z3M7Q8V5X2N4R6T8W0Y1A3-1"]
+      - id: ynf.lane
+        type: string
+        stability: development
+        brief: >
+          The lane's id: where the lane is defined, host first, then its name, or the lane's own
+          explicit id. ynr stamps it on a run's records from ynf's run manifest, on ynf's behalf.
+        examples: ["github.com/example-org/factory-config#lint-paydown", "github.com/eyelock/ynh#docs-refresh"]
+        annotations:
+          ynr.cardinality: 100
+      - id: ynf.lane.harness
+        type: string
+        stability: development
+        brief: >
+          The harness the run actually used, so a repository that overrides a lane shows as a
+          variant of the same factory. ynr stamps it from ynf's run manifest, on ynf's behalf.
+        examples: ["local/lint-paydown"]
+      - id: ynf.lane.focus
+        type: string
+        stability: development
+        brief: >
+          The focus the run actually used. ynr stamps it from ynf's run manifest, on ynf's behalf.
+        examples: ["paydown"]
+      - id: ynf.policy.hash
+        type: string
+        stability: development
+        brief: The SHA-256 of the lane's normalised form, recorded with every decision (ADR-006).
+        examples: ["9f2c4b7e"]
+      - id: ynf.lease.epoch
+        type: int
+        stability: development
+        brief: The epoch of the lease the step holds (ADR-005).
+        examples: [3]
+      - id: ynf.repo
+        type: string
+        stability: development
+        brief: The repository the work's code goes to, in ynf's host-first form.
+        examples: ["github.com/eyelock/ynh", "github.example.internal/example-org/x"]
+      - id: ynf.item.state
+        type: string
+        stability: development
+        brief: The state the decision left the item in (ADR-006).
+        examples: ["ready", "proposed", "escalated"]
+      - id: ynf.action
+        type: string
+        stability: development
+        brief: The kind of action a decision asked for (ADR-006).
+        examples: ["run", "open_pr", "comment"]
+      - id: ynf.outcome
+        type:
+          members:
+            - {id: converged, value: converged, stability: development, brief: "A run: the lane's sensors passed."}
+            - {id: budget, value: budget, stability: development, brief: "A run: a cap ended it."}
+            - {id: stuck, value: stuck, stability: development, brief: "A run: it stopped making progress."}
+            - {id: tamper, value: tamper, stability: development, brief: "A run: it changed what it must not."}
+            - {id: operator_error, value: operator_error, stability: development, brief: "A run: the operator's setup refused or broke it."}
+            - {id: error, value: error, stability: development, brief: "A run: ynf or the runner failed."}
+            - {id: aborted, value: aborted, stability: development, brief: "A run: it was stopped."}
+            - {id: completed, value: completed, stability: development, brief: "A step: it ran to the point the item waits."}
+            - {id: failed, value: failed, stability: development, brief: "A step, phase or call: it ended in an error."}
+            - {id: lost, value: lost, stability: development, brief: "A step: its lease was lost, so it stopped."}
+            - {id: held, value: held, stability: development, brief: "A step or claim: another instance holds the item."}
+            - {id: claimed, value: claimed, stability: development, brief: "A claim: the lease was taken."}
+            - {id: ok, value: ok, stability: development, brief: "A phase or call: it succeeded."}
+            - {id: accepted, value: accepted, stability: development, brief: "An intake: the event was taken in."}
+            - {id: deduplicated, value: deduplicated, stability: development, brief: "An intake: the event had been received before."}
+            - {id: rejected, value: rejected, stability: development, brief: "An intake: the event was refused."}
+        stability: development
+        brief: ynf's own outcome for a unit of work, which also sets the span's status.
+        examples: ["converged"]
+        annotations:
+          ynr.cardinality: 20
+      - id: ynf.intake.result
+        type:
+          members:
+            - {id: accepted, value: accepted, stability: development, brief: The event was taken in.}
+            - {id: deduplicated, value: deduplicated, stability: development, brief: The event had been received before.}
+            - {id: rejected, value: rejected, stability: development, brief: The event was refused.}
+        stability: development
+        brief: What ynf did with a CloudEvent it received.
+      - id: ynf.call.system
+        type:
+          members:
+            - {id: forge, value: forge, stability: development, brief: "A forge, such as GitHub."}
+            - {id: tracker, value: tracker, stability: development, brief: A tracker.}
+            - {id: git, value: git, stability: development, brief: "Git, on the host."}
+            - {id: ynm, value: ynm, stability: development, brief: "ynm, ynf's memory."}
+            - {id: docker, value: docker, stability: development, brief: "Docker, where an agent image is made."}
+            - {id: executor, value: executor, stability: development, brief: The executor that runs a lane's command.}
+            - {id: ynh, value: ynh, stability: development, brief: "ynh, where it builds an agent image."}
+        stability: development
+        brief: The other system a call went to.
+      - id: ynf.call.operation
+        type: string
+        stability: development
+        brief: What the call did, such as pull_request or push. Never a name or text from the system.
+        examples: ["pull_request", "push"]
+      - id: ynf.token.type
+        type:
+          members:
+            - {id: input, value: input, stability: development, brief: Input tokens.}
+            - {id: output, value: output, stability: development, brief: Output tokens.}
+            - {id: cache_read, value: cache_read, stability: development, brief: Tokens read from a cache.}
+        stability: development
+        brief: Which tokens a count is of.
+        annotations:
+          ynr.cardinality: 3
+      - id: ynf.actor.kind
+        type:
+          members:
+            - {id: human, value: human, stability: development, brief: A person.}
+            - {id: bot, value: bot, stability: development, brief: Another automation.}
+            - {id: ynf, value: ynf, stability: development, brief: ynf itself.}
+        stability: development
+        brief: What kind of actor the handle in user.name names.
+      - id: ynf.paused
+        type: boolean
+        stability: development
+        brief: Whether a lane control paused the lane (true) or resumed it (false).

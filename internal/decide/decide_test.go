@@ -59,6 +59,15 @@ func pr(conclusions ...string) *facts.PR {
 	return p
 }
 
+// notStarted is a pull request whose reported checks all passed and whose required check has not
+// started.
+func notStarted() *facts.PR {
+	p := pr("success", "success")
+	p.Checks[0].Required = true
+	p.Checks = append(p.Checks, facts.Check{Name: "gate", Status: facts.StatusExpected, Required: true})
+	return p
+}
+
 func TestLifecycle(t *testing.T) {
 	f := lanes(t)
 	gofmt, lint, deps := f.Lanes["gofmt"], f.Lanes["lint-paydown"], f.Lanes["deps"]
@@ -99,6 +108,8 @@ func TestLifecycle(t *testing.T) {
 		{"CI pending waits", gofmt, item.Item{State: item.Proposed, PR: 7}, facts.Facts{Ticket: open(), PR: pr("success", "")},
 			ev(event.TimerDue, nil), item.Proposed, nil, 30 * time.Second, "CI pending"},
 		{"no checks yet waits", gofmt, item.Item{State: item.Proposed, PR: 7}, facts.Facts{Ticket: open(), PR: pr()},
+			ev(event.TimerDue, nil), item.Proposed, nil, 30 * time.Second, "CI pending"},
+		{"a required check that has not started waits", gofmt, item.Item{State: item.Proposed, PR: 7}, facts.Facts{Ticket: open(), PR: notStarted()},
 			ev(event.TimerDue, nil), item.Proposed, nil, 30 * time.Second, "CI pending"},
 		{"CI green is in review", gofmt, item.Item{State: item.Proposed, PR: 7}, facts.Facts{Ticket: open(), PR: pr("success", "success", "skipped")},
 			ev(event.TimerDue, nil), item.InReview, nil, 5 * time.Minute, "CI green"},

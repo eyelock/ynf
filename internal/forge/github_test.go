@@ -113,10 +113,47 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.comments = append(f.comments, c["body"])
 		w.WriteHeader(http.StatusCreated)
 		reply(map[string]any{"id": 1})
+	case p == "/graphql":
+		var q struct {
+			Variables struct {
+				Owner, Name string
+				Number      int
+			}
+		}
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &q)
+		pr := func(merged bool, parents, commits int, mergeHeadline, lastHeadline string) map[string]any {
+			return map[string]any{"__typename": "PullRequest", "number": 5, "merged": merged,
+				"mergeCommit": map[string]any{"oid": "m10", "messageHeadline": mergeHeadline, "parents": map[string]any{"totalCount": parents}},
+				"commits":     map[string]any{"totalCount": commits, "nodes": []any{map[string]any{"commit": map[string]any{"messageHeadline": lastHeadline}}}}}
+		}
+		closers := map[int]any{
+			10: pr(true, 1, 3, "Fix it (#5)", "wip"),                 // squash merged
+			11: nil,                                                  // closed by hand
+			12: pr(false, 0, 1, "", ""),                              // a pull request that was not merged
+			13: map[string]any{"__typename": "Commit", "oid": "m10"}, // a commit, whose merged pull request is looked up
+			14: map[string]any{"__typename": "Commit", "oid": "c12"}, // a commit with no merged pull request
+			15: pr(true, 1, 3, "last commit", "last commit"),         // rebase merged
+			16: pr(true, 2, 3, "Merge pull request #5", "x"),         // a merge commit
+			17: pr(true, 1, 1, "only commit", "only commit"),         // one commit: squash and rebase are the same
+		}
+		if q.Variables.Number == 404 {
+			reply(map[string]any{"data": map[string]any{"repository": map[string]any{"issue": nil}}, "errors": []any{map[string]any{"message": "Could not resolve to an Issue"}}})
+			return
+		}
+		node := map[string]any{"closer": closers[q.Variables.Number]}
+		reply(map[string]any{"data": map[string]any{"repository": map[string]any{"issue": map[string]any{
+			"timelineItems": map[string]any{"nodes": []any{node}}}}}})
+	case p == "/repos/o/r/commits/m10/pulls":
+		reply([]any{map[string]any{"number": 5, "merged_at": "2026-09-01T00:00:00Z", "merge_commit_sha": "m10"}})
+	case p == "/repos/o/r/commits/c12/pulls":
+		reply([]any{map[string]any{"number": 6, "merge_commit_sha": "c12"}})
 	case p == "/repos/o/r":
 		reply(map[string]any{"default_branch": "main"})
 	case p == "/repos/o/r/contents/.agents/factory/lanes.yaml":
 		reply(map[string]any{"type": "file", "encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte("version: 1"))})
+	case p == "/repos/o/r/contents/.github/workflows":
+		reply([]any{map[string]any{"type": "file", "name": "ci.yml"}, map[string]any{"type": "file", "name": "README.md"}, map[string]any{"type": "dir", "name": "x.yml"}})
 	case p == "/repos/o/r/contents/.agents/factory":
 		reply([]any{map[string]any{"type": "file", "name": "lanes.yaml"}})
 	default:
@@ -234,6 +271,18 @@ func TestRepoFiles(t *testing.T) {
 	}
 }
 
+// TestWorkflows: only workflow files count, and a repository with no workflows folder has none.
+func TestWorkflows(t *testing.T) {
+	g, _ := setup(t)
+	ctx := context.Background()
+	if n, err := g.Workflows(ctx, "o/r", "main"); err != nil || n != 1 {
+		t.Fatalf("%d %v", n, err)
+	}
+	if n, err := g.Workflows(ctx, "o/none", "main"); err != nil || n != 0 {
+		t.Fatalf("a repository with no workflows folder has none: %d %v", n, err)
+	}
+}
+
 // TestIssueTracker: GitHub serves its issues through the tracker port, keyed owner/name#number,
 // and labels go on and off idempotently.
 func TestIssueTracker(t *testing.T) {
@@ -295,5 +344,45 @@ func TestHead(t *testing.T) {
 	}
 	if _, err := g.Head(context.Background(), "o/r", "gone"); !errors.Is(err, forge.ErrNotFound) {
 		t.Fatalf("a missing branch: %v", err)
+	}
+}
+
+func TestFixFor(t *testing.T) {
+	g, _ := setup(t)
+	ctx := context.Background()
+	for _, n := range []int{10, 13, 16, 17} {
+		fix, err := g.FixFor(ctx, "o/r", n)
+		if err != nil || fix.MergeSHA != "m10" || fix.PR != 5 {
+			t.Errorf("#%d: %+v %v", n, fix, err)
+		}
+	}
+	for _, n := range []int{11, 12, 14} {
+		if _, err := g.FixFor(ctx, "o/r", n); !errors.Is(err, forge.ErrNoFix) {
+			t.Errorf("#%d: %v, want ErrNoFix", n, err)
+		}
+	}
+	if _, err := g.FixFor(ctx, "o/r", 15); !errors.Is(err, forge.ErrRebased) {
+		t.Errorf("a rebase merge: %v", err)
+	}
+	if _, err := g.FixFor(ctx, "o/r", 404); err == nil {
+		t.Error("missing issue")
+	}
+}
+
+// TestGraphQLEndpoint: GitHub Enterprise Server's REST base is <host>/api/v3/ and its GraphQL
+// endpoint <host>/api/graphql; api.github.com's is /graphql beside the REST base.
+func TestGraphQLEndpoint(t *testing.T) {
+	for base, want := range map[string]string{
+		"https://ghe.example/api/v3/": "https://ghe.example/api/graphql",
+		"https://api.example.com/":    "https://api.example.com/graphql",
+		"http://127.0.0.1:1234":       "http://127.0.0.1:1234/graphql",
+	} {
+		g, err := forge.NewGitHub("t", base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := g.GraphQLURL(); got != want {
+			t.Errorf("%s: %s, want %s", base, got, want)
+		}
 	}
 }

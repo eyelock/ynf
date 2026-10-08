@@ -131,7 +131,11 @@ print(hit["data"])'
 ```
 
 Expected: the schema `ynf.failure.v1`, `source` naming the step that wrote it, and `data` with the
-signature, the lane, the item and the occurrence count.
+signature, the lane, the item and the occurrence count, and what the run reported: its `outcome`,
+`exit` code and an `excerpt` of its message. The record's text carries the same, such as
+`the run ended error, exit <code>; it reported: "exit <code>: ..."`, so a reflection over several of them
+has a cause to work from. The excerpt is scrubbed of secrets and cut to 1 KiB, and holds nothing
+from the ticket or the prompt.
 
 Who wrote it is in the store's raw record, its `provenance`:
 
@@ -145,6 +149,13 @@ for line in sys.stdin:
 Expected: `token:static`. A static token names no one, so every write made with it is recorded the
 same way. ynm files a write under the caller only when it names no namespace, and ynf always names
 one, so the token does not move the record.
+
+## When the server is down
+
+A hosted store can be unreachable when a failure happens. ynf neither stops nor loses the record: a
+write ynm can't take is queued in ynf's own store, and sent, oldest first, before the next write once
+the server answers. Until then, `ynf doctor` carries a `memory queue` line, `<n> memory writes queued
+since <time>`, marked `--` as a warning, not a failure. With nothing waiting, it says nothing.
 
 ## In production: a machine token
 

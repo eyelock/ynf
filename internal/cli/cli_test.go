@@ -38,6 +38,9 @@ lanes:
     when: {converged: open_pr}
 `
 
+// apiHook lets a test answer paths fakeAPI does not; it reports whether it did.
+var apiHook func(w http.ResponseWriter, path string) bool
+
 // fakeAPI serves enough of GitHub for the commands that do not run anything: one issue in a
 // disabled lane, so a sweep tracks it and ignores it without touching git or docker.
 func fakeAPI(t *testing.T) string {
@@ -63,6 +66,9 @@ func fakeAPI(t *testing.T) string {
 		case "/repos/o/r/issues/5":
 			reply(map[string]any{"number": 5, "state": "open", "title": "t", "labels": []any{map[string]any{"name": "ynf:off"}, map[string]any{"name": "pkg:internal/format"}}})
 		default:
+			if apiHook != nil && apiHook(w, r.URL.Path) {
+				return
+			}
 			w.WriteHeader(http.StatusNotFound)
 			reply(map[string]any{"message": "Not Found"})
 		}
@@ -112,6 +118,10 @@ func TestUsageAndVersion(t *testing.T) {
 	}
 	if code, out, _ := e.run("--format", "json", "version"); code != 0 || !strings.Contains(out, `"version"`) {
 		t.Fatalf("version: %d %s", code, out)
+	}
+	_, want, _ := e.run("version")
+	if code, out, _ := e.run("--version"); code != 0 || out != want || !strings.HasPrefix(out, "ynf ") {
+		t.Fatalf("--version %d %q should print what version prints, %q", code, out, want)
 	}
 	if code, _, _ := e.run("--bogus"); code != cli.ExitUsage {
 		t.Fatalf("bad flag: %d", code)
@@ -200,6 +210,157 @@ func TestSweepUntilSettledAndDoctor(t *testing.T) {
 	code, out, _ := e.run("--format", "json", "doctor")
 	if !strings.Contains(out, `"lanes o/r"`) || !strings.Contains(out, ".agents/factory on main at c0ffee: fmt, off") {
 		t.Fatalf("doctor: %d %s", code, out)
+	}
+}
+
+// TestDoctorSaysWhenRequiredChecksCannotBeRead: the fake GitHub serves neither branch protection nor
+// rulesets, so doctor names the repository and says every check gates. It is a warning, as ynf works.
+func TestDoctorSaysWhenRequiredChecksCannotBeRead(t *testing.T) {
+	e := setup(t)
+	code, out, _ := e.run("--format", "json", "doctor")
+	var rep struct {
+		Checks []struct {
+			Name, Detail string
+			OK           bool
+		}
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatal(err, out)
+	}
+	found := false
+	for _, c := range rep.Checks {
+		if c.Name == "required checks o/r" {
+			found = true
+			if c.OK || !strings.Contains(c.Detail, "every check gates") || !strings.Contains(c.Detail, "main") {
+				t.Errorf("%+v", c)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("doctor %d did not report o/r's required checks: %s", code, out)
+	}
+	if _, human, _ := e.run("doctor"); !strings.Contains(human, "--    required checks o/r") {
+		t.Errorf("unreadable required checks are a warning, not a failure: %s", human)
+	}
+}
+
+// TestDoctorWarnsOfARepositoryWithNoCI: the default branch has no required checks and, depending on
+// the workflows, none or some workflow files. With none, doctor warns that no CI will report; it is
+// a warning, not a failure, and it is not said when there are workflows.
+func TestDoctorWarnsOfARepositoryWithNoCI(t *testing.T) {
+	workflows := []any{}
+	t.Cleanup(func() { apiHook = nil })
+	apiHook = func(w http.ResponseWriter, path string) bool {
+		switch path {
+		case "/repos/o/r/branches/main/protection/required_status_checks":
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]any{"message": "Branch not protected"})
+		case "/repos/o/r/rules/branches/main":
+			_, _ = w.Write([]byte("[]"))
+		case "/repos/o/r/contents/.github/workflows":
+			if len(workflows) == 0 {
+				return false
+			}
+			_ = json.NewEncoder(w).Encode(workflows)
+		default:
+			return false
+		}
+		return true
+	}
+	e := setup(t)
+	code, human, _ := e.run("doctor")
+	if code != 0 || !strings.Contains(human, "--    ci o/r") || !strings.Contains(human, "no workflow files and no required checks on main") {
+		t.Fatalf("doctor %d should warn of no CI, and not fail: %s", code, human)
+	}
+	workflows = []any{map[string]any{"type": "file", "name": "ci.yml", "path": ".github/workflows/ci.yml"}}
+	if _, human, _ := e.run("doctor"); strings.Contains(human, "ci o/r") {
+		t.Fatalf("a repository with a workflow has CI: %s", human)
+	}
+}
+
+// TestDoctorSaysWhyMemoryIsOff: ynm on PATH is not enough (ADR-012): with no store, memory stays off
+// and doctor says so as a warning; with one, it is on.
+func TestDoctorSaysWhyMemoryIsOff(t *testing.T) {
+	e := setup(t)
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "ynm"), []byte("#!/bin/sh\necho 0.3.0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("YNM_HOME", "")
+	t.Chdir(t.TempDir())
+	_, human, _ := e.run("doctor")
+	if !strings.Contains(human, "--    memory") || !strings.Contains(human, "off: ynm is on PATH but has no store") {
+		t.Fatalf("doctor should say why memory is off: %s", human)
+	}
+	ynmHome := t.TempDir()
+	t.Setenv("YNM_HOME", ynmHome)
+	if _, human, _ := e.run("doctor"); !strings.Contains(human, "ok    memory") || !strings.Contains(human, "on: ynm on PATH, the user store, from YNM_HOME at "+ynmHome) {
+		t.Fatalf("a store turns it on, and doctor says which: %s", human)
+	}
+	// A repository under HOME, a ~/.ynm, and YNM_HOME naming a folder that is not there: ynm
+	// writes to YNM_HOME, so ~/.ynm is not the store (#147).
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".ynm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(home, "repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(repo)
+	t.Setenv("YNM_HOME", filepath.Join(repo, "no-such-home"))
+	if _, human, _ := e.run("doctor"); !strings.Contains(human, "--    memory") || strings.Contains(human, "store at "+filepath.Join(home, ".ynm")) || !strings.Contains(human, "no-such-home") {
+		t.Fatalf("a missing YNM_HOME does not fall back to ~/.ynm: %s", human)
+	}
+}
+
+// TestDoctorReportsQueuedMemoryWrites: nothing is said when the queue is empty; when writes wait
+// for ynm, doctor says how many and since when, as a warning, not a failure.
+func TestDoctorReportsQueuedMemoryWrites(t *testing.T) {
+	e := setup(t)
+	if code, out, _ := e.run("doctor"); strings.Contains(out, "memory queue") {
+		t.Fatalf("an empty queue is not reported: %d %s", code, out)
+	}
+	st, err := sqlite.Open(filepath.Join(e.dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, at := range []string{"2026-10-05T09:00:00Z", "2026-10-05T10:00:00Z"} {
+		doc, _ := json.Marshal(map[string]any{"record": map[string]any{"Subject": "sig/x"}, "queued": at})
+		if _, err := st.Put(context.Background(), fmt.Sprintf("memory/queue/%026d", i), doc, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = st.Close()
+	code, out, _ := e.run("--format", "json", "doctor")
+	var rep struct {
+		OK     bool
+		Checks []struct {
+			Name, Detail string
+			OK           bool
+		}
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatal(err, out)
+	}
+	found := false
+	for _, c := range rep.Checks {
+		if c.Name == "memory queue" {
+			found = true
+			want := time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC).Local().Format(time.RFC3339)
+			if c.OK || c.Detail != "2 memory writes queued since "+want {
+				t.Errorf("memory queue check: %+v", c)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("doctor %d did not report the queue: %s", code, out)
+	}
+	if _, human, _ := e.run("doctor"); !strings.Contains(human, "--    memory queue") {
+		t.Errorf("a queue is a warning, not a failure: %s", human)
 	}
 }
 
@@ -488,6 +649,7 @@ func TestStart(t *testing.T) {
 		{[]string{"start", "o/r#5", "extra"}, cli.ExitUsage, "one reference"},
 		{[]string{"start", "o/r#5", "--auto-approve", "everything"}, cli.ExitUsage, "want edits or all"},
 		{[]string{"start", "o/r#5", "--auto-approve", "edits", "--detach"}, cli.ExitUsage, "not --detach"},
+		{[]string{"shadow", "run", "fmt", "--auto-approve", "everything"}, cli.ExitUsage, "want edits or all"},
 		{[]string{"start", "not-a-ref"}, cli.ExitUsage, "is not a reference"},
 		{[]string{"start", "o/r#5", "--bogus"}, cli.ExitUsage, ""},
 	} {

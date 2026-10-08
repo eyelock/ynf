@@ -32,6 +32,14 @@ For each occurrence of a failure, ynf writes an episodic memory to ynm whose sub
 item, run, step and time, so consolidation never takes two occurrences for one, and each is tagged
 `ynf.failure.v1`, which is how to select ynf's records.
 
+The text also says what failed, not only what ynf decided: the run's outcome and exit code, the cap
+that bound it, the failing sensors or CI checks, the harness, and an excerpt of the run's own
+message. A `sig/outcome/error` record reads, for example: "Failure `sig/outcome/error` on X in
+lane `Y`: the run ended error, exit 3; it reported: "exit 3: the build step failed". Occurrence 3,
+run `R`. ynf then decided: outcome.error after 2 retries." That is what lets ynm's reflection find
+a cause. Only what the run reported goes in, scrubbed of secrets and cut to 1 KiB, never ticket
+text or a prompt, because a record in a shared store is shared.
+
 ```
 sig/ci-diverges/golangci-lint
 sig/stuck/sensor:unit-tests
