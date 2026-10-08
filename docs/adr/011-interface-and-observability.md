@@ -30,7 +30,7 @@ ynf lanes        validate [--file <path>] | show --repo <host/org/repo> [<lane>]
 ynf pause        <lane> --reason <text> [--repo …]
 ynf resume       <lane> --reason <text> [--repo …]
 ynf stats        [--lane <name>] [--window 30d]
-ynf shadow       run <lane> [--since 90d] | ls | grade [<run>] | report [<run> | --lane <lane>]
+ynf shadow       run <lane> [--since 90d] [--auto-approve edits|all] | ls | grade [<run>] | report [<run> | --lane <lane>]
 
 Connections
 ynf trackers     ls | get <ref>                                           get reads without starting
@@ -62,8 +62,8 @@ be several or none. Both feed the same `step` (ADR-009). `ynf start`:
   and that the lane exists and accepts the item, and fails before creating anything if any check
   does
 - counts as attended when run from a terminal, so it may use the `process` executor, and is the
-  only way to switch off an agent's approval prompts outside containment (`--auto-approve`,
-  ADR-007)
+  only way to switch off an agent's approval prompts outside containment (`--auto-approve`, on
+  `start` and `shadow run`, ADR-007)
 - steps the item now and returns when it is waiting on something outside ynf (CI, a review, a
   person), printing its state and any pull request; `--detach` only records it, for a running
   `ynf serve` to pick up

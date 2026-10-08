@@ -415,3 +415,31 @@ func TestShadowPinsTheHarnessFromTheDefaultBranch(t *testing.T) {
 		t.Fatalf("outward: %v", h.o.calls)
 	}
 }
+
+// TestShadowAutoApproveOnTheHost: --auto-approve, given by the person at the terminal, reaches the
+// ynh command of every attempt on the host, as it does for start, and is recorded in the run's
+// pins. Without it the attempts keep their prompts.
+func TestShadowAutoApproveOnTheHost(t *testing.T) {
+	for _, asked := range []string{"", "edits", "all"} {
+		h := newShadowHarness(t)
+		calls := fakeYnh(t)
+		h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "k"}[k] }
+		h.e.HostAutoApprove = asked
+		h.e.HostCapabilities = func(context.Context) (string, error) { return "0.9.0", nil }
+		h.closedFixed(1, "ynf:agentic", "pkg:internal/format")
+		run, err := h.e.ShadowRun(context.Background(), engine.ShadowRequest{Lane: "agentic"})
+		if err != nil || run.Attempted != 1 {
+			t.Fatalf("%q: %+v %v", asked, run, err)
+		}
+		if got := run.Pins["o/r"].HostAutoApprove; got != asked {
+			t.Errorf("%q: pinned %q", asked, got)
+		}
+		b, _ := os.ReadFile(calls)
+		if got := strings.Contains(string(b), "--auto-approve "+asked) && asked != ""; got != (asked != "") {
+			t.Errorf("%q: flag passed %v:\n%s", asked, got, b)
+		}
+		if asked == "" && strings.Contains(string(b), "--auto-approve") {
+			t.Errorf("no level was asked for, and one was passed:\n%s", b)
+		}
+	}
+}

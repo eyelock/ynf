@@ -247,7 +247,7 @@ func TestLaneRunsSayWhatAPinResolvesTo(t *testing.T) {
 	for _, r := range runs {
 		by[r.Lane] = r
 	}
-	if r := by["agentic"]; r.Problem != "" || r.Read == nil || r.Resolved != "local/chain@1.2.0 at 0123456789abcdef" || r.Pin == nil || r.Pin.Ref != "v1" || !strings.Contains(r.Where, "pinned from github.com/o/chain at v1") {
+	if r := by["agentic"]; r.Problem != "" || r.Read == nil || r.Resolved != "local/chain@1.2.0 at 0123456789abcdef" || r.Pin == nil || r.Pin.Ref != "v1" || r.Pin.URL != "https://github.com/o/chain" || !strings.Contains(r.Where, "pinned from https://github.com/o/chain at v1") {
 		t.Fatalf("a pinned harness: %+v", r)
 	}
 	if r := by["greedy"]; !strings.Contains(r.Problem, "max_turns 99 loosens") {

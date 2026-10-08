@@ -414,6 +414,9 @@ func (e *Engine) shadowPin(ctx context.Context, t *shadowTarget, mirror string) 
 		return p, nil
 	}
 	p.pins.Model, p.pins.Effort = y.Model, y.Effort
+	if !ex.Contained() && ex.Name() != "inline" {
+		p.pins.HostAutoApprove = e.HostAutoApprove
+	}
 	if ex.Name() == "inline" {
 		return p, nil // the harness installed here, which no candidate changes
 	}

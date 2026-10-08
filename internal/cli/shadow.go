@@ -54,6 +54,7 @@ func (a *app) shadowRun(ctx context.Context, args []string) error {
 	fs.Var(&tickets, "ticket", "")
 	sinceArg := fs.String("since", "90d", "")
 	limit := fs.Int("limit", 20, "")
+	approve := fs.String("auto-approve", "", "")
 	if err := fs.Parse(args); err != nil {
 		return withCode(ExitUsage, err)
 	}
@@ -72,11 +73,15 @@ func (a *app) shadowRun(ctx context.Context, args []string) error {
 	if *limit <= 0 {
 		return withCode(ExitUsage, fmt.Errorf("--limit %d: want at least 1", *limit))
 	}
+	if err := checkAutoApprove(*approve); err != nil {
+		return err
+	}
 	a.interactive = true // the process executor is allowed for shadow mode (ADR-007)
 	e, err := a.engine()
 	if err != nil {
 		return err
 	}
+	e.HostAutoApprove = *approve // given at the terminal, for attempts on the host only, as for start
 	req := engine.ShadowRequest{Lane: lane, Since: since, Limit: *limit}
 	for _, r := range repos {
 		repo, err := forgeRepo(r, e.ForgeHost)
