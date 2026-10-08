@@ -23,7 +23,7 @@ as a hosted service.
 | Writer | What | Type | Namespace and subject |
 |---|---|---|---|
 | ynh run, via ynm's plugin, when its harness wants memory | in-run learnings and scratch | `working`, promoted to `episodic` | `session/<id>`, the repository's namespace |
-| ynf, per occurrence of a failure | one record each time a signature occurs, its text naming the item, run, step and time | `episodic`, `dataSchema: ynf.failure.v1`, tagged `ynf.failure.v1`, `failure` and `occurrence` | `factory/<host>/<org>/<repo>`, subject = the failure signature |
+| ynf, per occurrence of a failure | one record each time a signature occurs, its text naming the item, run, step and time and what the run reported | `episodic`, `dataSchema: ynf.failure.v1`, tagged `ynf.failure.v1`, `failure` and `occurrence` | `factory/<host>/<org>/<repo>`, subject = the failure signature |
 | ynm dream | "this keeps happening" | `reflective`, and `procedural` on promote | the same signature subject |
 
 **ynf's own store is the run history; memory holds the patterns.** Every decision, run and action
@@ -77,12 +77,35 @@ summaries, and a recurring signature can open an issue on the harness's reposito
 sensor, a focus change or a quarantine. ynf proposes harness changes; it never makes them. An
 agent sees ynf's records only if its harness connects to the same store and namespace.
 
+**A failure record says what failed, and only what the run reported.** The signature says what
+kind of failure it was and the decision says what ynf did about it; neither says why, and a
+reflect pass over several `sig/outcome/error` occurrences has nothing to explain unless each one
+does. So each record's text and `data` carry, where the run reported them: the run's outcome, exit
+code and the cap that bound it; the sensors still failing and, for a CI signature, the checks that
+failed, by name; the harness name and version; and an excerpt of the failure output, the run's own
+detail or error message (a command's exit status and the end of its output, a ynh run's reason).
+ynf holds no check's log, so a CI signature names the checks and has no excerpt. The text reads as
+a sentence, for ynm's reflection to work over: "Failure `sig/outcome/error` on X in lane `Y`: the
+run ended error, exit 3; it reported: "exit 3: the build step failed". Occurrence 3, run `R`.
+ynf then decided: outcome.error after 2 retries."
+
+What a record may hold is bounded, because a record at `distributed` level is shared with everyone
+who reads that store. Memory may hold content where telemetry may not, but it holds no ticket text
+and no prompt: nothing the lane's task was built from, only what the run reported back. The
+excerpt is passed through the same secret scrubbing as telemetry (`telemetry.Scrub`: tokens, keys,
+credentials in URLs, email addresses) and then cut to its last 1 KiB, scrubbing first so a cut
+never leaves half a secret that no longer matches. Lists of names stop at 20. The exit code is
+recorded only when the step that writes the record made the run, so a record never claims an exit
+code from an earlier run.
+
 **ynf owns its schema.** `ynf.failure.v1` is ynf's, published from this repository as a JSON
 schema under `docs/schema/memory/`. ynm stores it as it stores any record: `data` is an object it
 does not interpret, and `dataSchema` a label it keeps but does not filter on. ynm's filters are
 text, type, level, namespace prefix, subject, tags, a `data` key and time, so each record is also
 tagged with its schema, `ynf.failure.v1`, and selected by that tag and the `factory/` namespace.
-ynm needs no change, no registry entry and no knowledge of ynf to hold it.
+ynm needs no change, no registry entry and no knowledge of ynf to hold it. The detail is optional
+properties only (`outcome`, `exit`, `bound_by`, `failed_sensors`, `failed_checks`, `excerpt`,
+`harness`, `harness_version`), so records written before it remain valid `ynf.failure.v1`.
 
 **Loosely coupled, configured by ynf.** ynm is detected with no configuration when installed
 (ADR-012), and optional: with no `memory` block ynf runs without it, and only its records and the

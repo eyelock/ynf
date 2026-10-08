@@ -11,6 +11,7 @@ import (
 	"github.com/eyelock/ynf/internal/decide"
 	"github.com/eyelock/ynf/internal/item"
 	"github.com/eyelock/ynf/internal/memory"
+	"github.com/eyelock/ynf/internal/telemetry"
 )
 
 // namespace is where an item's repository's memories go: {repo} is host/owner/name, so the same
@@ -75,18 +76,28 @@ func (s *step) remember(in decide.Input, d decide.Decision) {
 			continue
 		}
 		n := it.Counters[name]
+		det := s.failureDetailFor(in, it, name)
+		content := fmt.Sprintf("Failure `%s` on %s in lane `%s`", name, it.Ref(), it.Lane)
+		if w := det.sentence(); w != "" {
+			content += ": " + w
+		}
+		content += fmt.Sprintf(". Occurrence %d, run `%s`, step `%s`, model `%s`, at %s.", n, runID, s.id, model, at)
+		if d.Reason != "" {
+			content += " ynf then decided: " + telemetry.Scrub(d.Reason)
+		}
+		data := map[string]any{
+			"signature": name, "item": it.Key, "lane": it.Lane, "count": n,
+			"run_id": runID, "step": s.id, "at": at, "model": model,
+		}
+		det.data(data)
 		r := memory.Record{
 			Type: "episodic", Namespace: ns, Level: s.e.MemoryLevel, Source: "ynf/step/" + s.id,
-			Subject: name,
-			Summary: fmt.Sprintf("%s on %s (%s), occurrence %d, run %s", name, it.Ref(), it.Lane, n, runID),
-			Content: fmt.Sprintf("Failure `%s` occurred on %s in lane `%s` at %s: occurrence %d on this item, run `%s`, step `%s`, model `%s`.\n\n%s",
-				name, it.Ref(), it.Lane, at, n, runID, s.id, model, d.Reason),
+			Subject:    name,
+			Summary:    fmt.Sprintf("%s on %s (%s), occurrence %d, run %s", name, it.Ref(), it.Lane, n, runID),
+			Content:    content,
 			Tags:       []string{"ynf", "ynf.failure.v1", "lane:" + it.Lane, "failure", "occurrence"},
 			DataSchema: "ynf.failure.v1",
-			Data: map[string]any{
-				"signature": name, "item": it.Key, "lane": it.Lane, "count": n,
-				"run_id": runID, "step": s.id, "at": at, "model": model,
-			},
+			Data:       data,
 		}
 		if err := q.Remember(ctx, r); err != nil {
 			s.e.log().Warn("memory remember: could not queue", "item", it.Key, "err", err)

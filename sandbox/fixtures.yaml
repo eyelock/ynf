@@ -236,7 +236,9 @@ fixtures:
     expect:
       result: escalated
       signatures: ["sig/outcome/error"]
+      memory: ["exit 3", "this lane always fails"]
       checks:
+        - the failure memory says what the run reported, its exit code and its message, not only that ynf escalated
         - the command exits 3, so the run ends error and the item escalates at once; no model runs
         - the failure memory (sig/outcome/error) is what `make e2e-memory-outage` queues while ynm is unreachable, and finds in ynm after
 

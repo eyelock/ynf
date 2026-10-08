@@ -131,7 +131,11 @@ print(hit["data"])'
 ```
 
 Expected: the schema `ynf.failure.v1`, `source` naming the step that wrote it, and `data` with the
-signature, the lane, the item and the occurrence count.
+signature, the lane, the item and the occurrence count, and what the run reported: its `outcome`,
+`exit` code and an `excerpt` of its message. The record's text carries the same, such as
+`the run ended error, exit <code>; it reported: "exit <code>: ..."`, so a reflection over several of them
+has a cause to work from. The excerpt is scrubbed of secrets and cut to 1 KiB, and holds nothing
+from the ticket or the prompt.
 
 Who wrote it is in the store's raw record, its `provenance`:
 

@@ -51,6 +51,42 @@
     "model": {
       "type": "string",
       "description": "The model of the step's run, when the runner reported one."
+    },
+    "outcome": {
+      "type": "string",
+      "description": "How the run ended, as the run reported it (error, budget, operator_error, and so on). Absent for a CI signature, which no run of this item's last step produced."
+    },
+    "exit": {
+      "type": "integer",
+      "description": "The run's exit code. Present only when the step that wrote the record made the run."
+    },
+    "bound_by": {
+      "type": "string",
+      "description": "The cap that ended the run, when one did."
+    },
+    "failed_sensors": {
+      "type": "array",
+      "maxItems": 20,
+      "items": { "type": "string" },
+      "description": "The sensors still failing when the run ended, by name, in the runner's order."
+    },
+    "failed_checks": {
+      "type": "array",
+      "maxItems": 20,
+      "items": { "type": "string" },
+      "description": "For a CI signature, the pull request's checks that had failed, by name."
+    },
+    "excerpt": {
+      "type": "string",
+      "description": "The end of what the run reported about its failure (its detail or error message), passed through the secret scrubbing telemetry uses and cut to its last 1024 bytes, with a leading ellipsis when cut. Never ticket text or a prompt."
+    },
+    "harness": {
+      "type": "string",
+      "description": "The harness that ran, by name, when there was one."
+    },
+    "harness_version": {
+      "type": "string",
+      "description": "The harness's version, when the runner reported one."
     }
   }
 }
