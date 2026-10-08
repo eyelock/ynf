@@ -692,11 +692,28 @@ func TestYnhRunnerOnTheHost(t *testing.T) {
 }
 
 // installs records what InstallHarness was asked, standing in for `ynh install` into the run's home.
-type installs struct{ dirs, homes []string }
+type installs struct {
+	dirs, homes []string
+	pins        []policy.Pin
+	result      runner.Installed // what a pin installs; the id is local/installed unless it says
+	err         error
+}
 
-func (in *installs) install(_ context.Context, dir, home string) (string, error) {
-	in.dirs, in.homes = append(in.dirs, dir), append(in.homes, home)
-	return "local/installed", nil
+func (in *installs) install(_ context.Context, src runner.HarnessSource, home string) (runner.Installed, error) {
+	in.homes = append(in.homes, home)
+	if src.Pin != nil {
+		in.pins = append(in.pins, *src.Pin)
+	} else {
+		in.dirs = append(in.dirs, src.Dir)
+	}
+	if in.err != nil {
+		return runner.Installed{}, in.err
+	}
+	out := in.result
+	if out.ID == "" {
+		out.ID = "local/installed"
+	}
+	return out, nil
 }
 
 // TestHarnessFolderOnTheHostIsInstalledForTheRun: ynh agent run takes a harness id, so a lane whose

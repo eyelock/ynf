@@ -96,7 +96,7 @@ Rules branch on ynf's outcome vocabulary (ADR-012), never on a runner's exit cod
 The harness, its profile and its focus say *how*. The harness a lane is held to is the one inside
 the image that runs it, read from that image (ADR-012), never the repository's working copy. A
 lane names a published image, or names a harness folder in the repository that ynf builds into an
-image when nothing is published (ADR-007). Two rules keep the line sharp:
+image when nothing is published (ADR-007). On the host executors the harness is the one ynh installs into the run's own home, whether it is a folder in the checkout or one pinned from git as `<repository>@<tag-or-commit>`, and the lane is held to what was installed, read before the run starts; a harness folder that cannot be read fails the run rather than skipping the check. Two rules keep the line sharp:
 
 - a lane may only **tighten** budgets, never loosen them. ynf compares the lane's budgets with the
   image's harness before the run and refuses a lane that would loosen one; ynh's `budget_sources`

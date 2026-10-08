@@ -213,8 +213,8 @@ func (a *app) lanesCmd(ctx context.Context, args []string) error {
 		if err != nil {
 			return withCode(ExitPolicy, err)
 		}
-		return a.out(map[string]any{"valid": true, "file": *file, "lanes": f.Names()},
-			fmt.Sprintf("%s: valid, %d lanes (%s)", *file, len(f.Lanes), strings.Join(f.Names(), ", ")))
+		out := withPins(map[string]any{"valid": true, "file": *file, "lanes": f.Names()}, f.Pins())
+		return a.out(out, fmt.Sprintf("%s: valid, %d lanes (%s)", *file, len(f.Lanes), strings.Join(f.Names(), ", "))+pinLines(f.Pins()))
 	case "show":
 		fs := a.flags("lanes show")
 		repo := fs.String("repo", "", "")
@@ -258,6 +258,7 @@ func (a *app) lanesCmd(ctx context.Context, args []string) error {
 		if len(resolves) > 0 {
 			shown["resolves"] = resolves
 		}
+		withPins(shown, (&policy.File{Lanes: lanes}).Pins())
 		if rp.Config != nil {
 			// Which layer set each value (ADR-006): the configuration repository or the repository.
 			shown["config"] = map[string]string{"repo": rp.Config.Repo, "sha": rp.Config.SHA}
@@ -578,6 +579,24 @@ func summarise(en store.LogEntry) string {
 	return string(en.Body)
 }
 
+// withPins adds the harnesses lanes pin from a repository to out, if any do. This says what a pin
+// names without installing it: `ynf harness` installs it and says what it resolves to.
+func withPins(out map[string]any, pins map[string]policy.Pin) map[string]any {
+	if len(pins) > 0 {
+		out["pinned_harnesses"] = pins
+	}
+	return out
+}
+
+// pinLines says, for each lane that pins its harness, which repository and tag or commit it takes.
+func pinLines(pins map[string]policy.Pin) string {
+	var b strings.Builder
+	for _, name := range slices.Sorted(maps.Keys(pins)) {
+		fmt.Fprintf(&b, "\nlane %s pins its harness from %s at %s (installed for each run on the host; `ynf harness` resolves it)", name, pins[name].Repo, pins[name].Ref)
+	}
+	return b.String()
+}
+
 // validateMerged checks a repository's lanes.yaml as ynf would use it: laid over the configuration
 // repository's lanes, which a layer alone may depend on, and validated as a whole.
 func (a *app) validateMerged(ctx context.Context, repo, file string, doc []byte) error {
@@ -590,8 +609,8 @@ func (a *app) validateMerged(ctx context.Context, repo, file string, doc []byte)
 		return withCode(ExitPolicy, err)
 	}
 	names := rp.File.Names()
-	out := map[string]any{"valid": true, "file": file, "repo": repo, "lanes": names}
-	text := fmt.Sprintf("%s: valid, %d lanes (%s)", file, len(names), strings.Join(names, ", "))
+	out := withPins(map[string]any{"valid": true, "file": file, "repo": repo, "lanes": names}, rp.File.Pins())
+	text := fmt.Sprintf("%s: valid, %d lanes (%s)", file, len(names), strings.Join(names, ", ")) + pinLines(rp.File.Pins())
 	if rp.Config != nil {
 		out["config"] = map[string]string{"repo": rp.Config.Repo, "sha": rp.Config.SHA}
 		text += fmt.Sprintf("\nmerged over config@%s of %s", short(rp.Config.SHA), rp.Config.Repo)

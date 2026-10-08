@@ -85,6 +85,9 @@ type RunRecord struct {
 	Denied         []string `json:"denied,omitempty"` // hosts the egress proxy refused
 	StepDir        string   `json:"step_dir"`
 	Duration       string   `json:"duration"`
+	// HarnessPin is the repository and ref a pinned harness was installed from, as the lane wrote
+	// it; Harness and HarnessSHA say which harness and commit that gave.
+	HarnessPin string `json:"harness_pin,omitempty"`
 	// Model and Usage are what the runner reports, for comparing outcomes and cost by model and
 	// effort (ADR-011). ynf's own store is the run history; memory holds only failure patterns.
 	Model string `json:"model,omitempty"`
@@ -416,8 +419,19 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	e.Telemetry.Event(s.ctx, telemetry.EventRunStarted, runAttrs...)
 	// usedHarness and usedFocus are what the run actually used, known once the harness is read.
 	var usedHarness, usedFocus string
+	var installed *runner.Installed // the harness installed into this run's own ynh home, if one was
 	finished := func(rec RunRecord) event.Event {
 		rec.RunID = runID
+		if installed != nil {
+			// What ynh installed, for a run that did not get as far as reporting its own.
+			if rec.Harness == "" {
+				rec.Harness = installed.Label()
+			}
+			if rec.HarnessSHA == "" {
+				rec.HarnessSHA = installed.Commit
+			}
+			rec.HarnessPin = installed.Pin
+		}
 		s.run = &rec
 		s.recordRun(it.Key, rec)
 		done := []attribute.KeyValue{attribute.String(telemetry.AttrGenAiResponseModel, telemetry.Scrub(rec.Model))}
@@ -515,30 +529,50 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	var harness runner.Harness
 	harnessKnown := false
 	if y, ok := r.(runner.YnhRunner); ok {
-		h, known, err := s.harness(y, job.Image, inImage, lane.Run.Image == "" || s.imageBuilt, inline, wt)
-		if err != nil {
-			return fail(runner.OperatorError, err)
-		}
-		usedHarness = y.Cfg.Harness
-		switch {
-		case inline && h.ID != "":
-			y.Cfg.Harness = h.ID // run the harness installed here, by its id
-			usedHarness = h.ID
-			r = y
-		case known && h.ID == "" && !inImage && e.InstallHarness != nil:
-			// A harness folder on the host: ynh agent run takes only an id, so install the folder
-			// into a ynh home of this run's own, and run with that home. The operator's is never
-			// touched, and the run record and telemetry keep the folder the lane names.
-			home := filepath.Join(runDir, "ynh")
-			id, err := telemetry.Call(s.ctx, e.Telemetry, telemetry.CallSystemYnh, "install", func(ctx context.Context) (string, error) {
-				return e.InstallHarness(ctx, harnessDir(wt, y.Cfg.Harness), home)
-			})
+		var h runner.Harness
+		var known bool
+		pin, pinned, _ := policy.ParsePin(y.Cfg.Harness) // the lane was validated when it was loaded
+		if pinned {
+			// A harness pinned from a repository: installed into a ynh home of this run's own
+			// before the run starts, then read from what ynh installed, so the lane is held to
+			// exactly the harness that runs, and nothing is copied into the checkout.
+			inst, err := s.installFor(runner.HarnessSource{Pin: &pin}, y.Cfg.Harness, runDir)
 			if err != nil {
-				return fail(runner.OperatorError, fmt.Errorf("install the harness %s for this run: %w", y.Cfg.Harness, err))
+				return fail(runner.OperatorError, err)
 			}
-			y.Cfg.Harness = id
-			job.Env["YNH_HOME"] = home
+			installed = &inst
+			if h, err = runner.ReadHarness(inst.Path); err != nil {
+				return fail(runner.OperatorError, fmt.Errorf("read the harness %s installed for this run: %w", pin, err))
+			}
+			h.ID, known = inst.ID, true
+			usedHarness = inst.ID
+			y.Cfg.Harness = inst.ID
+			job.Env["YNH_HOME"] = filepath.Join(runDir, "ynh")
 			r = y
+		} else {
+			var err error
+			if h, known, err = s.harness(y, job.Image, inImage, lane.Run.Image == "" || s.imageBuilt, inline, wt); err != nil {
+				return fail(runner.OperatorError, err)
+			}
+			usedHarness = y.Cfg.Harness
+			switch {
+			case inline && h.ID != "":
+				y.Cfg.Harness = h.ID // run the harness installed here, by its id
+				usedHarness = h.ID
+				r = y
+			case known && h.ID == "" && !inImage && e.InstallHarness != nil:
+				// A harness folder on the host: ynh agent run takes only an id, so install the
+				// folder into a ynh home of this run's own, and run with that home. The operator's
+				// is never touched, and the run record and telemetry keep the folder the lane names.
+				inst, err := s.installFor(runner.HarnessSource{Dir: harnessDir(wt, y.Cfg.Harness)}, y.Cfg.Harness, runDir)
+				if err != nil {
+					return fail(runner.OperatorError, err)
+				}
+				installed = &inst
+				y.Cfg.Harness = inst.ID
+				job.Env["YNH_HOME"] = filepath.Join(runDir, "ynh")
+				r = y
+			}
 		}
 		harness, harnessKnown = h, known
 		usedFocus = y.Cfg.Focus
@@ -698,6 +732,11 @@ func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, ynhH
 		}
 		return job, false, nil
 	}
+	if pin, ok, _ := policy.ParsePin(y.Cfg.Harness); ok {
+		// ynf builds an image from a folder, not from a repository, and a published image carries
+		// its own harness: neither is a place to install a pin for one run.
+		return job, false, fmt.Errorf("lane %s pins harness %s from a repository, which only the host executors (process, inline) run: on %s, use a harness folder in the repository or run.image", lane.Name, pin, ex.Name())
+	}
 	if job.Image == "" {
 		if e.BuildImage == nil {
 			return job, false, fmt.Errorf("lane %s names no published image (run.image), and this instance does not build one: that needs ynh on PATH and images.build not false", lane.Name)
@@ -814,8 +853,34 @@ func (s *step) harness(y runner.YnhRunner, image string, inImage, built, inline 
 	if y.Cfg.Harness == "" {
 		return h, false, errors.New("a ynh lane on the host needs ynh.harness, the harness to run")
 	}
-	h, err = runner.ReadHarness(harnessDir(wt, y.Cfg.Harness))
-	return h, err == nil, nil
+	if !isFolder(wt, y.Cfg.Harness) {
+		return h, false, nil // an installed harness id, which ynh reads and reports on itself
+	}
+	// A folder that is there and cannot be read is the lane's mistake, not an installed id: the
+	// lane is checked against it, or the run is refused.
+	if h, err = runner.ReadHarness(harnessDir(wt, y.Cfg.Harness)); err != nil {
+		return h, false, err
+	}
+	return h, true, nil
+}
+
+// installFor installs src into a ynh home of this run's own, <run>/ynh, and says what was
+// installed. It is the one step that can reach the network (a pin is cloned), and it runs here, on
+// the host, before the run's containment starts, so the run's egress is never asked for it.
+//
+// Folders and pins both come through here, so a ynh that can run a folder directly can skip the
+// folder case in one place (the folder branch in runLane) and leave pins as they are.
+func (s *step) installFor(src runner.HarnessSource, named, runDir string) (runner.Installed, error) {
+	if s.e.InstallHarness == nil {
+		return runner.Installed{}, fmt.Errorf("harness %s cannot be installed for this run: this instance has no ynh to install it with", named)
+	}
+	inst, err := telemetry.Call(s.ctx, s.e.Telemetry, telemetry.CallSystemYnh, "install", func(ctx context.Context) (runner.Installed, error) {
+		return s.e.InstallHarness(ctx, src, filepath.Join(runDir, "ynh"))
+	})
+	if err != nil {
+		return inst, fmt.Errorf("install the harness %s for this run: %w", named, err)
+	}
+	return inst, nil
 }
 
 // harnessDir is the folder a lane's harness value names: in the checkout, or absolute (shadow mode
@@ -832,7 +897,7 @@ func isFolder(wt, name string) bool {
 	if name == "" || strings.Contains(name, "@") {
 		return false
 	}
-	fi, err := os.Stat(filepath.Join(wt, filepath.FromSlash(name)))
+	fi, err := os.Stat(harnessDir(wt, name))
 	return err == nil && fi.IsDir()
 }
 

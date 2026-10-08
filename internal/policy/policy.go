@@ -226,6 +226,9 @@ func Load(doc []byte) (*File, error) {
 		l.Name = name
 		f.Lanes[name] = f.Defaults.apply(l)
 	}
+	if err := f.checkHarnesses(); err != nil {
+		return nil, err
+	}
 	return &f, nil
 }
 

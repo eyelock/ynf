@@ -322,10 +322,10 @@ func (d *decider) react(key, def, feedback string) {
 			d.act(orDefault(r.Then, Escalate), "%s %d times", key, n)
 			return
 		}
-		d.startRun(feedback, key+": resuming with "+r.ResumeWith)
+		d.startRetry(feedback, key+": resuming with "+r.ResumeWith)
 	case r.Retry > 0:
 		if n := d.it.Bump("retry/" + key); n <= r.Retry {
-			d.startRun(feedback, fmt.Sprintf("%s: retry %d of %d", key, n, r.Retry))
+			d.startRetry(feedback, fmt.Sprintf("%s: retry %d of %d", key, n, r.Retry))
 			return
 		}
 		d.act(orDefault(r.Then, Escalate), "%s after %d retries", key, r.Retry)
@@ -361,10 +361,21 @@ func (d *decider) act(action, format string, args ...any) {
 	}
 }
 
-func (d *decider) startRun(feedback, why string) {
+func (d *decider) startRun(feedback, why string) { d.start(feedback, why, true) }
+
+// startRetry starts a run a lane's reaction asked for. Attempts counts runs started and never
+// finished (a dead holder) and a finished run resets it, so it would read "attempt 1" on every
+// retry; the reason already says which retry this is.
+func (d *decider) startRetry(feedback, why string) { d.start(feedback, why, false) }
+
+func (d *decider) start(feedback, why string, showAttempt bool) {
 	d.it.Attempts++
 	d.it.Feedback = feedback
-	d.to(item.Running, "%s: starting run (attempt %d)", why, d.it.Attempts)
+	if showAttempt {
+		d.to(item.Running, "%s: starting run (attempt %d)", why, d.it.Attempts)
+	} else {
+		d.to(item.Running, "%s: starting run", why)
+	}
 	d.actions = append(d.actions, Action{Kind: Run, Feedback: feedback})
 	// If no run.finished arrives by then, the holder died and the next sweep restarts the run.
 	d.wake(2 * time.Hour)

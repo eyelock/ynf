@@ -76,7 +76,8 @@ with the runner:
 ```yaml
 run:
   runner: ynh                      # or: command
-  image: ghcr.io/eyelock/ynh-lint@sha256:…   # or ynh.harness: <folder>, built when unpublished
+  image: ghcr.io/eyelock/ynh-lint@sha256:…   # or ynh.harness: <folder>, built when unpublished;
+                                             # on the host, ynh.harness: <repository>@<tag-or-commit>
   ynh:
     focus: tidy
     budgets: { max_turns: 20 }     # may only tighten (ADR-006)
