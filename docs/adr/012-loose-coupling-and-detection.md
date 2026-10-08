@@ -112,6 +112,19 @@ otherwise as its `command` block, and a lane with neither is refused. Every step
 providers it used and their versions, so a run on one machine is explainable on another, and
 `ynf doctor` prints which providers are installed and their versions.
 
+**Detected features, gated by name.** Besides its version and capabilities, ynh lists `features` in
+`ynh version --format json`: names that only ever get added, which a consumer gates on instead of
+comparing versions. ynf reads them, an absent list meaning none, and shows them in `ynf doctor` and
+in the run record (`runner_features`). Two are used. `agent-run-harness-path` means
+`ynh agent run --harness` takes a folder, so a harness folder on the host executors (`process`, and
+`inline` when the image carries no harness) is passed as a path with no install step; without it
+ynf installs the folder into a ynh home of the run's own, as it always does for a harness pinned from
+git. `agent-run-fetches-includes` means the run fetches the harness's git includes at setup. Either
+way the run's ynh home is its own, under the run folder, because a path run still writes there (the
+include clones and a schema marker), so the operator's home is never read or written. The fetch is
+network access inside the run, under the executor's own containment: the host's network on
+`process`, the job runner's policy on `inline`.
+
 **ynh-only features stay in the ynh provider.** Budget tightening, sensor overlays, the control
 channel, checkpoint paths, and the `YNH-Session` trailer exist only when the runner is `ynh`.
 Everything ynf itself guarantees (claims, containment, the credential split, the diff gate,

@@ -80,6 +80,13 @@ func TestDetectYnh(t *testing.T) {
 	if d := runner.DetectYnh(ctx); !d.Found || d.Version != "0.10.0" || d.String() != "ynh 0.10.0" {
 		t.Fatalf("%+v", d)
 	}
+	if d := runner.DetectYnh(ctx); len(d.Features) != 0 || d.Has(runner.FeatureHarnessPath) {
+		t.Fatalf("a ynh that lists no features has none: %+v", d)
+	}
+	fakeYnh(t, `{"version":"0.12.0","capabilities":"0.9.0","features":["agent-run-fetches-includes","agent-run-harness-path","some-later-one"]}`)
+	if d := runner.DetectYnh(ctx); !d.Found || len(d.Features) != 3 || !d.Has(runner.FeatureHarnessPath) || !d.Has(runner.FeatureFetchesIncludes) || d.Has("absent") {
+		t.Fatalf("features: %+v", d)
+	}
 	fakeYnh(t, `{"capabilities":"0.9.0"}`)
 	if d := runner.DetectYnh(ctx); !d.Found || d.Version != "0.9.0" {
 		t.Fatalf("a ynh that reports only capabilities: %+v", d)
@@ -102,7 +109,7 @@ func TestDetectedYnhAsksOnce(t *testing.T) {
 	fakeYnh(t, `{"version":"1.0.0","capabilities":"1.0.0"}`)
 	first := runner.DetectedYnh(context.Background())
 	noYnh(t)
-	if again := runner.DetectedYnh(context.Background()); again != first {
+	if again := runner.DetectedYnh(context.Background()); again.Version != first.Version || again.Found != first.Found {
 		t.Fatalf("asked twice: %+v then %+v", first, again)
 	}
 }

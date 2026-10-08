@@ -156,6 +156,25 @@ never falls back: where ynh runs on the host and is missing, the run is refused.
 says `runner_detected` and the ynh version, and `ynf harness` and `ynf lanes show` say what an
 unnamed runner resolves to here.
 
+ynh also lists `features` in that answer, such as `agent-run-harness-path` and
+`agent-run-fetches-includes`, and ynf gates on those by name, never by comparing versions. A ynh
+that lists none (before 0.12.0) has none. `ynf doctor` shows them on the ynh line, and the run record
+keeps them as `runner_features` for a run that was detected or ran a folder by path. With
+`agent-run-harness-path`, a harness folder on `process` or `inline` is passed to `ynh agent run
+--harness` as a path and not installed; without it the folder is installed into the run's own ynh
+home, as a pin always is (see `run.ynh.harness` in the [lanes reference](lanes.md)).
+
+**Where an include is fetched.** With `agent-run-fetches-includes`, `ynh agent run` clones a
+harness's git includes itself, at run setup, before the worker starts. That network access is
+inside the run, not a step of ynf's. On `process`, which is uncontained, it is the host's own
+network. On `inline`, the job runner's network policy applies, so the lane's egress has to allow the
+hosts the includes name (ynh reaches only those), and a fetch that fails stops the run before any
+worker starts with an error beginning `fetching includes`. The clones go to the run's own ynh home
+and the operator's is never read or written. On the install path (a ynh without the feature, or a
+pin) the includes are fetched by `ynh install` on the host before the run, as the pin's repository
+is. An include from a local repository (`file://` or a path) needs no network at all, which is how
+`make fullchain` proves it.
+
 A lane with both blocks can name each one's image: `run.command.image` is used when it resolves to the
 command runner and wins over `run.image`; when it resolves to ynh it is ignored, and ynh uses
 `run.image` or the image it builds from `ynh.base`.

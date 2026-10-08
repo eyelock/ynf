@@ -51,8 +51,8 @@ func (i Installed) Label() string {
 }
 
 // InstallHarness installs src into a ynh home of its own, ynhHome, and says what ynh installed.
-// `ynh agent run` accepts only an id, so a harness the lane names by folder or by pin is made one
-// this way. A folder is run by ynh from where it is; a pin is cloned at its tag or commit, which
+// A pin is made an id this way, and so is a folder for a ynh that does not list
+// agent-run-harness-path; one that does is given the folder directly and never reaches here. A folder is run by ynh from where it is; a pin is cloned at its tag or commit, which
 // is the one step that reaches the network, and it happens here, before the run starts and on the
 // host, never inside the run's containment. The home is passed as YNH_HOME to every ynh command
 // here and replaces the operator's, so the operator's own home is never read or written. The run

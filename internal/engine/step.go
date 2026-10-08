@@ -74,7 +74,10 @@ type RunRecord struct {
 	Runner string `json:"runner"`
 	// RunnerDetected is set when the lane named no runner and detection chose this one, so the
 	// log and stats can tell a named runner from a detected one (ADR-012).
-	RunnerDetected bool     `json:"runner_detected,omitempty"`
+	RunnerDetected bool `json:"runner_detected,omitempty"`
+	// RunnerFeatures are the features the host's ynh listed, for a run that was detected or ran a
+	// harness folder by path, so the record says what the run could rely on.
+	RunnerFeatures []string `json:"runner_features,omitempty"`
 	Executor       string   `json:"executor"`
 	Argv           []string `json:"argv"`
 	Base           string   `json:"base"`
@@ -436,6 +439,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	// usedHarness and usedFocus are what the run actually used, known once the harness is read.
 	var usedHarness, usedFocus string
 	var installed *runner.Installed // the harness installed into this run's own ynh home, if one was
+	viaPath := false                // the harness folder was passed to ynh by path, with no install
 	finished := func(rec RunRecord) event.Event {
 		rec.RunID = runID
 		if installed != nil {
@@ -576,8 +580,17 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 				y.Cfg.Harness = h.ID // run the harness installed here, by its id
 				usedHarness = h.ID
 				r = y
+			case known && h.ID == "" && !inImage && ynhHost.Found && ynhHost.Has(runner.FeatureHarnessPath):
+				// A harness folder on the host, and a ynh that runs a folder itself: pass the
+				// folder, with no install. ynh fetches the harness's includes at run setup and
+				// keeps them, and the run's sessions, in its home, so the run still gets a home
+				// of its own under the run folder and the operator's is never touched.
+				y.Cfg.Harness = harnessDir(wt, y.Cfg.Harness)
+				job.Env["YNH_HOME"] = filepath.Join(runDir, "ynh")
+				viaPath = true
+				r = y
 			case known && h.ID == "" && !inImage && e.InstallHarness != nil:
-				// A harness folder on the host: ynh agent run takes only an id, so install the
+				// A harness folder on the host, and a ynh that takes only an id: install the
 				// folder into a ynh home of this run's own, and run with that home. The operator's
 				// is never touched, and the run record and telemetry keep the folder the lane names.
 				inst, err := s.installFor(runner.HarnessSource{Dir: harnessDir(wt, y.Cfg.Harness)}, y.Cfg.Harness, runDir)
@@ -674,8 +687,11 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 			rec.Detail += ": " + tail(string(out.Stderr))
 		}
 	}
-	if detected && rec.RunnerVersion == "" && r.Name() == "ynh" {
-		rec.RunnerVersion = ynhHost.Version // the detected version, when the run did not report its own
+	if (detected || viaPath) && r.Name() == "ynh" {
+		if rec.RunnerVersion == "" {
+			rec.RunnerVersion = ynhHost.Version // the detected version, when the run did not report its own
+		}
+		rec.RunnerFeatures = ynhHost.Features
 	}
 	rec.Duration = e.Now().Sub(start).Round(time.Millisecond).String()
 	if rec.Changed, err = s.g.Changed(s.ctx, wt); err != nil {
@@ -884,8 +900,8 @@ func (s *step) harness(y runner.YnhRunner, image string, inImage, built, inline 
 // installed. It is the one step that can reach the network (a pin is cloned), and it runs here, on
 // the host, before the run's containment starts, so the run's egress is never asked for it.
 //
-// Folders and pins both come through here, so a ynh that can run a folder directly can skip the
-// folder case in one place (the folder branch in runLane) and leave pins as they are.
+// A pin always comes through here. A folder does too, unless the host's ynh lists
+// agent-run-harness-path, in which case runLane passes the folder by path and installs nothing.
 func (s *step) installFor(src runner.HarnessSource, named, runDir string) (runner.Installed, error) {
 	if s.e.InstallHarness == nil {
 		return runner.Installed{}, fmt.Errorf("harness %s cannot be installed for this run: this instance has no ynh to install it with", named)

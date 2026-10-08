@@ -189,15 +189,23 @@ the collector on, and a receiver of its own as `ynr serve`'s upstream. HOME, `XD
 `YNH_HOME` are its own. It uses no model, no network and no docker.
 
 The lane runs on the `process` executor, which ynf allows with `--interactive`. Its harness is `.`,
-the one the repository carries in `.agents/harness/`. `ynh agent run` takes only a harness id, so
-ynf installs the folder into a ynh home of the run's own (never yours) and runs it by the id ynh
-gives it; the focus is read from the checkout. `ynf.lane.harness` holds what the lane names, `.`.
+the one the repository carries in `.agents/harness/`. ynh 0.12.0 lists `agent-run-harness-path`,
+so ynf passes the folder to `ynh agent run --harness` as a path and installs nothing, with a ynh home
+of the run's own (never yours); the focus is read from the checkout. The check asserts the run
+converged, that the record shows an absolute `--harness` path and the ynh features, and that your
+ynh home is as it was. `ynf.lane.harness` holds what the lane names, `.`.
 
 The check then runs a second lane, whose harness is pinned from a local bare repository at a tag
-(`file://.../chain.git@v0.1.0`), with a target repository that carries no harness at all. ynf has
-ynh install that tag into the run's own home, and the check asserts the run converged, that the
-run record names the harness, its version, the pin and the commit the tag points at, and that your
-ynh home is as it was. `ynf.lane.harness` holds the id ynh gave it, `local/chain`.
+(`file://.../chain.git@v0.1.0`), with a target repository that carries no harness at all. A pin
+always takes the install step: ynf has ynh install that tag into the run's own home, and the check
+asserts the run converged, that the run record names the harness, its version, the pin and the
+commit the tag points at, and that your ynh home is as it was. `ynf.lane.harness` holds the id ynh
+gave it, `local/chain`.
+
+A third lane runs a harness folder whose manifest has a git include from a local repository
+(`file://.../include`), which ynh fetches into the run's own home at run setup. The check asserts the
+run converged, which it cannot do on a cold cache without that fetch (`ynh check` on the same folder
+refuses and names `ynh update`), and that your ynh home is as it was. It needs no network.
 
 The vendor on `PATH` is `claude`, a link to ynr's stub vendor (`ynr-stub-vendor`). It answers the
 stream-json session ynh drives, one turn for every user message until stdin closes, and writes its
