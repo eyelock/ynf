@@ -72,3 +72,25 @@ resource "github_repository_ruleset" "this" {
     bypass_mode = "always"
   }
 }
+
+# A second ruleset no one can bypass, admins included: main and develop can never be deleted or
+# force-pushed by accident, whatever the rulesets above allow an admin to do. Created by hand in
+# every eyelock YN repository and adopted here (imports.tf).
+resource "github_repository_ruleset" "never_delete" {
+  repository  = github_repository.ynf.name
+  name        = "Never Delete Main or Develop"
+  target      = "branch"
+  enforcement = "active"
+
+  conditions {
+    ref_name {
+      include = ["refs/heads/main", "refs/heads/develop"]
+      exclude = []
+    }
+  }
+
+  rules {
+    deletion         = true
+    non_fast_forward = true
+  }
+}

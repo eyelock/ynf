@@ -1,13 +1,19 @@
 # Branch Protection Configuration
 
-ynf uses Gitflow, so two branches are protected, each by one repository ruleset. There is no
-classic branch protection: the rulesets are the single source of truth. They are managed in
+ynf uses Gitflow, so two branches are protected: each by a ruleset of its own, and both by a third
+that no one can bypass. There is no classic branch protection: the rulesets are the single source
+of truth. They are managed in
 Terraform ([`infra/github/branches.tf`](../infra/github/branches.tf)), not by hand.
 
 | Ruleset | Branch | Required checks |
 |---|---|---|
 | Develop Branch Protection | `develop` (the default branch) | All Clear |
 | Main Branch Protection | `main` | All Clear, Verify PR source branch |
+| Never Delete Main or Develop | `main` and `develop` | none |
+
+**Never Delete Main or Develop** blocks deleting or force-pushing either branch, and no one can
+bypass it, admins included. The two rulesets above let admins bypass in emergencies; this one makes
+sure that never extends to losing a branch.
 
 ## Required checks
 
