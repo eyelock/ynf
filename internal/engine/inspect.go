@@ -219,6 +219,8 @@ type RequiredReport struct {
 	Known  bool     `json:"known"`
 	Checks []string `json:"checks,omitempty"`
 	Detail string   `json:"detail"`
+	// Workflows is how many workflow files the default branch has, when the forge could say.
+	Workflows *int `json:"workflows,omitempty"`
 }
 
 // RequiredChecks reads each enrolled repository's required checks on its default branch, for
@@ -250,6 +252,11 @@ func (e *Engine) RequiredChecks(ctx context.Context) ([]RequiredReport, error) {
 		rep := RequiredReport{Repo: r, Branch: branch, Known: req.Known, Detail: req.Detail}
 		for _, c := range req.Checks {
 			rep.Checks = append(rep.Checks, c.Context)
+		}
+		if wr, ok := fg.(forge.WorkflowReader); ok {
+			if n, err := wr.Workflows(ctx, name, branch); err == nil {
+				rep.Workflows = &n
+			}
 		}
 		out = append(out, rep)
 	}

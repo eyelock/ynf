@@ -33,7 +33,7 @@ each with one job.
 - **A loop around a loop.** ynh runs the inner loop for minutes; ynf runs a durable state machine
   per work item for days.
 - **Intake** from webhooks (GitHub, JIRA), message topics, scheduled searches, and ynf's own run,
-  timer and lease events. Webhooks are hints; facts are re-probed before every decision.
+  timer and lease events. Webhooks are hints; facts are re-probed before every live decision and recorded with it, and `ynf replay` re-runs decisions on those recorded facts without probing again.
 - **Lanes** are versioned YAML with CEL guards. A lane says whether, when and with which ynh
   harness and focus; the harness says how.
 - **One claim at a time.** Leases with an epoch, heartbeats and fencing, over a store that can be

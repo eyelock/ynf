@@ -58,12 +58,43 @@ func TestYnmFailure(t *testing.T) {
 func TestDetect(t *testing.T) {
 	bin, _ := fakeYnm(t, 0)
 	t.Setenv("PATH", filepath.Dir(bin))
-	if memory.Detect() == nil {
-		t.Fatal("ynm on PATH should be detected")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("YNM_HOME", "")
+	work := t.TempDir()
+	if m, why := memory.Detect(work); m != nil || !strings.Contains(why, "no store") {
+		t.Fatalf("ynm without a store stays off, and says why: %v %q", m, why)
+	}
+	if err := os.Mkdir(filepath.Join(home, ".ynm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if m, _ := memory.Detect(work); m == nil {
+		t.Fatal("ynm on PATH and ~/.ynm should be detected")
+	}
+	if err := os.Remove(filepath.Join(home, ".ynm")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(work, "sub", "dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Mkdir(filepath.Join(work, ".ynm"), 0o755)
+	if m, why := memory.Detect(filepath.Join(work, "sub", "dir")); m == nil || !strings.Contains(why, filepath.Join(work, ".ynm")) {
+		t.Fatalf("a .ynm/ above the working directory counts: %v %q", m, why)
+	}
+	_ = os.Remove(filepath.Join(work, ".ynm"))
+	ynmHome := t.TempDir()
+	t.Setenv("YNM_HOME", ynmHome)
+	if m, _ := memory.Detect(work); m == nil {
+		t.Fatal("YNM_HOME is the user's store when set")
+	}
+	t.Setenv("YNM_HOME", filepath.Join(ynmHome, "missing"))
+	if m, _ := memory.Detect(work); m != nil {
+		t.Fatal("YNM_HOME wins over ~/.ynm, and it has no store")
 	}
 	t.Setenv("PATH", t.TempDir())
-	if memory.Detect() != nil {
-		t.Fatal("no ynm, no memory")
+	t.Setenv("YNM_HOME", ynmHome)
+	if m, why := memory.Detect(work); m != nil || !strings.Contains(why, "not on PATH") {
+		t.Fatalf("no ynm, no memory: %q", why)
 	}
 	if (memory.Ynm{}).Remember(context.Background(), memory.Record{Data: map[string]any{"bad": make(chan int)}}) == nil {
 		t.Fatal("unencodable data should be an error")

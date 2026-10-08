@@ -260,6 +260,7 @@ func (s *step) decideAndAct(ev event.Event) (*event.Event, error) {
 	if err != nil {
 		return nil, err
 	}
+	it.NoCI = noCI(it, f, e.Now())
 	in := decide.Input{Lane: lane, Item: it, Facts: f, Event: ev, Poll: e.Poll}
 	in.Item.Lease = nil // not an input to the decision; keeps replay exact
 	in.Item.Trace = nil // nor is where the item's history is in telemetry
@@ -310,6 +311,21 @@ func (s *step) decideAndAct(ev event.Event) (*event.Event, error) {
 		return &ev, nil
 	}
 	return nil, nil
+}
+
+// noCI keeps when a proposed head commit was first seen with no check or status of any kind, so a
+// decision can tell a commit nothing has reported on for a long time from one whose CI has not
+// started yet. It is a fact about the pull request, noted by the engine and recorded with the
+// decision; the decider only reads it. It is dropped as soon as anything reports, or the head moves.
+func noCI(it item.Item, f facts.Facts, now time.Time) *item.NoCI {
+	pr := f.PR
+	if pr == nil || it.State != item.Proposed || len(pr.Checks) > 0 || pr.State != "open" {
+		return nil
+	}
+	if it.NoCI != nil && it.NoCI.SHA == pr.HeadSHA {
+		return it.NoCI
+	}
+	return &item.NoCI{SHA: pr.HeadSHA, Since: now}
 }
 
 // latestReason is the reason the item shows after a decision. A decision that moves the item sets

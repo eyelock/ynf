@@ -20,6 +20,7 @@ import (
 	"github.com/eyelock/ynf/internal/forge"
 	"github.com/eyelock/ynf/internal/item"
 	"github.com/eyelock/ynf/internal/lease"
+	"github.com/eyelock/ynf/internal/memory"
 	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/runner"
 	"github.com/eyelock/ynf/internal/store"
@@ -108,6 +109,11 @@ func (a *app) doctor(ctx context.Context) error {
 					switch {
 					case rp.Known:
 						add(name, true, fmt.Sprintf("%s: %s", rp.Branch, strings.Join(rp.Checks, ", ")))
+						if len(rp.Checks) == 0 && rp.Workflows != nil && *rp.Workflows == 0 {
+							// Nothing will report on a pull request, so no item reaches in_review.
+							add("ci "+rp.Repo, false, fmt.Sprintf("no workflow files and no required checks on %s: no CI will report on a pull request, so an item stays proposed and escalates after the lane's no_ci_after (unless an outside CI reports statuses)", rp.Branch))
+							unreadable["ci "+rp.Repo] = true
+						}
 					default:
 						add(name, false, fmt.Sprintf("not readable on %s, so every check gates a pull request: %s", rp.Branch, rp.Detail))
 						unreadable[name] = true
@@ -167,6 +173,12 @@ func (a *app) doctor(ctx context.Context) error {
 		}
 		add(tool.name, err == nil, detail)
 	}
+	if a.cfg != nil {
+		if line, ok := a.memoryLine(); line != "" {
+			add("memory", ok, line)
+			optional["memory"] = true
+		}
+	}
 	var b strings.Builder
 	ok := true
 	for _, c := range checks {
@@ -188,6 +200,26 @@ func (a *app) doctor(ctx context.Context) error {
 		return withCode(ExitPolicy, errors.New("doctor found problems"))
 	}
 	return nil
+}
+
+// memoryLine says whether memory is on and why, for doctor: explicit settings, or detection
+// (ADR-012), which needs ynm on PATH and a store.
+func (a *app) memoryLine() (string, bool) {
+	enabled, _, cwd := a.cfg.MemorySettings()
+	transport, _, _, _ := a.cfg.MemoryTransport()
+	switch {
+	case enabled != nil && !*enabled:
+		return "off: memory.provider is none", true
+	case transport == "http":
+		return "on: hosted ynm, memory.transport http", true
+	case enabled != nil:
+		return "on: memory.provider ynm", true
+	}
+	m, why := memory.Detect(cwd)
+	if m == nil {
+		return "off: " + why, false
+	}
+	return "on: " + why, true
 }
 
 func (a *app) lanesCmd(ctx context.Context, args []string) error {

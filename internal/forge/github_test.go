@@ -152,6 +152,8 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply(map[string]any{"default_branch": "main"})
 	case p == "/repos/o/r/contents/.agents/factory/lanes.yaml":
 		reply(map[string]any{"type": "file", "encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte("version: 1"))})
+	case p == "/repos/o/r/contents/.github/workflows":
+		reply([]any{map[string]any{"type": "file", "name": "ci.yml"}, map[string]any{"type": "file", "name": "README.md"}, map[string]any{"type": "dir", "name": "x.yml"}})
 	case p == "/repos/o/r/contents/.agents/factory":
 		reply([]any{map[string]any{"type": "file", "name": "lanes.yaml"}})
 	default:
@@ -266,6 +268,18 @@ func TestRepoFiles(t *testing.T) {
 	}
 	if _, err := g.DefaultBranch(ctx, "o/missing"); !errors.Is(err, forge.ErrNotFound) {
 		t.Fatalf("missing repo: %v", err)
+	}
+}
+
+// TestWorkflows: only workflow files count, and a repository with no workflows folder has none.
+func TestWorkflows(t *testing.T) {
+	g, _ := setup(t)
+	ctx := context.Background()
+	if n, err := g.Workflows(ctx, "o/r", "main"); err != nil || n != 1 {
+		t.Fatalf("%d %v", n, err)
+	}
+	if n, err := g.Workflows(ctx, "o/none", "main"); err != nil || n != 0 {
+		t.Fatalf("a repository with no workflows folder has none: %d %v", n, err)
 	}
 }
 

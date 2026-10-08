@@ -59,7 +59,10 @@ type Item struct {
 	// CICountedSHA is the head commit whose failing CI the failure counters already include, so a
 	// failure that stays failed across polls is counted once. Empty until a failure is counted.
 	CICountedSHA string `json:"ci_counted_sha,omitempty"`
-	Attempts     int    `json:"attempts"`
+	// NoCI is when ynf first saw the head commit with no check or status at all, kept only while
+	// that is true: the decision to escalate reads it.
+	NoCI     *NoCI `json:"no_ci,omitempty"`
+	Attempts int   `json:"attempts"`
 	// Counters are the deterministic counters decisions read (ADR-008): reaction retries and
 	// per-signature failures.
 	Counters map[string]int `json:"counters,omitempty"`
@@ -71,6 +74,12 @@ type Item struct {
 	Trace   *Trace    `json:"trace,omitempty"`
 	Created time.Time `json:"created"`
 	Updated time.Time `json:"updated"`
+}
+
+// NoCI marks a head commit that has had no check or status of any kind since Since.
+type NoCI struct {
+	SHA   string    `json:"sha"`
+	Since time.Time `json:"since"`
 }
 
 // Trace holds the span ids that link an item's history across steps and processes, kept in the

@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -97,12 +99,62 @@ func (y Ynm) run(ctx context.Context, args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
-// Detect returns ynm when it is on PATH, or nil (ADR-012: detected, never required).
-func Detect() Memory {
+// Detect returns ynm when it is on PATH and a store is present, or nil and the reason it is not
+// (ADR-012: detected, never required). A store is a .ynm/ in cwd (the directory ynm runs from; the
+// working directory when empty) or any parent of it, which is how ynm finds a repository's, or the
+// user's own: $YNM_HOME when set, which is where ynm keeps its store then, else ~/.ynm/.
+func Detect(cwd string) (Memory, string) {
 	if _, err := exec.LookPath("ynm"); err != nil {
-		return nil
+		return nil, "ynm is not on PATH"
 	}
-	return Ynm{}
+	if where := StoreAt(cwd); where != "" {
+		return Ynm{Cwd: cwd}, "ynm on PATH, store at " + where
+	}
+	return nil, "ynm is on PATH but has no store: no .ynm/ in " + dirOrWd(cwd) + " or above, and no " + userStore() + " (ynm init sets one up)"
+}
+
+func dirOrWd(cwd string) string {
+	if cwd != "" {
+		return cwd
+	}
+	if wd, err := os.Getwd(); err == nil {
+		return wd
+	}
+	return "the working directory"
+}
+
+func userStore() string {
+	if h := os.Getenv("YNM_HOME"); h != "" {
+		return h
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".ynm")
+	}
+	return "~/.ynm"
+}
+
+// StoreAt names the ynm store ynf finds, or "" when there is none.
+func StoreAt(cwd string) string {
+	dir, err := filepath.Abs(dirOrWd(cwd))
+	if err == nil {
+		for {
+			p := filepath.Join(dir, ".ynm")
+			if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+				return p
+			}
+			up := filepath.Dir(dir)
+			if up == dir {
+				break
+			}
+			dir = up
+		}
+	}
+	if u := userStore(); u != "" {
+		if fi, err := os.Stat(u); err == nil && fi.IsDir() {
+			return u
+		}
+	}
+	return ""
 }
 
 // YnmHTTP talks to a hosted ynm over its MCP HTTP endpoint (ADR-008): the shared store for a pool

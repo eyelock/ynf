@@ -21,7 +21,7 @@ the folder the file is in.
 | `lease.heartbeat` | `30s` | How often a holder renews. Must be shorter than `ttl`. |
 | `poll.ci` | `30s` | How often a proposed item's checks are probed. |
 | `poll.review` | `5m` | How often an item in review is probed for merge, close or review. |
-| `memory.provider` | detected | `ynm`, or `none` to switch memory off. Without a `memory` block, ynf uses ynm when it is on PATH (ADR-012). ynf writes what only it can see: one `ynf.failure.v1` record per occurrence of a failure signature (steps are not written; ynf's own store is the run history). It never puts memory into an agent's task: a harness that wants memory connects its agent to ynm itself (ADR-008). |
+| `memory.provider` | detected | `ynm`, or `none` to switch memory off. Without a `memory` block, ynf uses ynm when it is on PATH **and** a store is present (ADR-012): a `.ynm/` in the directory ynm runs from (`memory.cwd`, else where ynf runs) or any directory above it, or the user's own store, `$YNM_HOME` when that is set (ynm keeps its store there instead of in `~/.ynm/`) and `~/.ynm/` when it is not. With the binary and no store, memory stays off and `ynf doctor` says why on its `memory` line. Setting `provider: ynm` turns memory on without that check. Finding the binary is PATH only. ynf writes what only it can see: one `ynf.failure.v1` record per occurrence of a failure signature (steps are not written; ynf's own store is the run history). It never puts memory into an agent's task: a harness that wants memory connects its agent to ynm itself (ADR-008). |
 | `memory.namespace` | `factory/{repo}` | Where a repository's memories go; `{repo}` is `host/owner/name`, so the same `owner/name` on two forges never share one. |
 | `memory.cwd` | where ynf runs | With `transport: cli`, the directory ynm runs as if from, which decides its store: your own on a laptop. |
 | `memory.transport` | `cli` | `cli`, the ynm CLI; or `http`, a hosted ynm's MCP endpoint, the shared store for a pool of workers or CI, where many writers go through one server (ADR-008). |
@@ -48,6 +48,30 @@ failure, so reflection can explain it: the outcome, exit code and the cap that b
 failing sensors or CI checks by name, the harness, and an excerpt of the run's own message, scrubbed
 of secrets and cut to 1 KiB. It holds no ticket text and no prompt. Each run's model, effort, turns, tokens and cost stay in ynf's
 own store, where `ynf stats` reads them.
+
+## Token scopes
+
+ynf reads `GITHUB_TOKEN` (or the variable `github.token_env` names, or `gh auth token`). With a
+classic token:
+
+| Scope | Needed for |
+|---|---|
+| `repo` | Everything ynf does: searching and reading issues, pull requests, checks and files, labelling and commenting, pushing its branches and opening pull requests. |
+| `workflow` | Only to push a change to a workflow file under `.github/workflows/`. GitHub refuses such a push without it. ynf's diff gate refuses workflow changes in a lane's pull request anyway, so a factory does not need it; the sandbox's setup does, to push its own workflows. |
+| `delete_repo` | Only the sandbox's clean-up (`make -C sandbox reset` and `destroy`), which deletes the repositories it created. ynf itself never deletes one. |
+
+Fine-grained tokens have not been tried. From the calls ynf makes, one would need these
+repository permissions, which is a reading of the code and not a tested list:
+
+| Permission | Why |
+|---|---|
+| Metadata: read | Repositories and branches. |
+| Contents: read and write | Reading lanes and files; pushing ynf's branches. |
+| Pull requests: read and write | Opening, finding and reading pull requests and their reviews. |
+| Issues: read and write | Reading tickets, labels, comments and search; labelling and commenting. |
+| Checks: read | Check runs on a head commit. |
+| Commit statuses: read | Commit statuses on a head commit. |
+| Administration: read | Branch protection's required checks. Optional: without it ynf reads the rulesets, and when neither can be read every check gates a pull request (`ynf doctor` says so). |
 
 ## A factory job with the collector on
 

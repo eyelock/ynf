@@ -145,6 +145,7 @@ ok    git                      git version <version>
 ok    ynh                      0.11.0, capabilities 0.9.0: detected, used by a lane with no runner and a ynh block
 ok    ynm                      @ynm/cli/<version> linux-<arch> node-<version>
 --    ynr                      not found or not working (ynr: exec: "ynr": executable file not found in $PATH)
+ok    memory                   off: memory.provider is none
 ```
 
 No Docker inside, and none needed: every lane runs inline. Now the join from lesson 1, from the

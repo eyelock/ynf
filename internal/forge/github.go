@@ -400,6 +400,25 @@ func (g *GitHub) File(ctx context.Context, repo, ref, path string) ([]byte, erro
 	return []byte(s), err
 }
 
+// Workflows implements WorkflowReader: the .yml and .yaml files in .github/workflows at ref.
+func (g *GitHub) Workflows(ctx context.Context, repo, ref string) (int, error) {
+	o, r := split(repo)
+	_, dir, _, err := g.c.Repositories.GetContents(ctx, o, r, ".github/workflows", &github.RepositoryContentGetOptions{Ref: ref})
+	if err != nil {
+		if errors.Is(notFound(err), ErrNotFound) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	n := 0
+	for _, f := range dir {
+		if name := f.GetName(); f.GetType() == "file" && (strings.HasSuffix(name, ".yml") || strings.HasSuffix(name, ".yaml")) {
+			n++
+		}
+	}
+	return n, nil
+}
+
 // GraphQLURL is the GraphQL endpoint beside the REST base: <base>graphql on api.github.com (and a
 // test server), <host>/api/graphql on GitHub Enterprise Server, whose REST base ends /api/v3/.
 func (g *GitHub) GraphQLURL() string {

@@ -126,8 +126,11 @@ type Engine struct {
 
 	mu       sync.Mutex
 	policies map[string]*RepoPolicy
-	memq     *memory.Queue
-	factory  *FactoryPolicy
+	// emptySaid holds the lanes whose empty search was already reported, so a serve says it once
+	// until the search finds something again.
+	emptySaid map[string]bool
+	memq      *memory.Queue
+	factory   *FactoryPolicy
 	// trackerHosts maps a configured tracker's name to its host, for shorthand references.
 	trackerHosts map[string]string
 	// forgeNames maps a declared forge's name to its host, for listing.
@@ -404,6 +407,12 @@ func (e *Engine) SweepRepos(ctx context.Context, repos []string) error {
 }
 
 func (e *Engine) sweepLane(ctx context.Context, repo string, lane policy.Lane) error {
+	searched, matched := false, false
+	defer func() {
+		if searched {
+			e.reportEmpty(ctx, repo, lane, matched)
+		}
+	}()
 	for _, in := range lane.Intake {
 		if in.GitHubSearch == "" {
 			e.log().Warn("intake not supported yet", "lane", lane.Name, "intake", in)
@@ -419,16 +428,42 @@ func (e *Engine) sweepLane(ctx context.Context, repo string, lane policy.Lane) e
 		if err != nil {
 			return err
 		}
+		searched = true
 		for _, h := range hits {
 			if h.Repo != name || h.IsPR != (lane.Kind == "adopt") {
 				continue
 			}
+			matched = true
 			if err := e.track(ctx, lane, host, h); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// reportEmpty says, once, that a lane's search found nothing: the forge's search can take a minute
+// to show a label just added, and a silent sweep looks like ynf ignoring the ticket. A lane that
+// is off or paused is not looking, so it is not reported.
+func (e *Engine) reportEmpty(ctx context.Context, repo string, lane policy.Lane, matched bool) {
+	key := repo + "/" + lane.Name
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if matched {
+		delete(e.emptySaid, key)
+		return
+	}
+	if e.emptySaid[key] || !lane.On() {
+		return
+	}
+	if s, _, err := e.LaneState(ctx, repo, lane.Name); err != nil || s.Paused {
+		return
+	}
+	if e.emptySaid == nil {
+		e.emptySaid = map[string]bool{}
+	}
+	e.emptySaid[key] = true
+	e.log().Info("lane "+lane.Name+": no matching items (GitHub search can lag a newly added label by a minute)", "repo", repo)
 }
 
 // track creates the item for a new ticket and steps it; a ticket already tracked is left alone.
