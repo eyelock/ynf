@@ -37,6 +37,7 @@ type Defaults struct {
 	Executor  string  `yaml:"executor" json:"executor,omitempty"`
 	Attempts  int     `yaml:"attempts" json:"attempts,omitempty"`
 	Retention string  `yaml:"retention" json:"retention,omitempty"`
+	NoCIAfter string  `yaml:"no_ci_after" json:"no_ci_after,omitempty"`
 	Egress    *Egress `yaml:"egress" json:"egress,omitempty"`
 	Stop      *Stop   `yaml:"stop" json:"stop,omitempty"`
 	PR        *PR     `yaml:"pr" json:"pr,omitempty"`
@@ -75,7 +76,10 @@ type Lane struct {
 	Executor  string              `yaml:"executor" json:"executor,omitempty"`
 	Attempts  int                 `yaml:"attempts" json:"attempts,omitempty"`
 	Retention string              `yaml:"retention" json:"retention,omitempty"`
-	Labels    *Labels             `yaml:"labels" json:"labels,omitempty"`
+	// NoCIAfter is how long a proposed head commit may have no check or status at all before the
+	// item reacts (when: no_ci). Empty means DefaultNoCIAfter; 0s switches it off.
+	NoCIAfter string  `yaml:"no_ci_after" json:"no_ci_after,omitempty"`
+	Labels    *Labels `yaml:"labels" json:"labels,omitempty"`
 }
 
 // On reports whether the lane is enabled.
@@ -248,6 +252,9 @@ func (d Defaults) apply(l Lane) Lane {
 	if l.Retention == "" {
 		l.Retention = d.Retention
 	}
+	if l.NoCIAfter == "" {
+		l.NoCIAfter = d.NoCIAfter
+	}
 	if l.Run.Egress == nil {
 		l.Run.Egress = d.Egress
 	}
@@ -339,6 +346,22 @@ func LabelValue(labels []string, prefix string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// DefaultNoCIAfter is how long a proposed commit may report no check or status at all before the
+// item escalates, when a lane does not say.
+const DefaultNoCIAfter = 30 * time.Minute
+
+// NoCIWait is the lane's no_ci_after as a duration; zero means the reaction is off.
+func (l Lane) NoCIWait() time.Duration {
+	if l.NoCIAfter == "" {
+		return DefaultNoCIAfter
+	}
+	d, err := ParseDuration(l.NoCIAfter)
+	if err != nil || d < 0 {
+		return DefaultNoCIAfter
+	}
+	return d
 }
 
 // ParseDuration accepts the schema's durations, including days.

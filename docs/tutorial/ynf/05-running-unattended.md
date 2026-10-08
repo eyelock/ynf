@@ -42,6 +42,16 @@ proposed item asks to be checked again after `poll.ci`, fifteen seconds in your 
 finished green, so it moved to `in_review`, and the issue's label changed to `ynf:in-review`. (If
 its CI is still running, it stays `proposed`, with the reason `#13: CI pending`.)
 
+Once a ticket has been taken on, its lane's label is gone, so a later sweep's search finds nothing.
+The log says so, once, and the exit code does not change:
+
+```text
+level=INFO msg="lane gofmt: no matching items (GitHub search can lag a newly added label by a minute)" repo=<you>/ynf-sandbox
+```
+
+If you add a label and sweep at once, this is also what you see when GitHub's search has not caught
+up yet. Wait a minute and sweep again.
+
 An item **settles** when nothing more happens without a person: in review, escalated, quarantined,
 ignored, done or closed. `proposed` isn't settled: CI is still to come.
 

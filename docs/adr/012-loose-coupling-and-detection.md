@@ -93,7 +93,7 @@ environment's business, and a second way to say it is a second thing to get wron
 | Provider | Detected when |
 |---|---|
 | runner `ynh` | `ynh` is on `PATH` and `ynh version --format json` is in the supported range |
-| memory `ynm` | `ynm` is on `PATH`, and the repository has `.ynm/` or the user has `~/.ynm/`; or a `YNM_URL` endpoint answers |
+| memory `ynm` | `ynm` is on `PATH`, and a store is present: a `.ynm/` in the directory ynm runs from (`memory.cwd`, else where ynf runs) or any directory above it, or the user's own store, which is `$YNM_HOME` when that is set (ynm keeps its store there instead of in `~/.ynm/`) and `~/.ynm/` when it is not. With the binary but no store, memory stays off and `ynf doctor` says why. A hosted ynm is configured (`memory.transport: http`), never detected |
 | `ynr` (optional) | `ynr` is on `PATH` and `ynr info --format json` answers with a version. Detecting it starts nothing: `ynf doctor` shows it, and only the telemetry configuration starts `ynr serve` (ADR-009, ADR-011) |
 | tracker and forge `github` for github.com | always available; any other instance, GitHub Enterprise Server or an `mcp` tracker, is configured, never detected |
 
@@ -103,7 +103,8 @@ collector is a background process, and an unattended factory must not start one 
 installed a binary. Without it, every run and every job does what it did.
 
 Precedence is explicit config, then detection, then the built-in fallback (`command` for the
-runner, `none` for memory). A lane that names a provider explicitly and cannot get it is refused
+runner, `none` for memory). An explicit `memory.provider: ynm` turns memory on without the store
+check. A lane that names a provider explicitly and cannot get it is refused
 before anything runs, and never falls back. A lane that relies on detection runs with whatever was
 detected: with no runner named, a lane with a `ynh` block runs as ynh when ynh is detected and
 otherwise as its `command` block, and a lane with neither is refused. Every step records the

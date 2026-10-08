@@ -123,7 +123,8 @@ Each line, in order:
 - **`poll`** is how often ynf checks a pull request's CI, and its review. Shorter than the
   defaults, so you wait less.
 - **`memory: {provider: none}`** switches memory off. Without it, ynf would use ynm if it found it
-  installed. This track doesn't need memory, so it says so.
+  on your `PATH` and a store, a `.ynm/` or `~/.ynm/`, to write to. This track doesn't need memory,
+  so it says so.
 
 State goes to `state.db` beside the config, and repository clones and run folders to `work/`.
 
@@ -148,6 +149,7 @@ ok    docker                   27.4.0
 --    ynh                      not found or not working (exec: "ynh": executable file not found in $PATH)
 --    ynm                      not found or not working (exec: "ynm": executable file not found in $PATH)
 --    ynr                      not found or not working (ynr: exec: "ynr": executable file not found in $PATH)
+ok    memory                   off: memory.provider is none
 ```
 
 ### What just happened
@@ -163,9 +165,9 @@ ok    docker                   27.4.0
 - **The tracker,** by starting its MCP server and checking it has every tool the configuration
   names.
 - **The tools on this machine.** ynh, ynm and ynr are marked `--`, not `FAIL`: they're optional. If
-  you have them installed, those lines say `ok` with their versions; that's fine too. (A line for
-  the memory queue appears only when memory writes are waiting to be sent, which this track never
-  has: memory is off.)
+  you have them installed, those lines say `ok` with their versions; that's fine too. The `memory`
+  line says memory is off because your config says so. (A line for the memory queue appears only
+  when memory writes are waiting to be sent, which this track never has.)
 
 Docker is needed because the sandbox's lanes run in containers. If it weren't running, its line
 would say `FAIL` and `doctor` would exit non-zero.

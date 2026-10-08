@@ -254,6 +254,9 @@ func (d *decider) proposed() {
 	it.PRHead = pr.HeadSHA
 	switch pr.CIState() {
 	case "pending":
+		if d.noCI(pr) {
+			return
+		}
 		d.reason = fmt.Sprintf("#%d: CI pending", pr.Number)
 		d.wake(d.in.Poll.CI)
 	case "success":
@@ -283,6 +286,34 @@ func (d *decider) proposed() {
 		}
 		d.react("ci_failed", Escalate, "CI failed on the pull request: "+strings.Join(pr.Failed(), ", "))
 	}
+}
+
+// noCI reacts when the head commit has had no check or status of any kind for the lane's
+// no_ci_after, which the engine counts from when it first saw it bare (item.NoCI): nothing will
+// ever report, so waiting on CI is waiting for ever. Required checks that have not reported are
+// not this: they are listed as expected, so there is something to wait on.
+func (d *decider) noCI(pr *facts.PR) bool {
+	it, lane := &d.it, d.in.Lane
+	wait := lane.NoCIWait()
+	if wait <= 0 || it.State != item.Proposed || len(pr.Checks) > 0 || it.NoCI == nil || it.NoCI.SHA != pr.HeadSHA {
+		return false
+	}
+	if d.now.Sub(it.NoCI.Since) < wait {
+		return false
+	}
+	why := fmt.Sprintf("no CI reported on %.7s after %s: does the repository have CI?", pr.HeadSHA, shortDuration(wait))
+	r := lane.When["no_ci"]
+	d.act(orDefault(r.Action, Escalate), "%s", why)
+	return true
+}
+
+func shortDuration(t time.Duration) string {
+	s := t.String()
+	s = strings.TrimSuffix(s, "0s")
+	if strings.HasSuffix(s, "m") && strings.Contains(s, "h") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
 }
 
 // bumpRunSignatures counts why a run that did not converge failed. Each fact the runner reported
@@ -386,6 +417,9 @@ func (d *decider) quarantine(format string, args ...any) {
 
 func (d *decider) to(s item.State, format string, args ...any) {
 	d.it.State = s
+	if s != item.Proposed {
+		d.it.NoCI = nil
+	}
 	d.it.Reason = fmt.Sprintf(format, args...)
 	d.reason = d.it.Reason
 	if s.Settled() && s != item.InReview {

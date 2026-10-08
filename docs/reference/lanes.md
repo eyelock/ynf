@@ -24,13 +24,14 @@ carried out today.
 | `run.env` | Variables passed into the run by name, such as the model key; values never logged | yes |
 | `run.ynh` | `harness`, `vendor`, `base`, `focus`, `profile`, `sandbox`, `model`, `effort` (`low`, `medium` or `high`; needs ynh 0.10.0 or later), `budgets`, `sensor_scope` (each sensor's declared command narrowed: a path word replaced by one beneath it, or paths appended; anything else is refused before the run), `telemetry_relay`. `harness` is the id of an installed harness, or a folder in the checkout (`.` is the harness the repository carries). On docker a folder is built into an agent image; on `process`, and on `inline` when no harness is installed in the image, it is installed into a ynh home of the run's own (`YNH_HOME` in the run's folder, so yours is never read or written) and run by the id ynh gives it | yes; the vendor's API host is allowed through the egress proxy without being listed |
 | `run.ynh.telemetry_relay` | `true` sets `YNH_TELEMETRY_RELAY=1` for the lane's runs, so `ynh agent run` starts `ynr relay` beside the vendor CLI, which exports only over the network, and the relay writes what it receives into the run's own spool folder (ynr ADR-004). It needs `telemetry.spool` in ynf's configuration (ynf logs a warning when it is on and there is none), and `ynr` in the run's image or on its `PATH`. A lane that names `runner: command` refuses it at load; a lane with both blocks keeps it for when ynh runs. Default `false` | yes |
-| `when` | Reactions to `converged`, `ci_failed`, `changes_requested` and `outcome.<name>` | `open_pr` (originate), `push_commit` (adopt), `escalate`, `quarantine`, `comment`, `close`, `retry`/`then`, `resume_with`/`max`; `request_review` escalates |
+| `when` | Reactions to `converged`, `ci_failed`, `no_ci`, `changes_requested` and `outcome.<name>`. `no_ci` takes an `action` only, `escalate` by default | `open_pr` (originate), `push_commit` (adopt), `escalate`, `quarantine`, `comment`, `close`, `retry`/`then`, `resume_with`/`max`; `request_review` escalates |
 | `pr.allowed_paths` | The diff gate refuses changes outside these | yes |
 | `pr.protected_paths` | Refused as well as the built-in protected paths | yes |
 | `pr.draft` | Open pull requests as drafts | yes (default `true`) |
 | `stop` | Stop conditions (ADR-010) | `max_open_proposals` holds new work while that many proposals await review; `yield_floor` pauses the lane once `min_sample` (default 20) proposals are decided below it; `review_time_ceiling` and `escaped_defects` not yet |
 | `labels` | What ynf writes on the ticket as the item moves (ADR-003) | `on_claim` (taken on), `on_propose` (pull request open), `on_review` (CI green), `on_escalate` (escalated or quarantined) and `on_done` (merged or closed), each `{add: [...], remove: [...]}`, written through the ticket's tracker as the item enters the state. Remove the triggering label in `on_claim` so nothing finds the ticket twice. A failed write is logged and recorded, never fatal. Each reaction falls back to `defaults.labels` on its own |
 | `attempts` | Runs that never finish before the item is quarantined | yes (default 3) |
+| `no_ci_after` | How long a proposed head commit may have no check or status at all before the item reacts with `when.no_ci`, which escalates unless the lane says otherwise. A duration; `0s` switches it off | yes (default `30m`; also in `defaults`) |
 | `id` | The lane's own id in telemetry, which stays fixed if the repository that defines it moves. Without one, a lane's id is where it is defined, host first, then its name: `github.com/example-org/factory-config#lint-paydown` for a lane in the configuration repository (wherever a repository overrides it), `github.com/eyelock/ynh#docs-refresh` for one the repository defines itself (ADR-006). Letters, digits and `. _ ~ : @ / # -` | yes |
 
 ## What guards see of a pull request
@@ -71,6 +72,17 @@ check has not started, not for how long.
 `pending` until every gating check has concluded, which includes an `expected` one, and `failure`
 as soon as one has failed. An item whose pull request is `pending` stays proposed, and does not
 move to `in_review`.
+
+**A repository needs CI for an item to reach `in_review`.** An item moves to `in_review` only
+when the checks that gate its pull request have all passed, and a pull request nothing reports on
+has none: `ci` stays `pending` for ever. That is not the same as a required check that has not
+reported, which is listed as `expected`. When the head commit has had no check or status of any
+kind for `no_ci_after` (30 minutes unless the lane says), the item escalates with the reason `no CI
+reported on <sha> after 30m: does the repository have CI?`. The wait starts when ynf first sees the
+commit bare, and starts again for a new commit. `ynf doctor` warns earlier, on a `ci <repository>`
+line, for an enrolled repository whose default branch has no workflow files and no required checks.
+A CI that reports through commit statuses from outside GitHub Actions counts as CI as soon as it
+reports.
 
 When neither source can be read (a token without the right to read branch protection, and a
 repository whose rulesets are unavailable), `required_unknown` is `true`, nothing is marked

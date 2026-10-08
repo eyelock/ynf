@@ -79,6 +79,7 @@ Global flags (before the command):
   --log-file <path> also write the log to this file (YNF_LOG_FILE)
   --log-format text|json   (YNF_LOG_FORMAT)
   -v                debug logging
+  --version         the same as the version command
 `
 
 type app struct {
@@ -126,12 +127,16 @@ func RunIn(ctx context.Context, args []string, stdin io.Reader, stdout, stderr i
 	fs.StringVar(&a.format, "format", envOr("YNF_FORMAT", "text"), "")
 	fs.BoolVar(&a.interactive, "interactive", false, "")
 	fs.BoolVar(&a.verbose, "v", false, "")
+	showVersion := fs.Bool("version", false, "")
 	fs.StringVar(&a.logFile, "log-file", os.Getenv("YNF_LOG_FILE"), "")
 	fs.StringVar(&a.logFormat, "log-format", envOr("YNF_LOG_FORMAT", "text"), "")
 	if err := fs.Parse(args); err != nil {
 		return ExitUsage
 	}
 	rest := fs.Args()
+	if *showVersion && len(rest) == 0 {
+		rest = []string{"version"} // ynf --version is ynf version
+	}
 	if len(rest) == 0 {
 		fs.Usage()
 		return ExitUsage

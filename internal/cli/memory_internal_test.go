@@ -30,8 +30,18 @@ func TestMemoryFor(t *testing.T) {
 	bin := t.TempDir()
 	_ = os.WriteFile(filepath.Join(bin, "ynm"), []byte("#!/bin/sh\n"), 0o755)
 	t.Setenv("PATH", bin)
+	t.Setenv("HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+	t.Setenv("YNM_HOME", "")
+	if m, _, _, _ := memoryFor(load("version: 1\nrepos: [o/r]\n")); m != nil {
+		t.Fatal("ynm on PATH with no store stays off")
+	}
+	if m, _, _, _ := memoryFor(load("version: 1\nrepos: [o/r]\nmemory: {provider: ynm}\n")); m == nil {
+		t.Fatal("an explicit provider turns it on without a store")
+	}
+	t.Setenv("YNM_HOME", t.TempDir())
 	if m, _, _, _ := memoryFor(load("version: 1\nrepos: [o/r]\n")); m == nil {
-		t.Fatal("ynm on PATH should be detected")
+		t.Fatal("ynm on PATH and a store should be detected")
 	}
 	if m, _, _, _ := memoryFor(load("version: 1\nrepos: [o/r]\nmemory: {provider: none}\n")); m != nil {
 		t.Fatal("provider none wins over detection")
