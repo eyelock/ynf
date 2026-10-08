@@ -55,9 +55,11 @@ type fixture struct {
 	Expect struct {
 		Result     results  `yaml:"result"`
 		Signatures []string `yaml:"signatures"`
-		Detail     string   `yaml:"detail"`
-		Crash      bool     `yaml:"crash"`
-		Runner     *struct {
+		// Memory is text the item's failure memories must carry: what the run reported (ADR-008).
+		Memory []string `yaml:"memory"`
+		Detail string   `yaml:"detail"`
+		Crash  bool     `yaml:"crash"`
+		Runner *struct {
 			Name     string `yaml:"name"`
 			Detected bool   `yaml:"detected"`
 		} `yaml:"runner"`
@@ -791,6 +793,7 @@ type memoryRecord struct {
 	Current  struct {
 		Namespace  string         `json:"namespace"`
 		Subject    string         `json:"subject"`
+		Content    string         `json:"content"`
 		Tags       []string       `json:"tags"`
 		DataSchema string         `json:"dataSchema"`
 		Data       map[string]any `json:"data"`
@@ -868,6 +871,22 @@ func checkMemory(f fixture, numbers map[string]int, items []item, repo string, m
 			return c.DataSchema == "ynf.failure.v1" && c.Subject == sig && c.Data["item"] == it.Key && slices.Contains(c.Tags, "ynf.failure.v1") && slices.Contains(c.Tags, "occurrence")
 		}) {
 			return "", fmt.Errorf("%s: no ynf.failure.v1 memory for %s", name, sig)
+		}
+		// Each says what the run reported, not only what ynf decided: the exit code and the run's
+		// own message are in its text and in its data (ADR-008).
+		for _, m := range memories {
+			c := m.Current
+			if c.DataSchema != "ynf.failure.v1" || c.Subject != sig || c.Data["item"] != it.Key {
+				continue
+			}
+			for _, want := range f.Expect.Memory {
+				if !strings.Contains(c.Content, want) {
+					return "", fmt.Errorf("%s: the %s memory does not say %q: %s", name, sig, want, c.Content)
+				}
+			}
+			if len(f.Expect.Memory) > 0 && (c.Data["outcome"] == nil || c.Data["excerpt"] == nil) {
+				return "", fmt.Errorf("%s: the %s memory's data lacks the run's outcome or excerpt: %v", name, sig, c.Data)
+			}
 		}
 		n++
 	}

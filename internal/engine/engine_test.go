@@ -1129,7 +1129,7 @@ func TestMemoryIsWrittenNotRelayed(t *testing.T) {
 	f := failures[0]
 	if f.Subject != "sig/ci-diverges/lint" || f.Type != "episodic" || f.Level != "distributed" || f.Namespace != "factory/github.com/o/r" ||
 		!slices.Contains(f.Tags, "ynf.failure.v1") || !slices.Contains(f.Tags, "failure") || !slices.Contains(f.Tags, "occurrence") ||
-		!strings.Contains(f.Content, "occurrence 1") || !strings.Contains(f.Content, "run `") || f.Data["step"] == "" {
+		!strings.Contains(f.Content, "Occurrence 1") || !strings.Contains(f.Content, "failing checks: lint") || f.Data["failed_checks"] == nil || !strings.Contains(f.Content, "run `") || f.Data["step"] == "" {
 		t.Fatalf("failure memory: %+v", f)
 	}
 	entries, _ := h.e.Store.Log(ctx, item.IssueKey("github.com", "o/r", 1))
@@ -1245,7 +1245,7 @@ func TestRunFinishedCarriesWhatTheRunnerReported(t *testing.T) {
 	h.e.MemoryLevel = "distributed"
 	dir := t.TempDir()
 	script := `#!/bin/sh
-echo '{"exit_code":10,"reason":"turn cap reached","backend":"claude","bound_by":"turns","harness":{"name":"Tidy","version":"1.0.0"},"sensors":[{"name":"Unit Tests","status":"fail"},{"name":"lint","status":"pass"}]}'
+echo '{"exit_code":10,"reason":"turn cap reached; token=sekrit-value-9","backend":"claude","bound_by":"turns","harness":{"name":"Tidy","version":"1.0.0"},"sensors":[{"name":"Unit Tests","status":"fail"},{"name":"lint","status":"pass"}]}'
 exit 10
 `
 	if err := os.WriteFile(filepath.Join(dir, "ynh"), []byte(script), 0o755); err != nil {
@@ -1285,6 +1285,21 @@ exit 10
 	slices.Sort(subjects)
 	if want := []string{"sig/budget/turns/harness:tidy@1.0.0", "sig/stuck/sensor:unit-tests"}; !slices.Equal(subjects, want) {
 		t.Fatalf("memory subjects %v, want %v", subjects, want)
+	}
+	// Each failure memory says what the run reported, scrubbed (ADR-008).
+	for _, r := range mem.records {
+		for _, want := range []string{"the run ended", ", exit 10", "bound by the turns cap", "failing sensors: Unit Tests", "harness Tidy@1.0.0", "turn cap reached"} {
+			if !strings.Contains(r.Content, want) {
+				t.Errorf("%s: content lacks %q: %s", r.Subject, want, r.Content)
+			}
+		}
+		if strings.Contains(r.Content, "sekrit-value-9") || strings.Contains(fmt.Sprint(r.Data), "sekrit-value-9") {
+			t.Errorf("%s: a planted secret reached memory: %s %v", r.Subject, r.Content, r.Data)
+		}
+		if r.Data["exit"] != 10 || r.Data["bound_by"] != "turns" || r.Data["harness"] != "Tidy" || r.Data["harness_version"] != "1.0.0" ||
+			!slices.Equal(r.Data["failed_sensors"].([]string), []string{"Unit Tests"}) || !strings.Contains(r.Data["excerpt"].(string), "turn cap reached") {
+			t.Errorf("%s: data %v", r.Subject, r.Data)
+		}
 	}
 }
 

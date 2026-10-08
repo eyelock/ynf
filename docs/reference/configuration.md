@@ -43,7 +43,10 @@ write and on every sweep. `ynf doctor` reports what is waiting.
 What ynf writes to memory, and why it never decides anything with it, is in
 [Learning from failure](../explanation/learning-from-failure.md): one
 [`ynf.failure.v1`](../schema/memory/ynf.failure.v1.schema.json) record per occurrence of a failure
-signature, tagged `ynf.failure.v1` and `occurrence`. Each run's model, effort, turns, tokens and cost stay in ynf's
+signature, tagged `ynf.failure.v1` and `occurrence`. A record carries what the run reported about the
+failure, so reflection can explain it: the outcome, exit code and the cap that bound the run, the
+failing sensors or CI checks by name, the harness, and an excerpt of the run's own message, scrubbed
+of secrets and cut to 1 KiB. It holds no ticket text and no prompt. Each run's model, effort, turns, tokens and cost stay in ynf's
 own store, where `ynf stats` reads them.
 
 ## A factory job with the collector on
