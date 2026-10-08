@@ -61,39 +61,91 @@ func TestDetect(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("YNM_HOME", "")
-	work := t.TempDir()
-	if m, why := memory.Detect(work); m != nil || !strings.Contains(why, "no store") {
-		t.Fatalf("ynm without a store stays off, and says why: %v %q", m, why)
+	mk := func(p string) string {
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return p
 	}
-	if err := os.Mkdir(filepath.Join(home, ".ynm"), 0o755); err != nil {
-		t.Fatal(err)
+	repo := mk(filepath.Join(home, "work", "repo"))
+	mk(filepath.Join(repo, ".git"))
+	deep := mk(filepath.Join(repo, "sub", "dir"))
+
+	if m, why := memory.Detect(deep); m != nil || !strings.Contains(why, "no store") || !strings.Contains(why, repo) || !strings.Contains(why, filepath.Join(home, ".ynm")) {
+		t.Fatalf("ynm without a store stays off, and says where it looked: %v %q", m, why)
 	}
-	if m, _ := memory.Detect(work); m == nil {
-		t.Fatal("ynm on PATH and ~/.ynm should be detected")
+	mk(filepath.Join(home, ".ynm"))
+	if m, why := memory.Detect(deep); m == nil || !strings.Contains(why, "the user store, ~/.ynm") {
+		t.Fatalf("ynm on PATH and ~/.ynm should be detected as the user store: %v %q", m, why)
 	}
-	if err := os.Remove(filepath.Join(home, ".ynm")); err != nil {
-		t.Fatal(err)
+	// The repro from #147: YNM_HOME names a folder that is not there. ynm writes there, so
+	// ~/.ynm, which the repository sits under, is not the store.
+	t.Setenv("YNM_HOME", filepath.Join(home, "no-such-home"))
+	if m, why := memory.Detect(deep); m != nil || strings.Contains(why, "store at "+filepath.Join(home, ".ynm")) || !strings.Contains(why, "no-such-home") {
+		t.Fatalf("YNM_HOME wins over ~/.ynm, and it has no store: %v %q", m, why)
 	}
-	if err := os.MkdirAll(filepath.Join(work, "sub", "dir"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	_ = os.Mkdir(filepath.Join(work, ".ynm"), 0o755)
-	if m, why := memory.Detect(filepath.Join(work, "sub", "dir")); m == nil || !strings.Contains(why, filepath.Join(work, ".ynm")) {
-		t.Fatalf("a .ynm/ above the working directory counts: %v %q", m, why)
-	}
-	_ = os.Remove(filepath.Join(work, ".ynm"))
-	ynmHome := t.TempDir()
+	ynmHome := mk(filepath.Join(home, "elsewhere"))
 	t.Setenv("YNM_HOME", ynmHome)
-	if m, _ := memory.Detect(work); m == nil {
-		t.Fatal("YNM_HOME is the user's store when set")
+	if m, why := memory.Detect(deep); m == nil || !strings.Contains(why, "from YNM_HOME") || !strings.Contains(why, ynmHome) {
+		t.Fatalf("YNM_HOME is the user's store when set: %v %q", m, why)
 	}
-	t.Setenv("YNM_HOME", filepath.Join(ynmHome, "missing"))
-	if m, _ := memory.Detect(work); m != nil {
-		t.Fatal("YNM_HOME wins over ~/.ynm, and it has no store")
+	t.Setenv("YNM_HOME", "")
+	if err := os.RemoveAll(filepath.Join(home, ".ynm")); err != nil {
+		t.Fatal(err)
 	}
+
+	// A repository's own .ynm/ is found from anywhere inside it.
+	mk(filepath.Join(repo, ".ynm"))
+	if m, why := memory.Detect(deep); m == nil || !strings.Contains(why, "the project store") || !strings.Contains(why, filepath.Join(repo, ".ynm")) {
+		t.Fatalf("a .ynm/ at the repository root counts: %v %q", m, why)
+	}
+	// The project store is named before the user's.
+	mk(filepath.Join(home, ".ynm"))
+	if _, why := memory.Detect(deep); !strings.Contains(why, "the project store") {
+		t.Fatalf("the project store is the repository's: %q", why)
+	}
+	if err := os.RemoveAll(filepath.Join(repo, ".ynm")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(home, ".ynm")); err != nil {
+		t.Fatal(err)
+	}
+
+	// The walk stops at the repository root: a .ynm/ above it is not a project store.
+	mk(filepath.Join(home, "work", ".ynm"))
+	if m, _ := memory.Detect(deep); m != nil {
+		t.Fatal("a .ynm/ above the repository root is not found")
+	}
+	// Outside any repository there is no project store, so a .ynm/ there is not found either.
+	loose := mk(filepath.Join(t.TempDir(), "loose"))
+	mk(filepath.Join(loose, ".ynm"))
+	if m, why := memory.Detect(loose); m != nil || !strings.Contains(why, "not in a git repository") {
+		t.Fatalf("no repository, no project store: %v %q", m, why)
+	}
+
+	// A linked worktree uses the main repository's store, as ynm does.
+	main := mk(filepath.Join(home, "main"))
+	mk(filepath.Join(main, ".git", "worktrees", "wt"))
+	mk(filepath.Join(main, ".ynm"))
+	wt := mk(filepath.Join(home, "wt"))
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: "+filepath.Join(main, ".git", "worktrees", "wt")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if m, why := memory.Detect(wt); m == nil || !strings.Contains(why, filepath.Join(main, ".ynm")) {
+		t.Fatalf("a worktree's project store is the main repository's: %v %q", m, why)
+	}
+	// A .git file that names no worktree is still the repository root.
+	odd := mk(filepath.Join(home, "odd"))
+	if err := os.WriteFile(filepath.Join(odd, ".git"), []byte("nonsense"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mk(filepath.Join(odd, ".ynm"))
+	if m, _ := memory.Detect(odd); m == nil {
+		t.Fatal("a .git file is a repository root")
+	}
+
 	t.Setenv("PATH", t.TempDir())
-	t.Setenv("YNM_HOME", ynmHome)
-	if m, why := memory.Detect(work); m != nil || !strings.Contains(why, "not on PATH") {
+	if m, why := memory.Detect(wt); m != nil || !strings.Contains(why, "not on PATH") {
 		t.Fatalf("no ynm, no memory: %q", why)
 	}
 	if (memory.Ynm{}).Remember(context.Background(), memory.Record{Data: map[string]any{"bad": make(chan int)}}) == nil {

@@ -88,6 +88,64 @@ func words(s string, strict bool) ([]string, error) {
 	return out, nil
 }
 
+// assignment matches a leading NAME=value word.
+var assignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+
+// rawWords splits s on unquoted blanks and keeps each word as written: quotes, backslashes and
+// expansions stay in the text, so two words are equal only when they are the same characters.
+// end[i] is the offset in s just after word i. An open quote runs to the end of s.
+func rawWords(s string) (ws []string, end []int) {
+	start := -1
+	flush := func(i int) {
+		if start >= 0 {
+			ws = append(ws, s[start:i])
+			end = append(end, i)
+			start = -1
+		}
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+			flush(i)
+			continue
+		}
+		if start < 0 {
+			start = i
+		}
+		switch c {
+		case '\\':
+			i++
+		case '\'':
+			if j := strings.IndexByte(s[i+1:], '\''); j >= 0 {
+				i += j + 1
+			} else {
+				i = len(s)
+			}
+		case '"':
+			for i++; i < len(s) && s[i] != '"'; i++ {
+				if s[i] == '\\' {
+					i++
+				}
+			}
+		}
+	}
+	flush(len(s))
+	return ws, end
+}
+
+// envPrefix returns the leading NAME=value words of s as written, and the rest of s.
+func envPrefix(s string) (prefix []string, rest string) {
+	ws, end := rawWords(s)
+	n := 0
+	for n < len(ws) && assignment.MatchString(ws[n]) {
+		n++
+	}
+	if n == 0 {
+		return nil, s
+	}
+	return ws[:n], s[end[n-1]:]
+}
+
 // pathChars is what a path word the scope adds may be made of.
 var pathChars = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
@@ -141,8 +199,23 @@ func beneath(d, p string) bool {
 // one and in order, except that a path word of the declared command may be replaced by one or
 // more path words beneath it (`./...` by `./x/...`, `.` by any relative path); a declared command
 // with no path word may have path words appended at the end. The scope may hold no shell
-// operator or expansion, and a leading NAME=value assignment is only a different first word.
+// operator or expansion. The declared command's leading NAME=value assignments are kept exactly
+// as written, expansions included, and the scope may not add, drop, reorder or change one.
 func Narrows(declared, scope string) error {
+	// The declared command's leading environment assignments are the harness author's, expansions
+	// included: the scope keeps them word for word, as written, or is refused.
+	dpre, declared := envPrefix(declared)
+	spre, scope := envPrefix(scope)
+	if !slices.Equal(dpre, spre) {
+		switch {
+		case len(dpre) == 0:
+			return fmt.Errorf("the scope sets %s, which the declared command does not", strings.Join(spre, " "))
+		case len(spre) == 0:
+			return fmt.Errorf("the scope drops the declared environment %s", strings.Join(dpre, " "))
+		default:
+			return fmt.Errorf("the scope's environment %s is not the declared %s: assignments are kept exactly as declared", strings.Join(spre, " "), strings.Join(dpre, " "))
+		}
+	}
 	dw, err := words(declared, false)
 	if err != nil {
 		return fmt.Errorf("the declared command cannot be read: %w", err)
