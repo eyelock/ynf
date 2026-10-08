@@ -1,17 +1,12 @@
 package runner
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
 	"github.com/eyelock/ynf/internal/policy"
-	"github.com/eyelock/ynf/internal/telemetry"
 )
 
 // YnhRunner runs `ynh agent run` (ADR-012). It owns the mapping from ynh's exit codes to ynf's
@@ -30,45 +25,6 @@ var ynhOutcomes = map[int]string{
 	20: Error, 21: Error,
 	22: OperatorError,
 	30: Aborted, 31: Aborted,
-}
-
-// InstallFolder installs the harness in dir into a ynh home of its own, ynhHome, and returns the id
-// `ynh agent run --harness` takes for it. `ynh agent run` accepts only an id, so a harness the
-// repository carries is made one this way (ynh runs a local install from its source folder). The
-// home is passed as YNH_HOME to every ynh command here and replaces the operator's, so the
-// operator's own home is never read or written. The run needs the same YNH_HOME.
-func InstallFolder(ctx context.Context, dir, ynhHome string) (string, error) {
-	if err := os.MkdirAll(ynhHome, 0o755); err != nil {
-		return "", err
-	}
-	env := append(os.Environ(), "YNH_HOME="+ynhHome)
-	run := func(args ...string) (string, error) {
-		var out, errb bytes.Buffer
-		c := exec.CommandContext(ctx, Ynh, args...)
-		c.Env = env
-		telemetry.Command(ctx, c)
-		c.Stdout, c.Stderr = &out, &errb
-		if err := c.Run(); err != nil {
-			return "", fmt.Errorf("ynh %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(errb.String()))
-		}
-		return out.String(), nil
-	}
-	if _, err := run("install", dir); err != nil {
-		return "", err
-	}
-	out, err := run("ls", "--format", "json")
-	if err != nil {
-		return "", err
-	}
-	var ls struct {
-		Harnesses []struct {
-			ID string `json:"id"`
-		} `json:"harnesses"`
-	}
-	if err := json.Unmarshal([]byte(out), &ls); err != nil || len(ls.Harnesses) != 1 || ls.Harnesses[0].ID == "" {
-		return "", fmt.Errorf("ynh ls after installing %s: want the one harness, got %q", dir, strings.TrimSpace(out))
-	}
-	return ls.Harnesses[0].ID, nil
 }
 
 // ModelHosts are the API hosts each vendor's CLI needs. The egress proxy allows the lane's vendor's

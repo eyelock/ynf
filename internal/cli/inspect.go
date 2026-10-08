@@ -119,6 +119,9 @@ func (a *app) harness(ctx context.Context, args []string) error {
 			} else {
 				fmt.Fprintf(&b, "        %s\n", r.Where)
 			}
+			if r.Resolved != "" {
+				fmt.Fprintf(&b, "        resolves to %s\n", r.Resolved)
+			}
 			if r.Model != "" {
 				fmt.Fprintf(&b, "        model %s\n", r.Model)
 			}

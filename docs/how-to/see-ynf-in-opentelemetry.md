@@ -193,6 +193,12 @@ the one the repository carries in `.agents/harness/`. `ynh agent run` takes only
 ynf installs the folder into a ynh home of the run's own (never yours) and runs it by the id ynh
 gives it; the focus is read from the checkout. `ynf.lane.harness` holds what the lane names, `.`.
 
+The check then runs a second lane, whose harness is pinned from a local bare repository at a tag
+(`file://.../chain.git@v0.1.0`), with a target repository that carries no harness at all. ynf has
+ynh install that tag into the run's own home, and the check asserts the run converged, that the
+run record names the harness, its version, the pin and the commit the tag points at, and that your
+ynh home is as it was. `ynf.lane.harness` holds the id ynh gave it, `local/chain`.
+
 The vendor on `PATH` is `claude`, a link to ynr's stub vendor (`ynr-stub-vendor`). It answers the
 stream-json session ynh drives, one turn for every user message until stdin closes, and writes its
 records to the relay in the trace `TRACEPARENT` names. The vendor's records in the trace are the stub's.

@@ -4,10 +4,14 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 
+	"github.com/eyelock/ynf/internal/executor"
 	"github.com/eyelock/ynf/internal/facts"
 	"github.com/eyelock/ynf/internal/forge"
+	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/runner"
 	"github.com/eyelock/ynf/internal/tracker"
 )
@@ -118,12 +122,14 @@ type LaneRun struct {
 	Resolves string          `json:"resolves,omitempty"` // what an unnamed runner resolves to here, such as "ynh (detected 0.10.0)"
 	Executor string          `json:"executor"`
 	Image    string          `json:"image,omitempty"`
-	Harness  string          `json:"harness,omitempty"` // what the lane names
-	Model    string          `json:"model,omitempty"`   // the model the lane pins; empty is the vendor's default
-	Effort   string          `json:"effort,omitempty"`  // the effort the lane asks for; empty is the harness's or vendor's default
-	Where    string          `json:"where"`             // where the harness comes from
-	Read     *runner.Harness `json:"read,omitempty"`    // the harness, when it could be read
-	Problem  string          `json:"problem,omitempty"` // why it could not be read, or does not fit the lane
+	Harness  string          `json:"harness,omitempty"`  // what the lane names
+	Model    string          `json:"model,omitempty"`    // the model the lane pins; empty is the vendor's default
+	Effort   string          `json:"effort,omitempty"`   // the effort the lane asks for; empty is the harness's or vendor's default
+	Where    string          `json:"where"`              // where the harness comes from
+	Pin      *policy.Pin     `json:"pin,omitempty"`      // the repository and ref, for a harness pinned from one
+	Resolved string          `json:"resolved,omitempty"` // what a pin installs: name@version at its commit
+	Read     *runner.Harness `json:"read,omitempty"`     // the harness, when it could be read
+	Problem  string          `json:"problem,omitempty"`  // why it could not be read, or does not fit the lane
 }
 
 // LaneRuns describes how each of a repository's lanes runs (ADR-006, ADR-012). A harness in a
@@ -164,6 +170,11 @@ func (e *Engine) LaneRuns(ctx context.Context, repo string) ([]LaneRun, error) {
 			continue
 		}
 		lr.Harness, lr.Model, lr.Effort = l.Run.Ynh.Harness, l.Run.Ynh.Model, l.Run.Ynh.Effort
+		if pin, ok, perr := policy.ParsePin(lr.Harness); ok || perr != nil {
+			e.pinnedRun(ctx, &lr, ex, l, pin, perr)
+			out = append(out, lr)
+			continue
+		}
 		var image string
 		switch {
 		case ex.Name() == "inline":
@@ -243,4 +254,49 @@ func (e *Engine) RequiredChecks(ctx context.Context) ([]RequiredReport, error) {
 		out = append(out, rep)
 	}
 	return out, nil
+}
+
+// pinnedRun says what a lane's pinned harness resolves to. A pin is installed for each run, on the
+// host executors only; here it is installed once into a temporary ynh home, read, and checked
+// against the lane, so a wrong tag or a lane that does not fit shows before a run.
+func (e *Engine) pinnedRun(ctx context.Context, lr *LaneRun, ex executor.Executor, l policy.Lane, pin policy.Pin, perr error) {
+	if perr != nil {
+		lr.Where, lr.Problem = "a pin that cannot be used", perr.Error()
+		return
+	}
+	lr.Pin = &pin
+	lr.Where = fmt.Sprintf("pinned from %s at %s, installed into each run's own ynh home before the run starts", pin.Repo, pin.Ref)
+	if ex.Contained() && ex.Name() != "inline" {
+		lr.Problem = fmt.Sprintf("a pinned harness runs only on the host executors (process, inline), not on %s", ex.Name())
+		return
+	}
+	if e.InstallHarness == nil {
+		lr.Problem = "ynf cannot resolve it here: ynh is not available"
+		return
+	}
+	dir, err := os.MkdirTemp("", "ynf-harness-")
+	if err != nil {
+		lr.Problem = err.Error()
+		return
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	inst, err := e.InstallHarness(ctx, runner.HarnessSource{Pin: &pin}, filepath.Join(dir, "ynh"))
+	if err != nil {
+		lr.Problem = err.Error()
+		return
+	}
+	lr.Resolved = inst.Label()
+	if inst.Commit != "" {
+		lr.Resolved += " at " + inst.Commit
+	}
+	h, err := runner.ReadHarness(inst.Path)
+	if err != nil {
+		lr.Problem = err.Error()
+		return
+	}
+	h.ID = inst.ID
+	lr.Read = &h
+	if err := h.CheckLane(*l.Run.Ynh); err != nil {
+		lr.Problem = err.Error()
+	}
 }

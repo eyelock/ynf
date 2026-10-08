@@ -26,6 +26,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -49,15 +50,37 @@ import (
 )
 
 const (
-	lane    = "chain"
-	harness = "."
-	focus   = "tidy"
+	lane  = "chain"
+	focus = "tidy"
 )
 
+// A scenario is one lane the check runs a step for. Each has its own temporary directory, ynh home
+// and receiver, so the two cannot see each other's records.
+type scenario struct {
+	name string
+	// pinned means the lane's harness is pinned from a local repository (file://...@v0.1.0), and
+	// the target repository carries no harness at all: nothing is copied into it.
+	pinned bool
+	// want is the harness the run's records say: the lane's own value for a folder, the id ynh gave
+	// it for a pin.
+	want string
+}
+
+var scenarios = []scenario{
+	{name: "a harness folder the repository carries", want: "."},
+	{name: "a harness pinned from a local repository", pinned: true, want: "local/chain"},
+}
+
+// pinTag is the tag the pinned scenario's lane names.
+const pinTag = "v0.1.0"
+
 func main() {
-	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "fullchain: FAIL:", err)
-		os.Exit(1)
+	for _, sc := range scenarios {
+		fmt.Println("fullchain:", sc.name)
+		if err := run(sc); err != nil {
+			fmt.Fprintln(os.Stderr, "fullchain: FAIL:", sc.name+":", err)
+			os.Exit(1)
+		}
 	}
 }
 
@@ -223,7 +246,8 @@ const pluginJSON = `{
 }
 `
 
-const lanesYAML = `version: 1
+func lanesYAML(harness string) string {
+	return fmt.Sprintf(`version: 1
 lanes:
   chain:
     kind: originate
@@ -231,11 +255,12 @@ lanes:
     run:
       runner: ynh
       executor: process
-      ynh: {harness: ".", vendor: claude, focus: tidy, telemetry_relay: true}
+      ynh: {harness: %q, vendor: claude, focus: tidy, telemetry_relay: true}
     when: {converged: open_pr}
-`
+`, harness)
+}
 
-func run() error {
+func run(sc scenario) error {
 	tools, err := lookPath("ynf", "ynh", "ynr", "ynr-stub-vendor", "fakeforge", "git")
 	if err != nil {
 		return err
@@ -262,7 +287,44 @@ func run() error {
 
 	// A local repository standing in for github.com/o/r, with the harness in it.
 	src, remote := filepath.Join(t, "src"), filepath.Join(t, "remote", "o", "r.git")
-	if err := os.WriteFile(filepath.Join(src, ".agents", "harness", "plugin.json"), []byte(pluginJSON), 0o644); err != nil {
+	laneHarness, pinSHA := ".", ""
+	if sc.pinned {
+		// The harness lives in a repository of its own, tagged; the target repository has none.
+		if err := os.Remove(filepath.Join(src, ".agents", "harness")); err != nil {
+			return err
+		}
+		if err := os.Remove(filepath.Join(src, ".agents")); err != nil {
+			return err
+		}
+		hsrc, hbare := filepath.Join(t, "harness-src"), filepath.Join(t, "harnesses", "chain.git")
+		if err := os.MkdirAll(filepath.Join(hsrc, ".agents", "harness"), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(hsrc, ".agents", "harness", "plugin.json"), []byte(pluginJSON), 0o644); err != nil {
+			return err
+		}
+		henv := append(cleanEnv(), "HOME="+filepath.Join(t, "home"), "GIT_CONFIG_NOSYSTEM=1",
+			"GIT_AUTHOR_NAME=chain", "GIT_AUTHOR_EMAIL=chain@example.com", "GIT_COMMITTER_NAME=chain", "GIT_COMMITTER_EMAIL=chain@example.com")
+		for _, a := range [][]string{{"init", "-q", "-b", "main"}, {"add", "."}, {"commit", "-q", "-m", "harness"}, {"tag", pinTag}} {
+			if err := sh(hsrc, henv, "git", a...); err != nil {
+				return err
+			}
+		}
+		if err := os.MkdirAll(filepath.Dir(hbare), 0o755); err != nil {
+			return err
+		}
+		if err := sh(hsrc, henv, "git", "clone", "-q", "--bare", hsrc, hbare); err != nil {
+			return err
+		}
+		laneHarness = "file://" + hbare + "@" + pinTag
+		rev := exec.Command("git", "rev-parse", pinTag+"^{commit}")
+		rev.Dir, rev.Env = hsrc, henv
+		b, err := rev.Output()
+		if err != nil {
+			return err
+		}
+		pinSHA = strings.TrimSpace(string(b))
+	} else if err := os.WriteFile(filepath.Join(src, ".agents", "harness", "plugin.json"), []byte(pluginJSON), 0o644); err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(src, "README.md"), []byte("hello\n"), 0o644); err != nil {
@@ -293,7 +355,7 @@ func run() error {
 	defer func() { _ = rcv.srv.Shutdown(context.Background()) }()
 	spool := filepath.Join(t, "spool")
 	files := map[string]string{
-		"lanes.yaml": lanesYAML,
+		"lanes.yaml": lanesYAML(laneHarness),
 		"extra.yaml": fmt.Sprintf("telemetry:\n  spool: %s\n  run_quota: 16MiB\n  collector: {enabled: true, id: fullchain, upstream: %s, archive: 20s}\n", spool, rcv.url),
 	}
 	for n, c := range files {
@@ -306,15 +368,15 @@ func run() error {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, tools["fakeforge"], "--lanes", filepath.Join(t, "lanes.yaml"), "--config-extra", filepath.Join(t, "extra.yaml"),
-		"--", tools["ynf"], "--interactive", "sweep")
+		"--", "sh", "-c", `"$0" --interactive sweep >&2 && "$0" --format json items log o/r#5`, tools["ynf"])
 	cmd.Dir = t
 	cmd.Env = append(cleanEnv(),
 		"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"HOME="+filepath.Join(t, "home"), "XDG_STATE_HOME="+filepath.Join(t, "state"), "YNH_HOME="+filepath.Join(t, "ynh"),
 		"GIT_CONFIG_GLOBAL="+gitconfig, "GIT_CONFIG_NOSYSTEM=1",
 		"GIT_AUTHOR_NAME=chain", "GIT_AUTHOR_EMAIL=chain@example.com", "GIT_COMMITTER_NAME=chain", "GIT_COMMITTER_EMAIL=chain@example.com")
-	var out bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &out
+	var out, itemLog bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &itemLog, &out
 	runErr := cmd.Run()
 	if runErr != nil {
 		return fmt.Errorf("ynf sweep: %w\n%s", runErr, out.String())
@@ -323,6 +385,9 @@ func run() error {
 	// as it was made.
 	if es, err := os.ReadDir(filepath.Join(t, "ynh")); err != nil || len(es) != 0 {
 		return fmt.Errorf("the run changed the operator's ynh home (%d entries, %v)\n%s", len(es), err, out.String())
+	}
+	if err := checkRunRecord(itemLog.Bytes(), sc, pinSHA); err != nil {
+		return fmt.Errorf("%w\n--- the item's log ---\n%s\n--- ynf's output ---\n%s", err, itemLog.String(), out.String())
 	}
 	if os.Getenv("FULLCHAIN_VERBOSE") != "" {
 		fmt.Println(out.String())
@@ -343,8 +408,52 @@ func run() error {
 		}
 	}
 	recs := rcv.snapshot()
-	if err := check(recs); err != nil {
+	if err := check(recs, sc.want); err != nil {
 		return fmt.Errorf("%w\n--- ynf's output ---\n%s", err, out.String())
+	}
+	return nil
+}
+
+// checkRunRecord reads the run record ynf kept for the step. The harness that ran is in it: the name
+// and version ynh reported, and the commit it was installed from. A pinned harness also says which
+// repository and tag the lane named, and its commit is the one the tag points at.
+func checkRunRecord(log []byte, sc scenario, pinSHA string) error {
+	var entries []struct {
+		Kind string          `json:"kind"`
+		Body json.RawMessage `json:"body"`
+	}
+	if err := json.Unmarshal(log, &entries); err != nil {
+		return fmt.Errorf("the item's log is not JSON: %w", err)
+	}
+	var rec struct {
+		Outcome    string `json:"outcome"`
+		Harness    string `json:"harness"`
+		HarnessSHA string `json:"harness_sha"`
+		HarnessPin string `json:"harness_pin"`
+	}
+	n := 0
+	for _, e := range entries {
+		if e.Kind == "run" {
+			n++
+			if err := json.Unmarshal(e.Body, &rec); err != nil {
+				return err
+			}
+		}
+	}
+	if n != 1 {
+		return fmt.Errorf("want one run record, got %d", n)
+	}
+	if rec.Outcome != "converged" || rec.Harness != "local/chain@0.1.0" {
+		return fmt.Errorf("the run record says outcome %q, harness %q: want converged, local/chain@0.1.0", rec.Outcome, rec.Harness)
+	}
+	if !sc.pinned {
+		if rec.HarnessPin != "" {
+			return fmt.Errorf("a harness folder should not say it was pinned: %q", rec.HarnessPin)
+		}
+		return nil
+	}
+	if rec.HarnessSHA != pinSHA || !strings.HasSuffix(rec.HarnessPin, "@"+pinTag) || !strings.HasPrefix(rec.HarnessPin, "file://") {
+		return fmt.Errorf("the run record should say the pin and the commit the tag points at (%s): harness_pin %q, harness_sha %q", pinSHA, rec.HarnessPin, rec.HarnessSHA)
 	}
 	return nil
 }
@@ -364,7 +473,7 @@ func cleanEnv() []string {
 }
 
 // check is the full-chain assertion over what ynr serve shipped.
-func check(recs []record) error {
+func check(recs []record, harness string) error {
 	var problems []string
 	bad := func(f string, a ...any) { problems = append(problems, fmt.Sprintf(f, a...)) }
 
