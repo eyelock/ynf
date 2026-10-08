@@ -20,7 +20,8 @@ page is only how ynf does it.
 - A lane that takes GitHub issues from a `github.search` intake. A lane that adopts pull requests,
   or one whose intake is a tracker search (JIRA, say), is refused for now.
 - The lane's containment, as for any run: Docker for a `docker` lane. Shadow mode also accepts a
-  `process` lane, run on your machine, as an attended `start` does. No mode opens egress, so the
+  `process` lane, run on your machine, as an attended `start` does; see
+  [Let the attempts edit on the host](#let-the-attempts-edit-on-the-host). No mode opens egress, so the
   lane's `allow` list applies.
 
 ## Run the lane
@@ -36,6 +37,20 @@ ynf takes the lane's `github.search` intakes and reads them as closed: `is:open`
 ```bash
 ynf shadow run lint-paydown --ticket example-org/payments#412 --ticket example-org/payments#437
 ```
+
+### Let the attempts edit on the host
+
+On the host a lane's `auto_approve` is ignored, so an attempt that has to write a file is denied,
+ends stuck and counts as nothing. As with `ynf start`, you can switch the prompts off yourself:
+
+```bash
+ynf shadow run lint-paydown --repo example-org/payments --auto-approve edits
+```
+
+`edits` approves file edits and still refuses commands; `all` approves everything, so use the
+narrowest that works. It applies only to attempts run on this machine, never inside containment,
+which has its own setting, and it needs a ynh that reports capabilities 0.9.0 or later. The level is
+recorded in the run's pins, so the report shows what the attempts were allowed.
 
 A ticket is run only if the lane would have taken it and a merged pull request fixed it. The rest
 are skipped, and the command says how many and why:

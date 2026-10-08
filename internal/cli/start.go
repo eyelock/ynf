@@ -39,10 +39,8 @@ func (a *app) start(ctx context.Context, args []string) error {
 	if (refArg == "") == (*prompt == "") {
 		return withCode(ExitUsage, errors.New("start needs a reference or --prompt <text>, not both"))
 	}
-	switch *approve {
-	case "", "edits", "all":
-	default:
-		return withCode(ExitUsage, fmt.Errorf("--auto-approve %q: want edits or all", *approve))
+	if err := checkAutoApprove(*approve); err != nil {
+		return err
 	}
 	if *approve != "" && *detach {
 		return withCode(ExitUsage, errors.New("--auto-approve is for work run here, not --detach"))
@@ -73,6 +71,15 @@ func (a *app) start(ctx context.Context, args []string) error {
 		return err
 	}
 	return a.out(it, startSummary(it, *detach))
+}
+
+// checkAutoApprove validates --auto-approve, for the commands that run work attended.
+func checkAutoApprove(level string) error {
+	switch level {
+	case "", "edits", "all":
+		return nil
+	}
+	return withCode(ExitUsage, fmt.Errorf("--auto-approve %q: want edits or all", level))
 }
 
 // forgeRepo reads --repo: owner/name on the configured forge, or host/owner/name naming it.

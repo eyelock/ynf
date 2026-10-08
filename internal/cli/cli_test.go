@@ -649,6 +649,7 @@ func TestStart(t *testing.T) {
 		{[]string{"start", "o/r#5", "extra"}, cli.ExitUsage, "one reference"},
 		{[]string{"start", "o/r#5", "--auto-approve", "everything"}, cli.ExitUsage, "want edits or all"},
 		{[]string{"start", "o/r#5", "--auto-approve", "edits", "--detach"}, cli.ExitUsage, "not --detach"},
+		{[]string{"shadow", "run", "fmt", "--auto-approve", "everything"}, cli.ExitUsage, "want edits or all"},
 		{[]string{"start", "not-a-ref"}, cli.ExitUsage, "is not a reference"},
 		{[]string{"start", "o/r#5", "--bogus"}, cli.ExitUsage, ""},
 	} {

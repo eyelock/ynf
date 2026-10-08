@@ -13,9 +13,26 @@ import (
 type Pin struct {
 	Repo string `json:"repo"`
 	Ref  string `json:"ref"`
+	// URL is the repository as the clone tools are given it, set only when it differs from Repo:
+	// a bare host and path is cloned over https.
+	URL string `json:"url,omitempty"`
 }
 
 func (p Pin) String() string { return p.Repo + "@" + p.Ref }
+
+// CloneURL is the repository as the clone tools are given it. A URL with a scheme and an scp-like
+// address are used as written; a bare host and path, such as github.com/org/repo, is
+// https://github.com/org/repo, because the clone tools read the bare form as a folder.
+func (p Pin) CloneURL() string {
+	if strings.Contains(p.Repo, "://") || scpRepo.MatchString(p.Repo) {
+		return p.Repo
+	}
+	return "https://" + p.Repo
+}
+
+// Resolved is CloneURL and the ref: the pin as it is used, which differs from String only for a
+// bare host and path.
+func (p Pin) Resolved() string { return p.CloneURL() + "@" + p.Ref }
 
 var (
 	// pinRef is a tag or a commit: no spaces, nothing a flag could be mistaken for.
@@ -52,7 +69,11 @@ func ParsePin(harness string) (p Pin, ok bool, err error) {
 	if !pinRef.MatchString(ref) {
 		return p, false, fmt.Errorf("harness %q: pin it to a tag or commit, <repository>@<tag-or-commit>", harness)
 	}
-	return Pin{Repo: repo, Ref: ref}, true, nil
+	p = Pin{Repo: repo, Ref: ref}
+	if u := p.CloneURL(); u != repo {
+		p.URL = u
+	}
+	return p, true, nil
 }
 
 // Pins returns the harness each lane pins, by lane name.

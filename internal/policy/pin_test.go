@@ -11,10 +11,11 @@ func TestParsePin(t *testing.T) {
 	for _, c := range []struct {
 		in        string
 		repo, ref string
+		clone     string // the repository as the clone tools are given it; repo when empty
 		ok        bool
 		err       string
 	}{
-		{in: "github.com/org/harness@v1.2.0", repo: "github.com/org/harness", ref: "v1.2.0", ok: true},
+		{in: "github.com/org/harness@v1.2.0", repo: "github.com/org/harness", ref: "v1.2.0", clone: "https://github.com/org/harness", ok: true},
 		{in: "https://github.com/org/harness.git@3f9c2e1", repo: "https://github.com/org/harness.git", ref: "3f9c2e1", ok: true},
 		{in: "file:///srv/harness.git@v1", repo: "file:///srv/harness.git", ref: "v1", ok: true},
 		{in: "git@github.com:org/harness@release/1.0", repo: "git@github.com:org/harness", ref: "release/1.0", ok: true},
@@ -40,6 +41,23 @@ func TestParsePin(t *testing.T) {
 			}
 		case err != nil || ok != c.ok || p.Repo != c.repo || p.Ref != c.ref:
 			t.Errorf("%q: %+v %v %v, want %q %q %v", c.in, p, ok, err, c.repo, c.ref, c.ok)
+		case ok && (c.clone == "" && (p.CloneURL() != c.repo || p.URL != "") || c.clone != "" && (p.CloneURL() != c.clone || p.URL != c.clone)):
+			t.Errorf("%q: clone %q url %q, want %q", c.in, p.CloneURL(), p.URL, c.clone)
+		}
+	}
+}
+
+func TestPinCloneURL(t *testing.T) {
+	for in, want := range map[string]string{
+		"github.com/org/harness":         "https://github.com/org/harness",
+		"https://github.com/org/h.git":   "https://github.com/org/h.git",
+		"file:///srv/harness.git":        "file:///srv/harness.git",
+		"git@github.com:org/harness":     "git@github.com:org/harness",
+		"ssh://git@github.com/org/h.git": "ssh://git@github.com/org/h.git",
+	} {
+		p := policy.Pin{Repo: in, Ref: "v1"}
+		if p.CloneURL() != want || p.Resolved() != want+"@v1" || p.String() != in+"@v1" {
+			t.Errorf("%q: %q %q %q", in, p.CloneURL(), p.Resolved(), p.String())
 		}
 	}
 }
