@@ -272,7 +272,7 @@ func (e *Engine) pinnedRun(ctx context.Context, lr *LaneRun, ex executor.Executo
 		return
 	}
 	lr.Pin = &pin
-	lr.Where = fmt.Sprintf("pinned from %s at %s, installed into each run's own ynh home before the run starts", pin.Repo, pin.Ref)
+	lr.Where = fmt.Sprintf("pinned from %s at %s, installed into each run's own ynh home before the run starts", pin.CloneURL(), pin.Ref)
 	if ex.Contained() && ex.Name() != "inline" {
 		lr.Problem = fmt.Sprintf("a pinned harness runs only on the host executors (process, inline), not on %s", ex.Name())
 		return

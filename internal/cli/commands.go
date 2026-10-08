@@ -629,7 +629,7 @@ func withPins(out map[string]any, pins map[string]policy.Pin) map[string]any {
 func pinLines(pins map[string]policy.Pin) string {
 	var b strings.Builder
 	for _, name := range slices.Sorted(maps.Keys(pins)) {
-		fmt.Fprintf(&b, "\nlane %s pins its harness from %s at %s (installed for each run on the host; `ynf harness` resolves it)", name, pins[name].Repo, pins[name].Ref)
+		fmt.Fprintf(&b, "\nlane %s pins its harness from %s at %s (installed for each run on the host; `ynf harness` resolves it)", name, pins[name].CloneURL(), pins[name].Ref)
 	}
 	return b.String()
 }

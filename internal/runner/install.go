@@ -38,6 +38,9 @@ type Installed struct {
 	Commit string
 	// Pin is the repository and ref it was installed from, for a pin; empty for a folder.
 	Pin string
+	// PinURL is Pin with the repository as ynh was given it (a bare host and path made
+	// https://host/path); empty for a folder.
+	PinURL string
 	// Path is where ynh keeps the installed harness, which holds its manifest.
 	Path string
 }
@@ -68,7 +71,7 @@ func InstallHarness(ctx context.Context, src HarnessSource, ynhHome string) (Ins
 		if err := checkPinned(ctx, p); err != nil {
 			return Installed{}, err
 		}
-		args = append(args, p.Repo, "--ref", p.Ref)
+		args = append(args, p.CloneURL(), "--ref", p.Ref)
 	case src.Dir != "":
 		args = append(args, src.Dir)
 	default:
@@ -114,6 +117,7 @@ func InstallHarness(ctx context.Context, src HarnessSource, ynhHome string) (Ins
 	in := Installed{ID: h.ID, Name: h.Name, Version: h.Version, Commit: h.From.SHA, Path: h.Path}
 	if src.Pin != nil {
 		in.Pin = src.Pin.String()
+		in.PinURL = src.Pin.Resolved()
 	}
 	return in, nil
 }
@@ -123,7 +127,7 @@ func InstallHarness(ctx context.Context, src HarnessSource, ynhHome string) (Ins
 // anything it cannot find.
 func checkPinned(ctx context.Context, p policy.Pin) error {
 	var out, errb bytes.Buffer
-	c := exec.CommandContext(ctx, "git", "ls-remote", "--", p.Repo, "refs/heads/"+p.Ref, "refs/tags/"+p.Ref)
+	c := exec.CommandContext(ctx, "git", "ls-remote", "--", p.CloneURL(), "refs/heads/"+p.Ref, "refs/tags/"+p.Ref)
 	c.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	c.Stdout, c.Stderr = &out, &errb
 	if err := c.Run(); err != nil {

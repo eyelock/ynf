@@ -65,8 +65,11 @@ type Pins struct {
 	// Harness is the harness folder every run used, as a path in the default branch's checkout,
 	// when the lane runs one from the repository on the host.
 	Harness string `json:"harness,omitempty"`
-	Model   string `json:"model,omitempty"`  // as the lane configures it; empty is the vendor's default
-	Effort  string `json:"effort,omitempty"` // as the lane configures it
+	// HostAutoApprove is the --auto-approve the person gave at the terminal, when the attempts ran
+	// on the host and passed it to ynh; empty when none was given or the lane runs in containment.
+	HostAutoApprove string `json:"host_auto_approve,omitempty"`
+	Model           string `json:"model,omitempty"`  // as the lane configures it; empty is the vendor's default
+	Effort          string `json:"effort,omitempty"` // as the lane configures it
 
 	Observed Observed `json:"observed"`
 	Varied   []string `json:"varied,omitempty"`

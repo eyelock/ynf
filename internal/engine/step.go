@@ -91,6 +91,9 @@ type RunRecord struct {
 	// HarnessPin is the repository and ref a pinned harness was installed from, as the lane wrote
 	// it; Harness and HarnessSHA say which harness and commit that gave.
 	HarnessPin string `json:"harness_pin,omitempty"`
+	// HarnessPinURL is the same pin as ynh was given it, set only when it differs: a bare host and
+	// path (github.com/org/harness@v1) is cloned from https://github.com/org/harness.
+	HarnessPinURL string `json:"harness_pin_url,omitempty"`
 	// Model and Usage are what the runner reports, for comparing outcomes and cost by model and
 	// effort (ADR-011). ynf's own store is the run history; memory holds only failure patterns.
 	Model string `json:"model,omitempty"`
@@ -451,6 +454,9 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 				rec.HarnessSHA = installed.Commit
 			}
 			rec.HarnessPin = installed.Pin
+			if installed.PinURL != installed.Pin {
+				rec.HarnessPinURL = installed.PinURL
+			}
 		}
 		s.run = &rec
 		s.recordRun(it.Key, rec)

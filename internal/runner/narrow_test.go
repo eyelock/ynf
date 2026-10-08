@@ -9,6 +9,9 @@ import (
 	"github.com/eyelock/ynf/internal/runner"
 )
 
+// cacheSensor is the tutorial's sensor: it declares an environment prefix with an expansion.
+const cacheSensor = `GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run ./...`
+
 // TestAScopeOnlyNarrows: a sensor scope is the declared command narrowed, never anything else
 // (ADR-006). The words are compared with shell quoting rules and nothing is evaluated.
 func TestAScopeOnlyNarrows(t *testing.T) {
@@ -32,6 +35,9 @@ func TestAScopeOnlyNarrows(t *testing.T) {
 		{"no path word: append", "sh scripts/check-docs.sh", "sh scripts/check-docs.sh internal/status"},
 		{"no path word: append several", "make check", "make check a b/c"},
 		{"no path word: nothing added", "make check", "make check"},
+		{"the declared environment kept", `GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run ./...`, `GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run ./internal/x/...`},
+		{"the declared environment kept, unchanged", `A=1 B='x y' tool ./...`, `A=1 B='x y' tool ./...`},
+		{"the declared environment kept, extra blanks", `A=1  tool ./...`, `A=1 tool ./x`},
 		{"a file is not a path word", "go run ./cmd/tool.go", "go run ./cmd/tool.go pkg"},
 	} {
 		if err := runner.Narrows(c.declared, c.scope); err != nil {
@@ -51,7 +57,13 @@ func TestAScopeOnlyNarrows(t *testing.T) {
 		{"a different subcommand", "golangci-lint run ./...", "golangci-lint linters ./x", "found"},
 		{"a missing path", "golangci-lint run ./...", "golangci-lint run", "is missing"},
 		{"nothing at all", "golangci-lint run ./...", "", "empty"},
-		{"an environment assignment", "golangci-lint run ./...", `GOLANGCI_LINT_CACHE=/tmp/c golangci-lint run ./x`, "the program is"},
+		{"an environment assignment added", "golangci-lint run ./...", `GOLANGCI_LINT_CACHE=/tmp/c golangci-lint run ./x`, "which the declared command does not"},
+		{"the environment dropped", cacheSensor, `golangci-lint run ./x/...`, "drops the declared environment"},
+		{"the environment changed", cacheSensor, `GOLANGCI_LINT_CACHE=/tmp/c golangci-lint run ./x/...`, "kept exactly as declared"},
+		{"the environment requoted", cacheSensor, `GOLANGCI_LINT_CACHE='$PWD/.cache/golangci-lint' golangci-lint run ./x/...`, "kept exactly as declared"},
+		{"an assignment added to the declared one", cacheSensor, `X=1 GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run ./x/...`, "kept exactly as declared"},
+		{"the assignments reordered", `A=1 B=2 tool ./...`, `B=2 A=1 tool ./x`, "kept exactly as declared"},
+		{"an expansion after the environment", cacheSensor, `GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint" golangci-lint run "$HOME"`, "inside double quotes"},
 		{"a path that is not beneath", "go vet ./a/...", "go vet ./b/...", "or a path beneath it"},
 		{"the root of a narrower path", "go vet ./a/...", "go vet ./...", "or a path beneath it"},
 		{"a sibling with the same prefix", "lint ./dir", "lint dir2", "or a path beneath it"},

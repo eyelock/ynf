@@ -80,7 +80,7 @@ asked; a lane asks with `run.ynh.auto_approve: edits | all`, which ynf passes to
 own ynh, which runs the agent, for its capabilities (0.9.0 or later). An older image is refused
 before anything runs. Outside containment a lane's setting is ignored, with a warning: a
 repository's policy must never switch off the prompts on someone's own machine. There, only the
-person starting the work can, explicitly, with `ynf start … --auto-approve edits`. `edits`
+person starting the work can, explicitly, with `ynf start … --auto-approve edits` or `ynf shadow run … --auto-approve edits`, which applies to the attempts run on the host and is recorded in the run's pins. `edits`
 approves file edits and still refuses commands, with ynh's sensors checking the work between
 turns; lanes use the narrowest level that works. The vendor-specific part, which mode each vendor
 CLI needs and when the vendor refuses it, is ynh's.

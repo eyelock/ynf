@@ -294,9 +294,26 @@ func TestDoctorSaysWhyMemoryIsOff(t *testing.T) {
 	if !strings.Contains(human, "--    memory") || !strings.Contains(human, "off: ynm is on PATH but has no store") {
 		t.Fatalf("doctor should say why memory is off: %s", human)
 	}
-	t.Setenv("YNM_HOME", t.TempDir())
-	if _, human, _ := e.run("doctor"); !strings.Contains(human, "ok    memory") || !strings.Contains(human, "on: ynm on PATH, store at") {
-		t.Fatalf("a store turns it on: %s", human)
+	ynmHome := t.TempDir()
+	t.Setenv("YNM_HOME", ynmHome)
+	if _, human, _ := e.run("doctor"); !strings.Contains(human, "ok    memory") || !strings.Contains(human, "on: ynm on PATH, the user store, from YNM_HOME at "+ynmHome) {
+		t.Fatalf("a store turns it on, and doctor says which: %s", human)
+	}
+	// A repository under HOME, a ~/.ynm, and YNM_HOME naming a folder that is not there: ynm
+	// writes to YNM_HOME, so ~/.ynm is not the store (#147).
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".ynm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(home, "repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(repo)
+	t.Setenv("YNM_HOME", filepath.Join(repo, "no-such-home"))
+	if _, human, _ := e.run("doctor"); !strings.Contains(human, "--    memory") || strings.Contains(human, "store at "+filepath.Join(home, ".ynm")) || !strings.Contains(human, "no-such-home") {
+		t.Fatalf("a missing YNM_HOME does not fall back to ~/.ynm: %s", human)
 	}
 }
 
@@ -632,6 +649,7 @@ func TestStart(t *testing.T) {
 		{[]string{"start", "o/r#5", "extra"}, cli.ExitUsage, "one reference"},
 		{[]string{"start", "o/r#5", "--auto-approve", "everything"}, cli.ExitUsage, "want edits or all"},
 		{[]string{"start", "o/r#5", "--auto-approve", "edits", "--detach"}, cli.ExitUsage, "not --detach"},
+		{[]string{"shadow", "run", "fmt", "--auto-approve", "everything"}, cli.ExitUsage, "want edits or all"},
 		{[]string{"start", "not-a-ref"}, cli.ExitUsage, "is not a reference"},
 		{[]string{"start", "o/r#5", "--bogus"}, cli.ExitUsage, ""},
 	} {

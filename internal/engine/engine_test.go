@@ -1219,7 +1219,7 @@ func TestMemoryIsWrittenNotRelayed(t *testing.T) {
 	f := failures[0]
 	if f.Subject != "sig/ci-diverges/lint" || f.Type != "episodic" || f.Level != "distributed" || f.Namespace != "factory/github.com/o/r" ||
 		!slices.Contains(f.Tags, "ynf.failure.v1") || !slices.Contains(f.Tags, "failure") || !slices.Contains(f.Tags, "occurrence") ||
-		!strings.Contains(f.Content, "Occurrence 1") || !strings.Contains(f.Content, "failing checks: lint") || f.Data["failed_checks"] == nil || !strings.Contains(f.Content, "run `") || f.Data["step"] == "" {
+		!strings.Contains(f.Content, "Occurrence 1") || !strings.Contains(f.Content, "failing checks: lint") || f.Data["failed_checks"] == nil || !strings.Contains(f.Content, "run `") || !strings.HasSuffix(f.Content, ".") || f.Data["step"] == "" {
 		t.Fatalf("failure memory: %+v", f)
 	}
 	entries, _ := h.e.Store.Log(ctx, item.IssueKey("github.com", "o/r", 1))

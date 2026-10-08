@@ -168,6 +168,36 @@ func TestInstallPinnedHarnessRefusesABranch(t *testing.T) {
 	}
 }
 
+// TestInstallPinnedHarnessForms: each documented form of a repository (URL, host/path, scp-style,
+// file://) is installed, and the ref check and the install both get a form the clone tools can
+// use. The addresses do not exist; the clone tools are told where each really is, by the address
+// they are given, so a bare host/path that was not made a URL first would not be found.
+func TestInstallPinnedHarnessForms(t *testing.T) {
+	fakeInstallingYnh(t)
+	t.Setenv("YNH_HOME", t.TempDir())
+	file, commit := harnessRepo(t)
+	for _, c := range []struct{ name, repo, cloned, pin string }{
+		{"url", "https://example.test/org/chain.git", "https://example.test/org/chain.git", "https://example.test/org/chain.git@v1.2.0"},
+		{"host/path", "example.test/org/chain", "https://example.test/org/chain", "example.test/org/chain@v1.2.0"},
+		{"scp-style", "git@example.test:org/chain.git", "git@example.test:org/chain.git", "git@example.test:org/chain.git@v1.2.0"},
+		{"file", file, file, file + "@v1.2.0"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("GIT_CONFIG_COUNT", "1")
+			t.Setenv("GIT_CONFIG_KEY_0", "url."+file+".insteadOf")
+			t.Setenv("GIT_CONFIG_VALUE_0", c.cloned)
+			pin := policy.Pin{Repo: c.repo, Ref: "v1.2.0"}
+			in, err := runner.InstallHarness(context.Background(), runner.HarnessSource{Pin: &pin}, filepath.Join(t.TempDir(), "ynh"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if in.Commit != commit || in.Pin != c.pin || in.PinURL != c.cloned+"@v1.2.0" {
+				t.Errorf("%+v, want commit %s, pin %s, url %s", in, commit, c.pin, c.cloned+"@v1.2.0")
+			}
+		})
+	}
+}
+
 func TestInstallPinnedHarnessRefusesAFlag(t *testing.T) {
 	for _, p := range []policy.Pin{{Repo: "--upload-pack=x", Ref: "v1"}, {Repo: "github.com/o/r", Ref: "--force"}} {
 		if _, err := runner.InstallHarness(context.Background(), runner.HarnessSource{Pin: &p}, filepath.Join(t.TempDir(), "ynh")); err == nil || !strings.Contains(err.Error(), "dash") {

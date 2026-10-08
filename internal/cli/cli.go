@@ -61,7 +61,7 @@ Usage:
   ynf replay <owner/name#number | key> [--policy lanes.yaml]
   ynf pause|resume <lane> --reason <text> [--repo owner/name]
   ynf stats [--lane name]...
-  ynf shadow run <lane> [--repo owner/name]... [--since 90d] [--limit 20] [--ticket <ref>]...
+  ynf shadow run <lane> [--repo owner/name]... [--since 90d] [--limit 20] [--ticket <ref>]... [--auto-approve edits|all]
   ynf shadow ls
   ynf shadow grade [<shadow run id>] [--attempt <id> --a <grade> --b <grade>] [--regrade]
   ynf shadow report [<shadow run id> | --lane name]

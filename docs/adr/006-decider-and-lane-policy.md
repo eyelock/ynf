@@ -110,8 +110,12 @@ image when nothing is published (ADR-007). On the host executors the harness is 
   no shell operator or expansion, and its words must be the declared ones, one for one and in
   order, except that a path word (`.`, `./...`, a directory) may be replaced by one or more
   relative paths beneath it, with no `..` and no leading dash. A command with no path word may
-  only have such paths appended. A different program, flag, environment assignment or anything
-  else is refused as `operator_error`, naming the sensor, the declared command, the scope and
+  only have such paths appended. The declared command's leading `NAME=value` assignments belong
+  to the harness author, not the lane: the scope keeps them exactly as declared, the same text
+  with quotes and expansions as written (`GOLANGCI_LINT_CACHE="$PWD/.cache/golangci-lint"`), and
+  the rest is narrowed under the rule above, where expansions are still refused. A scope that
+  adds, drops, reorders or changes an assignment, a different program, a flag or anything else
+  is refused as `operator_error`, naming the sensor, the declared command, the scope and
   why; `ynf harness` reports the same, with each placeholder standing for a safe path segment.
   Placeholders come only from structured facts (`{label.<prefix>}` reads the value of a
   `<prefix>:<value>` label) and are validated against `^[A-Za-z0-9._/-]+$` before substitution,

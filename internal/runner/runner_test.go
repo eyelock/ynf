@@ -134,6 +134,23 @@ func TestYnhAutoApproveOnlyInAnImage(t *testing.T) {
 	}
 }
 
+// TestYnhHostAutoApprove: the level the person asked for (start, shadow run) is passed on the
+// host and ignored inside containment, where the lane's own auto_approve applies instead.
+func TestYnhHostAutoApprove(t *testing.T) {
+	y := runner.YnhRunner{Cfg: policy.Ynh{Harness: ".", AutoApprove: "all"}}
+	host, _ := y.Command(runner.Spec{TaskFile: "t", RunDir: "r", HostAutoApprove: "edits"})
+	if !strings.Contains(strings.Join(host, " "), "--auto-approve edits") || strings.Contains(strings.Join(host, " "), "--auto-approve all") {
+		t.Errorf("on the host %v", host)
+	}
+	for _, s := range []runner.Spec{{InImage: true}, {Contained: true}} {
+		s.TaskFile, s.RunDir, s.HostAutoApprove = "t", "r", "edits"
+		argv, _ := y.Command(s)
+		if !strings.Contains(strings.Join(argv, " "), "--auto-approve all") || strings.Contains(strings.Join(argv, " "), "--auto-approve edits") {
+			t.Errorf("%+v: %v", s, argv)
+		}
+	}
+}
+
 func TestYnhInImage(t *testing.T) {
 	y := runner.YnhRunner{Cfg: policy.Ynh{Harness: ".", Focus: "tidy"}}
 	argv, err := y.Command(runner.Spec{InImage: true, TaskFile: "/run/ynf/task.md", RunDir: "/run/ynf", Focus: &runner.Focus{Prompt: "Tidy."}})

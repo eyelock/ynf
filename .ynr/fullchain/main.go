@@ -62,6 +62,9 @@ type scenario struct {
 	// pinned means the lane's harness is pinned from a local repository (file://...@v0.1.0), and
 	// the target repository carries no harness at all: nothing is copied into it.
 	pinned bool
+	// hostPath means the pin is written as host/path (example.test/org/chain@v0.1.0), which ynf has
+	// to make https://example.test/org/chain before git or ynh sees it.
+	hostPath bool
 	// includes means the folder harness has an include from a local repository (a file:// URL), which
 	// ynh has to fetch into the run's own home at run setup.
 	includes bool
@@ -75,11 +78,15 @@ type scenario struct {
 var scenarios = []scenario{
 	{name: "a harness folder the repository carries, run by path", want: ".", harness: "chain@0.1.0"},
 	{name: "a harness pinned from a local repository, installed", pinned: true, want: "local/chain", harness: "local/chain@0.1.0"},
+	{name: "a harness pinned from a host/path, installed over https", pinned: true, hostPath: true, want: "example.test/org/chain/chain", harness: "example.test/org/chain/chain@0.1.0"},
 	{name: "a harness folder with a git include from a local repository", includes: true, want: ".", harness: "chain@0.1.0"},
 }
 
 // pinTag is the tag the pinned scenario's lane names.
 const pinTag = "v0.1.0"
+
+// hostPathPin is the repository the host/path scenario writes, without a scheme.
+const hostPathPin = "example.test/org/chain"
 
 func main() {
 	for _, sc := range scenarios {
@@ -321,7 +328,7 @@ func run(sc scenario) error {
 
 	// A local repository standing in for github.com/o/r, with the harness in it.
 	src, remote := filepath.Join(t, "src"), filepath.Join(t, "remote", "o", "r.git")
-	laneHarness, pinSHA := ".", ""
+	laneHarness, pinSHA, hostPathBare := ".", "", ""
 	if sc.pinned {
 		// The harness lives in a repository of its own, tagged; the target repository has none.
 		if err := os.Remove(filepath.Join(src, ".agents", "harness")); err != nil {
@@ -351,6 +358,9 @@ func run(sc scenario) error {
 			return err
 		}
 		laneHarness = "file://" + hbare + "@" + pinTag
+		if sc.hostPath {
+			laneHarness, hostPathBare = hostPathPin+"@"+pinTag, hbare
+		}
 		rev := exec.Command("git", "rev-parse", pinTag+"^{commit}")
 		rev.Dir, rev.Env = hsrc, henv
 		b, err := rev.Output()
@@ -389,7 +399,12 @@ func run(sc scenario) error {
 		return err
 	}
 	gitconfig := filepath.Join(t, "gitconfig")
-	if err := os.WriteFile(gitconfig, []byte(fmt.Sprintf("[url %q]\n\tinsteadOf = https://github.com/o/r.git\n", remote)), 0o644); err != nil {
+	rules := fmt.Sprintf("[url %q]\n\tinsteadOf = https://github.com/o/r.git\n", remote)
+	if hostPathBare != "" {
+		// Only the https form is mapped: the bare host/path, given to git as it is, is not found.
+		rules += fmt.Sprintf("[url %q]\n\tinsteadOf = https://%s\n", hostPathBare, hostPathPin)
+	}
+	if err := os.WriteFile(gitconfig, []byte(rules), 0o644); err != nil {
 		return err
 	}
 
@@ -475,6 +490,7 @@ func checkRunRecord(log []byte, sc scenario, pinSHA string) error {
 		Harness    string   `json:"harness"`
 		HarnessSHA string   `json:"harness_sha"`
 		HarnessPin string   `json:"harness_pin"`
+		PinURL     string   `json:"harness_pin_url"`
 		Argv       []string `json:"argv"`
 		Features   []string `json:"runner_features"`
 	}
@@ -511,6 +527,18 @@ func checkRunRecord(log []byte, sc scenario, pinSHA string) error {
 	}
 	if passed != sc.want {
 		return fmt.Errorf("a pinned harness should be run by the id ynh installed it as, %s: --harness %q", sc.want, passed)
+	}
+	if sc.hostPath {
+		if rec.HarnessPin != hostPathPin+"@"+pinTag || rec.PinURL != "https://"+hostPathPin+"@"+pinTag {
+			return fmt.Errorf("the run record should keep the pin as the lane wrote it and say the https form used: harness_pin %q, harness_pin_url %q", rec.HarnessPin, rec.PinURL)
+		}
+		if rec.HarnessSHA != pinSHA {
+			return fmt.Errorf("harness_sha %q, want %s", rec.HarnessSHA, pinSHA)
+		}
+		return nil
+	}
+	if rec.PinURL != "" {
+		return fmt.Errorf("a pin that needed no change should not say another form: harness_pin_url %q", rec.PinURL)
 	}
 	if rec.HarnessSHA != pinSHA || !strings.HasSuffix(rec.HarnessPin, "@"+pinTag) || !strings.HasPrefix(rec.HarnessPin, "file://") {
 		return fmt.Errorf("the run record should say the pin and the commit the tag points at (%s): harness_pin %q, harness_sha %q", pinSHA, rec.HarnessPin, rec.HarnessSHA)
