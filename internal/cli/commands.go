@@ -147,7 +147,7 @@ func (a *app) doctor(ctx context.Context) error {
 			detail := "not found or not working (" + d.Detail + ")"
 			switch {
 			case d.Found:
-				detail = fmt.Sprintf("%s, capabilities %s: detected, used by a lane with no runner and a ynh block", d.Version, d.Capabilities)
+				detail = fmt.Sprintf("%s, capabilities %s, features %s: detected, used by a lane with no runner and a ynh block", d.Version, d.Capabilities, featureList(d.Features))
 			case d.Capabilities != "":
 				detail = "found but not supported (" + d.Detail + ")"
 			}
@@ -595,7 +595,12 @@ func summarise(en store.LogEntry) string {
 				if r.RunnerVersion != "" {
 					via += " " + r.RunnerVersion
 				}
+				if len(r.RunnerFeatures) > 0 {
+					via += "; features " + strings.Join(r.RunnerFeatures, ", ")
+				}
 				via += ")"
+			} else if len(r.RunnerFeatures) > 0 {
+				via = " (" + r.RunnerVersion + "; features " + strings.Join(r.RunnerFeatures, ", ") + ")"
 			}
 			if r.Executor != "" {
 				via += " via " + r.Executor
@@ -744,4 +749,12 @@ func short(sha string) string { return sha[:min(7, len(sha))] }
 // trackerNames resolves a configured tracker's name to its host, for references.
 func trackerNames(ctx context.Context, e *engine.Engine) func(string) (string, error) {
 	return func(name string) (string, error) { return e.TrackerHost(ctx, name) }
+}
+
+// featureList says the features a ynh listed, or "none" for one that listed no features.
+func featureList(f []string) string {
+	if len(f) == 0 {
+		return "none"
+	}
+	return strings.Join(f, ", ")
 }

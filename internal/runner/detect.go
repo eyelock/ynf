@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +30,22 @@ type Detection struct {
 	Version      string `json:"version,omitempty"`      // ynh's own version
 	Capabilities string `json:"capabilities,omitempty"` // the capabilities version ynf checks abilities against
 	Detail       string `json:"detail,omitempty"`       // why it was not detected
+	// Features are the names ynh lists in `features`; absent means none. They are gated on by
+	// name, never by comparing versions (ADR-012).
+	Features []string `json:"features,omitempty"`
+}
+
+// The ynh features ynf uses.
+const (
+	// FeatureHarnessPath is `ynh agent run --harness <path>`: a folder runs without an install.
+	FeatureHarnessPath = "agent-run-harness-path"
+	// FeatureFetchesIncludes is a run fetching the harness's includes at setup.
+	FeatureFetchesIncludes = "agent-run-fetches-includes"
+)
+
+// Has reports whether ynh listed the feature.
+func (d Detection) Has(feature string) bool {
+	return slices.Contains(d.Features, feature)
 }
 
 // String says what was found, for people: "ynh 0.10.0" or "ynh not found".
@@ -53,13 +70,14 @@ func DetectYnh(ctx context.Context) Detection {
 		return Detection{Detail: fmt.Sprintf("%s: %v", bin, err)}
 	}
 	var v struct {
-		Version      string `json:"version"`
-		Capabilities string `json:"capabilities"`
+		Version      string   `json:"version"`
+		Capabilities string   `json:"capabilities"`
+		Features     []string `json:"features"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &v); err != nil || v.Capabilities == "" {
 		return Detection{Detail: bin + " version --format json gave no capabilities"}
 	}
-	d := Detection{Version: v.Version, Capabilities: v.Capabilities}
+	d := Detection{Version: v.Version, Capabilities: v.Capabilities, Features: v.Features}
 	if d.Version == "" {
 		d.Version = v.Capabilities
 	}

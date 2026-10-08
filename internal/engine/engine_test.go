@@ -751,6 +751,79 @@ func TestHarnessFolderOnTheHostIsInstalledForTheRun(t *testing.T) {
 	}
 }
 
+func callsOf(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// TestHarnessFolderGoesToYnhByPathWhenItCan: a ynh that lists agent-run-harness-path is given the
+// folder, so nothing is installed; it still gets a home of the run's own, which is where it keeps
+// the includes it fetches, and the operator's is never touched.
+func TestHarnessFolderGoesToYnhByPathWhenItCan(t *testing.T) {
+	operator := t.TempDir()
+	t.Setenv("YNH_HOME", operator)
+	h := newHarness(t)
+	calls := fakeYnh(t)
+	in := &installs{}
+	h.e.InstallHarness = in.install
+	h.e.DetectYnh = func(context.Context) runner.Detection {
+		return runner.Detection{Found: true, Version: "0.12.0", Capabilities: "0.9.0", Features: []string{runner.FeatureHarnessPath}}
+	}
+	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "sk-test"}[k] }
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Proposed {
+		t.Fatalf("%s %s", it.State, it.Reason)
+	}
+	if len(in.dirs) != 0 || len(in.pins) != 0 {
+		t.Fatalf("nothing should be installed: %v %v", in.dirs, in.pins)
+	}
+	b := string(callsOf(t, calls))
+	if !strings.Contains(b, "agent run --harness "+string(filepath.Separator)) || !strings.Contains(b, string(filepath.Separator)+"wt --task @") {
+		t.Errorf("ynh should be given the checkout's harness folder by path:\n%s", b)
+	}
+	if !strings.Contains(b, string(filepath.Separator)+"run"+string(filepath.Separator)) || !strings.Contains(b, "ynh\n") {
+		t.Errorf("ynh should run with a home under the run folder:\n%s", b)
+	}
+	if es, _ := os.ReadDir(operator); len(es) != 0 {
+		t.Errorf("the operator's ynh home was written to: %v", es)
+	}
+	rec := runOf(t, h, "1")
+	if rec.RunnerVersion != "0.12.0" || len(rec.RunnerFeatures) != 1 || rec.RunnerFeatures[0] != runner.FeatureHarnessPath {
+		t.Errorf("the run record should say the ynh version and its features: %+v", rec)
+	}
+}
+
+// TestHarnessFolderIsInstalledWhenYnhLacksThePathFeature: a ynh that lists other features, but not
+// agent-run-harness-path, still gets the install step.
+func TestHarnessFolderIsInstalledWhenYnhLacksThePathFeature(t *testing.T) {
+	t.Setenv("YNH_HOME", t.TempDir())
+	h := newHarness(t)
+	calls := fakeYnh(t)
+	in := &installs{}
+	h.e.InstallHarness = in.install
+	h.e.DetectYnh = func(context.Context) runner.Detection {
+		return runner.Detection{Found: true, Version: "0.12.0", Capabilities: "0.9.0", Features: []string{runner.FeatureFetchesIncludes}}
+	}
+	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "sk-test"}[k] }
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Proposed || len(in.dirs) != 1 {
+		t.Fatalf("%s %s installed %v", it.State, it.Reason, in.dirs)
+	}
+	if b := callsOf(t, calls); !strings.Contains(string(b), "agent run --harness local/installed") {
+		t.Errorf("the installed id should run:\n%s", b)
+	}
+}
+
 // TestNamedHarnessOnTheHostIsNotInstalled: a harness id is the operator's installed harness, run
 // as it is, in the operator's own ynh home.
 func TestNamedHarnessOnTheHostIsNotInstalled(t *testing.T) {

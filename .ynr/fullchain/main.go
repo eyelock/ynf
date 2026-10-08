@@ -35,6 +35,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -61,14 +62,20 @@ type scenario struct {
 	// pinned means the lane's harness is pinned from a local repository (file://...@v0.1.0), and
 	// the target repository carries no harness at all: nothing is copied into it.
 	pinned bool
+	// includes means the folder harness has an include from a local repository (a file:// URL), which
+	// ynh has to fetch into the run's own home at run setup.
+	includes bool
 	// want is the harness the run's records say: the lane's own value for a folder, the id ynh gave
 	// it for a pin.
 	want string
+	// harness is the name and version the run record says ran.
+	harness string
 }
 
 var scenarios = []scenario{
-	{name: "a harness folder the repository carries", want: "."},
-	{name: "a harness pinned from a local repository", pinned: true, want: "local/chain"},
+	{name: "a harness folder the repository carries, run by path", want: ".", harness: "chain@0.1.0"},
+	{name: "a harness pinned from a local repository, installed", pinned: true, want: "local/chain", harness: "local/chain@0.1.0"},
+	{name: "a harness folder with a git include from a local repository", includes: true, want: ".", harness: "chain@0.1.0"},
 }
 
 // pinTag is the tag the pinned scenario's lane names.
@@ -246,6 +253,33 @@ const pluginJSON = `{
 }
 `
 
+// manifestWith is the harness manifest, with an include from the repository at url when given.
+func manifestWith(url string) string {
+	if url == "" {
+		return pluginJSON
+	}
+	return strings.Replace(pluginJSON, `  "agent":`, fmt.Sprintf("  \"includes\": [{\"git\": %q}],\n  \"agent\":", url), 1)
+}
+
+// makeInclude makes the repository the include scenario's harness includes: one skill, in a
+// repository of its own, which ynh clones from its file:// URL.
+func makeInclude(t string, env []string) (string, error) {
+	inc := filepath.Join(t, "include")
+	if err := os.MkdirAll(filepath.Join(inc, "skills", "greet"), 0o755); err != nil {
+		return "", err
+	}
+	skill := "---\nname: greet\ndescription: Greets.\n---\nSay hello.\n"
+	if err := os.WriteFile(filepath.Join(inc, "skills", "greet", "SKILL.md"), []byte(skill), 0o644); err != nil {
+		return "", err
+	}
+	for _, a := range [][]string{{"init", "-q", "-b", "main"}, {"add", "."}, {"commit", "-q", "-m", "include"}} {
+		if err := sh(inc, env, "git", a...); err != nil {
+			return "", err
+		}
+	}
+	return "file://" + inc, nil
+}
+
 func lanesYAML(harness string) string {
 	return fmt.Sprintf(`version: 1
 lanes:
@@ -324,8 +358,19 @@ func run(sc scenario) error {
 			return err
 		}
 		pinSHA = strings.TrimSpace(string(b))
-	} else if err := os.WriteFile(filepath.Join(src, ".agents", "harness", "plugin.json"), []byte(pluginJSON), 0o644); err != nil {
-		return err
+	} else {
+		manifest := pluginJSON
+		if sc.includes {
+			url, err := makeInclude(t, append(cleanEnv(), "HOME="+filepath.Join(t, "home"), "GIT_CONFIG_NOSYSTEM=1",
+				"GIT_AUTHOR_NAME=chain", "GIT_AUTHOR_EMAIL=chain@example.com", "GIT_COMMITTER_NAME=chain", "GIT_COMMITTER_EMAIL=chain@example.com"))
+			if err != nil {
+				return err
+			}
+			manifest = manifestWith(url)
+		}
+		if err := os.WriteFile(filepath.Join(src, ".agents", "harness", "plugin.json"), []byte(manifest), 0o644); err != nil {
+			return err
+		}
 	}
 	if err := os.WriteFile(filepath.Join(src, "README.md"), []byte("hello\n"), 0o644); err != nil {
 		return err
@@ -426,10 +471,12 @@ func checkRunRecord(log []byte, sc scenario, pinSHA string) error {
 		return fmt.Errorf("the item's log is not JSON: %w", err)
 	}
 	var rec struct {
-		Outcome    string `json:"outcome"`
-		Harness    string `json:"harness"`
-		HarnessSHA string `json:"harness_sha"`
-		HarnessPin string `json:"harness_pin"`
+		Outcome    string   `json:"outcome"`
+		Harness    string   `json:"harness"`
+		HarnessSHA string   `json:"harness_sha"`
+		HarnessPin string   `json:"harness_pin"`
+		Argv       []string `json:"argv"`
+		Features   []string `json:"runner_features"`
 	}
 	n := 0
 	for _, e := range entries {
@@ -443,14 +490,27 @@ func checkRunRecord(log []byte, sc scenario, pinSHA string) error {
 	if n != 1 {
 		return fmt.Errorf("want one run record, got %d", n)
 	}
-	if rec.Outcome != "converged" || rec.Harness != "local/chain@0.1.0" {
-		return fmt.Errorf("the run record says outcome %q, harness %q: want converged, local/chain@0.1.0", rec.Outcome, rec.Harness)
+	if rec.Outcome != "converged" || rec.Harness != sc.harness {
+		return fmt.Errorf("the run record says outcome %q, harness %q: want converged, %s", rec.Outcome, rec.Harness, sc.harness)
+	}
+	passed := ""
+	for i, a := range rec.Argv {
+		if a == "--harness" && i+1 < len(rec.Argv) {
+			passed = rec.Argv[i+1]
+		}
 	}
 	if !sc.pinned {
+		// A folder goes to ynh by path, with no install, and the record says ynh could take it so.
+		if !filepath.IsAbs(passed) || !slices.Contains(rec.Features, "agent-run-harness-path") {
+			return fmt.Errorf("a harness folder should be passed by path to a ynh listing agent-run-harness-path: --harness %q, features %v", passed, rec.Features)
+		}
 		if rec.HarnessPin != "" {
 			return fmt.Errorf("a harness folder should not say it was pinned: %q", rec.HarnessPin)
 		}
 		return nil
+	}
+	if passed != sc.want {
+		return fmt.Errorf("a pinned harness should be run by the id ynh installed it as, %s: --harness %q", sc.want, passed)
 	}
 	if rec.HarnessSHA != pinSHA || !strings.HasSuffix(rec.HarnessPin, "@"+pinTag) || !strings.HasPrefix(rec.HarnessPin, "file://") {
 		return fmt.Errorf("the run record should say the pin and the commit the tag points at (%s): harness_pin %q, harness_sha %q", pinSHA, rec.HarnessPin, rec.HarnessSHA)
