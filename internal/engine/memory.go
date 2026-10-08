@@ -85,6 +85,9 @@ func (s *step) remember(in decide.Input, d decide.Decision) {
 		if d.Reason != "" {
 			content += " ynf then decided: " + telemetry.Scrub(d.Reason)
 		}
+		if !strings.HasSuffix(content, ".") {
+			content += "."
+		}
 		data := map[string]any{
 			"signature": name, "item": it.Key, "lane": it.Lane, "count": n,
 			"run_id": runID, "step": s.id, "at": at, "model": model,

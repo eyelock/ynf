@@ -100,17 +100,19 @@ func (y Ynm) run(ctx context.Context, args ...string) (string, error) {
 }
 
 // Detect returns ynm when it is on PATH and a store is present, or nil and the reason it is not
-// (ADR-012: detected, never required). A store is a .ynm/ in cwd (the directory ynm runs from; the
-// working directory when empty) or any parent of it, which is how ynm finds a repository's, or the
-// user's own: $YNM_HOME when set, which is where ynm keeps its store then, else ~/.ynm/.
+// (ADR-012: detected, never required). It looks where ynm itself writes: a repository's own
+// `.ynm/` (at the root of the git repository cwd is in, which for a linked worktree is the main
+// repository's too; cwd is the directory ynm runs from, the working directory when empty), then
+// the user's store, which is $YNM_HOME when that is set and only then ~/.ynm. Nothing is found by
+// walking up past the repository root, so ~/.ynm is never taken for a project's store.
 func Detect(cwd string) (Memory, string) {
 	if _, err := exec.LookPath("ynm"); err != nil {
 		return nil, "ynm is not on PATH"
 	}
-	if where := StoreAt(cwd); where != "" {
-		return Ynm{Cwd: cwd}, "ynm on PATH, store at " + where
+	if where, why := StoreAt(cwd); where != "" {
+		return Ynm{Cwd: cwd}, "ynm on PATH, " + why + " at " + where
 	}
-	return nil, "ynm is on PATH but has no store: no .ynm/ in " + dirOrWd(cwd) + " or above, and no " + userStore() + " (ynm init sets one up)"
+	return nil, "ynm is on PATH but has no store: no .ynm/ at the root of " + describeRepo(cwd) + ", and no user store at " + userStore() + " (ynm init sets one up)"
 }
 
 func dirOrWd(cwd string) string {
@@ -120,9 +122,10 @@ func dirOrWd(cwd string) string {
 	if wd, err := os.Getwd(); err == nil {
 		return wd
 	}
-	return "the working directory"
+	return "."
 }
 
+// userStore is where ynm keeps the user's own store: $YNM_HOME when set, else ~/.ynm.
 func userStore() string {
 	if h := os.Getenv("YNM_HOME"); h != "" {
 		return h
@@ -133,28 +136,68 @@ func userStore() string {
 	return "~/.ynm"
 }
 
-// StoreAt names the ynm store ynf finds, or "" when there is none.
-func StoreAt(cwd string) string {
-	dir, err := filepath.Abs(dirOrWd(cwd))
-	if err == nil {
-		for {
-			p := filepath.Join(dir, ".ynm")
-			if fi, err := os.Stat(p); err == nil && fi.IsDir() {
-				return p
+func isDir(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && fi.IsDir()
+}
+
+// repoRoots returns the git repository root that dir is in, and the main repository's root when
+// dir is in a linked worktree (a `.git` file naming `<main>/.git/worktrees/<name>`); both are
+// empty outside a repository.
+func repoRoots(dir string) (root, main string) {
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", ""
+	}
+	for {
+		fi, err := os.Stat(filepath.Join(dir, ".git"))
+		if err == nil && fi.IsDir() {
+			return dir, ""
+		}
+		if err == nil {
+			b, _ := os.ReadFile(filepath.Join(dir, ".git"))
+			if g, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "gitdir:"); ok {
+				g = strings.TrimSpace(g)
+				if !filepath.IsAbs(g) {
+					g = filepath.Join(dir, g)
+				}
+				if wt := filepath.Dir(g); filepath.Base(wt) == "worktrees" {
+					return dir, filepath.Dir(filepath.Dir(wt))
+				}
 			}
-			up := filepath.Dir(dir)
-			if up == dir {
-				break
-			}
-			dir = up
+			return dir, ""
+		}
+		up := filepath.Dir(dir)
+		if up == dir {
+			return "", ""
+		}
+		dir = up
+	}
+}
+
+func describeRepo(cwd string) string {
+	if root, _ := repoRoots(dirOrWd(cwd)); root != "" {
+		return "the repository " + root
+	}
+	return dirOrWd(cwd) + ", which is not in a git repository"
+}
+
+// StoreAt names the ynm store ynf finds and why it is the one, or "" when there is none: the
+// repository's own `.ynm/`, else the user's store.
+func StoreAt(cwd string) (path, why string) {
+	root, main := repoRoots(dirOrWd(cwd))
+	for _, r := range []string{root, main} {
+		if r != "" && isDir(filepath.Join(r, ".ynm")) {
+			return filepath.Join(r, ".ynm"), "the project store"
 		}
 	}
-	if u := userStore(); u != "" {
-		if fi, err := os.Stat(u); err == nil && fi.IsDir() {
-			return u
+	if u := userStore(); isDir(u) {
+		if os.Getenv("YNM_HOME") != "" {
+			return u, "the user store, from YNM_HOME"
 		}
+		return u, "the user store, ~/.ynm"
 	}
-	return ""
+	return "", ""
 }
 
 // YnmHTTP talks to a hosted ynm over its MCP HTTP endpoint (ADR-008): the shared store for a pool
