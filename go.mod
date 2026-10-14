@@ -4,10 +4,10 @@ go 1.26.0
 
 require (
 	cel.dev/cel-go v0.32.0
-	github.com/aws/aws-sdk-go-v2 v1.47.1
+	github.com/aws/aws-sdk-go-v2 v1.47.3
 	github.com/aws/aws-sdk-go-v2/config v1.33.6
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.0
-	github.com/aws/smithy-go v1.28.2
+	github.com/aws/smithy-go v1.28.5
 	github.com/bmatcuk/doublestar/v4 v4.10.2
 	github.com/eyelock/ynr/spoolexporter v0.1.0
 	github.com/google/go-github/v84 v84.0.0
