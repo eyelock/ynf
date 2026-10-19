@@ -41,6 +41,8 @@ type Forge interface {
 	// FindPR returns the open pull request whose head is branch, or 0.
 	FindPR(ctx context.Context, repo, branch string) (int, error)
 	OpenPR(ctx context.Context, repo string, pr NewPR) (int, error)
+	// SetLabels adds and removes labels on a pull request (a pull request is an issue to the forge).
+	SetLabels(ctx context.Context, repo string, number int, add, remove []string) error
 	// Comment posts body on a pull request unless a comment containing marker exists: side
 	// effects are idempotent per step (ADR-005).
 	Comment(ctx context.Context, repo string, number int, marker, body string) error

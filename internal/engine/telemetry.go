@@ -18,6 +18,7 @@ import (
 	"github.com/eyelock/ynf/internal/store"
 	"github.com/eyelock/ynf/internal/telemetry"
 	"github.com/eyelock/ynf/internal/tracker"
+	"github.com/eyelock/ynf/internal/workspace"
 )
 
 // ynf's telemetry (ADR-011, ynr ADR-002): a trace per step, a short span per CloudEvent received,
@@ -226,6 +227,10 @@ func (f tracedForge) OpenPR(ctx context.Context, repo string, pr forge.NewPR) (n
 	return
 }
 
+func (f tracedForge) SetLabels(ctx context.Context, repo string, number int, add, remove []string) error {
+	return f.call(ctx, "set_labels", func(ctx context.Context) error { return f.Forge.SetLabels(ctx, repo, number, add, remove) })
+}
+
 func (f tracedForge) Comment(ctx context.Context, repo string, number int, marker, body string) error {
 	return f.call(ctx, "comment", func(ctx context.Context) error { return f.Forge.Comment(ctx, repo, number, marker, body) })
 }
@@ -345,8 +350,8 @@ func (g tracedGit) RemoteHas(ctx context.Context, mirror, branch string) bool {
 	return ok
 }
 
-func (g tracedGit) Changed(ctx context.Context, wt string) ([]string, error) {
-	return gitCall(g, ctx, "changed", func(ctx context.Context) ([]string, error) { return g.Git.Changed(ctx, wt) })
+func (g tracedGit) Changes(ctx context.Context, wt string) ([]workspace.Change, error) {
+	return gitCall(g, ctx, "changed", func(ctx context.Context) ([]workspace.Change, error) { return g.Git.Changes(ctx, wt) })
 }
 
 func (g tracedGit) Commit(ctx context.Context, wt, message string) (string, error) {

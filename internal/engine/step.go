@@ -30,6 +30,7 @@ import (
 	"github.com/eyelock/ynf/internal/store"
 	"github.com/eyelock/ynf/internal/telemetry"
 	"github.com/eyelock/ynf/internal/tracker"
+	"github.com/eyelock/ynf/internal/workspace"
 )
 
 // maxDecisions bounds how many decisions one step makes before it lets the timer take over.
@@ -85,9 +86,13 @@ type RunRecord struct {
 	Outcome        string   `json:"outcome"`
 	Detail         string   `json:"detail,omitempty"`
 	Changed        []string `json:"changed,omitempty"`
-	Denied         []string `json:"denied,omitempty"` // hosts the egress proxy refused
-	StepDir        string   `json:"step_dir"`
-	Duration       string   `json:"duration"`
+	// Added and Deleted say how Changed changed: a changed path in neither was modified. A record
+	// from before change types has neither, so it reads every change as a modification.
+	Added    []string `json:"added,omitempty"`
+	Deleted  []string `json:"deleted,omitempty"`
+	Denied   []string `json:"denied,omitempty"` // hosts the egress proxy refused
+	StepDir  string   `json:"step_dir"`
+	Duration string   `json:"duration"`
 	// HarnessPin is the repository and ref a pinned harness was installed from, as the lane wrote
 	// it; Harness and HarnessSHA say which harness and commit that gave.
 	HarnessPin string `json:"harness_pin,omitempty"`
@@ -99,6 +104,29 @@ type RunRecord struct {
 	Model string `json:"model,omitempty"`
 	runner.Usage
 }
+
+// setChanges records the changed paths and how they changed.
+func (r *RunRecord) setChanges(cs []workspace.Change) {
+	r.Changed, r.Added, r.Deleted = nil, nil, nil
+	for _, c := range cs {
+		r.Changed = append(r.Changed, c.Path)
+		switch c.Status {
+		case "A":
+			r.Added = append(r.Added, c.Path)
+		case "D":
+			r.Deleted = append(r.Deleted, c.Path)
+		}
+	}
+}
+
+// checkGate is the diff gate for this run's change against the lane's pull request settings. The
+// live gate and shadow mode both ask it, so "would the gate accept" has one answer.
+func (r *RunRecord) checkGate(pr policy.PR) error {
+	return gate.CheckKinds(r.Changed, gate.Kinds{Added: r.Added, Deleted: r.Deleted}, pr.AllowedPaths, pr.ProtectedPaths, pr.AppendOnlyPaths)
+}
+
+// ReviewPathsLabel is the label a pull request gets when its change touches a lane's review_paths.
+const ReviewPathsLabel = "ynf:review-paths"
 
 // ActionRecord is the log entry for a forge action.
 type ActionRecord struct {
@@ -700,8 +728,10 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		rec.RunnerFeatures = ynhHost.Features
 	}
 	rec.Duration = e.Now().Sub(start).Round(time.Millisecond).String()
-	if rec.Changed, err = s.g.Changed(s.ctx, wt); err != nil {
+	if changes, err := s.g.Changes(s.ctx, wt); err != nil {
 		rec.Outcome, rec.Detail = runner.Error, err.Error()
+	} else {
+		rec.setChanges(changes)
 	}
 	log.Info("run finished", "outcome", rec.Outcome, "exit", rec.Exit, "duration", rec.Duration,
 		"changed", len(rec.Changed), "denied", strings.Join(rec.Denied, ","), "model", rec.Model, "turns", rec.Turns, "tokens", rec.Tokens,
@@ -966,7 +996,7 @@ func (s *step) openPR(it item.Item, rp *RepoPolicy, lane policy.Lane) event.Even
 	if s.wt == "" || s.run == nil {
 		return done(false, "no change from this step to propose", nil)
 	}
-	if err := gate.Check(s.run.Changed, lane.PR.AllowedPaths, lane.PR.ProtectedPaths); err != nil {
+	if err := s.run.checkGate(lane.PR); err != nil {
 		return done(false, err.Error(), nil)
 	}
 	subject := fmt.Sprintf("ynf(%s): %s", lane.Name, s.text.Title)
@@ -986,6 +1016,7 @@ func (s *step) openPR(it item.Item, rp *RepoPolicy, lane policy.Lane) event.Even
 	if err != nil {
 		return done(false, err.Error(), nil)
 	}
+	touched := gate.Touches(s.run.Changed, lane.PR.ReviewPaths)
 	n, err := fg.FindPR(s.ctx, name, branch)
 	if err != nil {
 		return done(false, err.Error(), nil)
@@ -993,10 +1024,16 @@ func (s *step) openPR(it item.Item, rp *RepoPolicy, lane policy.Lane) event.Even
 	if n == 0 {
 		n, err = fg.OpenPR(s.ctx, name, forge.NewPR{
 			Head: branch, Base: rp.Base, Title: subject, Draft: lane.PR.IsDraft(),
-			Body: prBody(it, lane, s.run) + "\n\n" + marker(it.Key, "item"),
+			Body: prBody(it, lane, s.run, touched) + "\n\n" + marker(it.Key, "item"),
 		})
 		if err != nil {
 			return done(false, err.Error(), nil)
+		}
+	}
+	if len(touched) > 0 {
+		// A label is a signal to people, not a decision: a failure is logged, never fatal.
+		if err := fg.SetLabels(s.ctx, name, n, []string{ReviewPathsLabel}, nil); err != nil {
+			e.log().Warn("review paths label", "item", it.Key, "pr", n, "err", err)
 		}
 	}
 	s.commentQuietly(it, decide.OpenPR, "**ynf** proposed "+prLink(it, n)+".")
@@ -1021,7 +1058,7 @@ func (s *step) pushCommit(it item.Item, lane policy.Lane) event.Event {
 	if s.wt == "" || s.run == nil {
 		return done(false, "no change from this step to propose", nil)
 	}
-	if err := gate.Check(s.run.Changed, lane.PR.AllowedPaths, lane.PR.ProtectedPaths); err != nil {
+	if err := s.run.checkGate(lane.PR); err != nil {
 		return done(false, err.Error(), nil)
 	}
 	if _, err := s.g.Mirror(s.ctx, e.repoOf(it)); err != nil {
@@ -1094,7 +1131,7 @@ func prLink(it item.Item, n int) string {
 	return fmt.Sprintf("https://%s/%s/pull/%d", it.Forge, it.Repo, n)
 }
 
-func prBody(it item.Item, lane policy.Lane, run *RunRecord) string {
+func prBody(it item.Item, lane policy.Lane, run *RunRecord, touched []string) string {
 	var b strings.Builder
 	// Closes links a GitHub issue in the same repository; any other ticket is named.
 	if repo, n, err := forge.ParseIssueKey(it.Ticket.Key); err == nil && it.Ticket.Host == it.Forge && repo == it.Repo {
@@ -1105,6 +1142,12 @@ func prBody(it item.Item, lane policy.Lane, run *RunRecord) string {
 	fmt.Fprintf(&b, "Proposed by **ynf**: lane `%s`, runner `%s`, executor `%s`.\n\n", lane.Name, run.Runner, run.Executor)
 	b.WriteString("| | |\n|---|---|\n")
 	fmt.Fprintf(&b, "| Item | `%s` |\n| Run | `%s` (%s, %s) |\n| Changed | %d file(s) |\n", it.Key, run.RunID, run.Outcome, run.Duration, len(run.Changed))
+	if len(touched) > 0 {
+		b.WriteString("\n### Touches review paths\n\n")
+		for _, p := range touched {
+			fmt.Fprintf(&b, "- `%s`\n", p)
+		}
+	}
 	b.WriteString("\nA human reviews and merges this; ynf never merges.")
 	return b.String()
 }

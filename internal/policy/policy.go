@@ -174,7 +174,13 @@ type Command struct {
 type PR struct {
 	AllowedPaths   []string `yaml:"allowed_paths" json:"allowed_paths,omitempty"`
 	ProtectedPaths []string `yaml:"protected_paths" json:"protected_paths,omitempty"`
-	Draft          *bool    `yaml:"draft" json:"draft,omitempty"`
+	// AppendOnlyPaths may gain new files but never have an existing one modified, deleted or
+	// renamed (ADR-007).
+	AppendOnlyPaths []string `yaml:"append_only_paths" json:"append_only_paths,omitempty"`
+	// ReviewPaths label the pull request, and list what was touched in its body, when a run
+	// changes one. It routes a review; it is not the gate.
+	ReviewPaths []string `yaml:"review_paths" json:"review_paths,omitempty"`
+	Draft       *bool    `yaml:"draft" json:"draft,omitempty"`
 }
 
 // IsDraft reports whether pull requests open as drafts (the default).
@@ -288,6 +294,12 @@ func (d Defaults) apply(l Lane) Lane {
 		}
 		if l.PR.ProtectedPaths == nil {
 			l.PR.ProtectedPaths = d.PR.ProtectedPaths
+		}
+		if l.PR.AppendOnlyPaths == nil {
+			l.PR.AppendOnlyPaths = d.PR.AppendOnlyPaths
+		}
+		if l.PR.ReviewPaths == nil {
+			l.PR.ReviewPaths = d.PR.ReviewPaths
 		}
 		if l.PR.Draft == nil {
 			l.PR.Draft = d.PR.Draft

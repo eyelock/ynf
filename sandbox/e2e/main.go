@@ -58,7 +58,15 @@ type fixture struct {
 		// Memory is text the item's failure memories must carry: what the run reported (ADR-008).
 		Memory []string `yaml:"memory"`
 		Detail string   `yaml:"detail"`
-		Crash  bool     `yaml:"crash"`
+		// Reason is text the item's reason must contain, such as the diff gate's refusal; the item
+		// has no pull request then.
+		Reason string `yaml:"reason"`
+		// Proposal is what the pull request must carry: labels, and text in its body.
+		Proposal *struct {
+			Labels []string `yaml:"labels"`
+			Body   []string `yaml:"body"`
+		} `yaml:"proposal"`
+		Crash  bool `yaml:"crash"`
 		Runner *struct {
 			Name     string `yaml:"name"`
 			Detected bool   `yaml:"detected"`
@@ -519,6 +527,58 @@ func check(f fixture, numbers map[string]int, items []item, repo, ynf, cfg, trac
 		detail += ", refused as: " + oneLine(want, 80)
 	}
 
+	if want := f.Expect.Reason; want != "" {
+		if !strings.Contains(it.Reason, want) || it.PR != 0 {
+			return "", fmt.Errorf("%s: its reason is %q with pull request #%d, expected %q and no pull request", name, it.Reason, it.PR, want)
+		}
+		detail += ", refused: " + it.Reason
+	}
+	if p := f.Expect.Proposal; p != nil {
+		if it.PR == 0 {
+			return "", fmt.Errorf("%s has no pull request to check", name)
+		}
+		var pr struct {
+			Body   string `json:"body"`
+			Labels []struct {
+				Name string `json:"name"`
+			} `json:"labels"`
+		}
+		out, err := sh("", "gh", "pr", "view", fmt.Sprint(it.PR), "-R", repo, "--json", "body,labels")
+		if err != nil {
+			return "", fmt.Errorf("pull request #%d: %w", it.PR, err)
+		}
+		if err := json.Unmarshal([]byte(out), &pr); err != nil {
+			return "", err
+		}
+		var have []string
+		for _, l := range pr.Labels {
+			have = append(have, l.Name)
+		}
+		for _, l := range p.Labels {
+			if !slices.Contains(have, l) {
+				return "", fmt.Errorf("#%d lacks the label %s: %v", it.PR, l, have)
+			}
+		}
+		for _, s := range p.Body {
+			if !strings.Contains(pr.Body, s) {
+				return "", fmt.Errorf("#%d's body lacks %q:\n%s", it.PR, s, pr.Body)
+			}
+		}
+		// The section as printed: from its heading to the first blank line after its bullets.
+		detail += fmt.Sprintf(", #%d labelled %s", it.PR, strings.Join(have, ","))
+		if i := strings.Index(pr.Body, strings.Join(p.Body[:min(1, len(p.Body))], "")); len(p.Body) > 0 && i >= 0 {
+			section := []string{}
+			for _, l := range strings.Split(pr.Body[i:], "\n") {
+				if l == "" && len(section) > 1 {
+					break
+				}
+				if l != "" {
+					section = append(section, l)
+				}
+			}
+			detail += "\n      body section:\n      " + strings.Join(section, "\n      ")
+		}
+	}
 	if it.PR > 0 {
 		var pr struct {
 			IsDraft     bool   `json:"isDraft"`

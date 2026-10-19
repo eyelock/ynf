@@ -125,6 +125,10 @@ Expected:
 
 ```text
 <you>/ynf-sandbox
+  ok    append-add: originate lane, command on docker
+        a command, not a harness
+  ok    append-edit: originate lane, command on docker
+        a command, not a harness
   ok    deps (off): originate lane, ynh on docker
         harness ., carried in the repository at ., read when a run checks it out
   ok    detect: originate lane, ynh (detected <version>) on docker
@@ -133,6 +137,8 @@ Expected:
         harness ., carried in the repository at ., read when a run checks it out
   ok    fix-ci: adopt lane, ynh on docker
         harness ., carried in the repository at ., read when a run checks it out
+  ok    gate: adopt lane, command on docker
+        a command, not a harness
   ok    gofmt: originate lane, command on docker
         a command, not a harness
   ok    lint-paydown: originate lane, ynh on docker
@@ -143,6 +149,8 @@ Expected:
         a command, not a harness
   ok    relaxed: originate lane, ynh on docker
         harness ., carried in the repository at ., read when a run checks it out
+  ok    review-route: originate lane, command on docker
+        a command, not a harness
   ok    spool: originate lane, command on docker
         a command, not a harness
   ok    spool-flood: originate lane, command on docker
@@ -153,8 +161,8 @@ Expected:
 
 `detect` names no runner, so ynf says what it resolves to here. With your ynh detected it is
 `ynh (detected <version>)`, as above; on a machine with no ynh it reads `command (ynh not found)`,
-and the lane runs its `gofmt` command. The fixture lanes (`outage`, `spool`, `spool-image` and
-`spool-flood`) are command lanes for the sandbox's acceptance test, and nothing here starts them.
+and the lane runs its `gofmt` command. The fixture lanes (`outage`, `spool`, `spool-image`,
+`spool-flood`, `gate`, `append-add`, `append-edit` and `review-route`) are command lanes for the sandbox's acceptance test, and nothing here starts them.
 
 ## The agent image
 
