@@ -631,6 +631,20 @@
           },
           "description": "The diff gate refuses a change outside these paths (ADR-007). Protected paths are refused regardless."
         },
+        "append_only_paths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/glob"
+          },
+          "description": "Paths the diff gate lets a run add to but not change: a modification, deletion or rename of an existing file is refused (ADR-007). It does not stop a new file changing how existing files behave, such as a new conftest.py. Protected paths win."
+        },
+        "review_paths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/glob"
+          },
+          "description": "When a run changes one of these paths, the pull request is labelled ynf:review-paths and its body lists the paths touched. Routing only: it does not refuse anything and requests no reviewers (ADR-007)."
+        },
         "draft": {
           "type": "boolean",
           "default": true

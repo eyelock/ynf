@@ -1,7 +1,11 @@
 package policy
 
 import (
+	"bytes"
+	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 )
@@ -74,6 +78,34 @@ func ParsePin(harness string) (p Pin, ok bool, err error) {
 		p.URL = u
 	}
 	return p, true, nil
+}
+
+// CheckRef refuses a pin whose ref is a branch: it moves, so a run could not be repeated. It reads
+// the pin repository's refs with git ls-remote against CloneURL, so it needs the repository; one it
+// cannot reach is an error, not a pass. A ref that is neither a branch nor a tag there is left to
+// ynh, which takes a commit and refuses anything it cannot find. `ynf harness`, a run and
+// `ynf lanes validate` all use this one check.
+func (p Pin) CheckRef(ctx context.Context) error {
+	var out, errb bytes.Buffer
+	c := exec.CommandContext(ctx, "git", "ls-remote", "--", p.CloneURL(), "refs/heads/"+p.Ref, "refs/tags/"+p.Ref)
+	c.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	c.Stdout, c.Stderr = &out, &errb
+	if err := c.Run(); err != nil {
+		return fmt.Errorf("harness %s: read its refs: %w: %s", p, err, strings.TrimSpace(errb.String()))
+	}
+	var branch, tag bool
+	for _, l := range strings.Split(out.String(), "\n") {
+		switch {
+		case strings.HasSuffix(l, "\trefs/heads/"+p.Ref):
+			branch = true
+		case strings.HasSuffix(l, "\trefs/tags/"+p.Ref):
+			tag = true
+		}
+	}
+	if branch && !tag {
+		return fmt.Errorf("harness %s: %s is a branch, which moves; pin a tag or a commit", p, p.Ref)
+	}
+	return nil
 }
 
 // Pins returns the harness each lane pins, by lane name.

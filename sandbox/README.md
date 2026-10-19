@@ -78,7 +78,7 @@ repository is disposable.
 | Path | What it is |
 |---|---|
 | `seed/` | The repository's contents, pushed as one commit on `main` |
-| `seed/.agents/factory/lanes.yaml` | The sandbox's factory: twelve lanes ([schema](../docs/schema/lanes.schema.json)) |
+| `seed/.agents/factory/lanes.yaml` | The sandbox's factory: sixteen lanes ([schema](../docs/schema/lanes.schema.json)) |
 | `seed/.agents/harness/plugin.json` | The sandbox's own ynh harness: `tidy`, `docs` and `fix-ci` focuses; `lint`, `test` and `docs` sensors |
 | `fixtures.yaml` | Every issue and pull request, its lane, and what ynf should do with it ([schema](fixtures.schema.json)) |
 | `fixtures/` | Issue and pull request bodies, the files committed on fixture branches (in `<id>/testdata/`, so Go tooling in this repository ignores their planted problems), and each fixture's known fix (`<id>.fix.patch`) |
@@ -102,6 +102,9 @@ in the sandbox cannot read what it is being tested on.
 | `spool` | originate | command (a record into the run's spool folder, then `gofmt -w`) | issues labelled `ynf:spool` | the run's own telemetry reaching the collector with run provenance and the manifest's lane |
 | `spool-image` | originate | command in `ynf-sandbox-probe` (uid 10042, kept as the image's own user; a record into the run's spool folder, then `gofmt -w`) | issues labelled `ynf:spool-image` | an image user's records reaching the collector: the manifest names the user |
 | `spool-flood` | originate | command (20 MiB into the run's spool folder, then `gofmt -w`) | issues labelled `ynf:spool-flood` | a run filling its folder: held to the quota, the step unaffected |
+| `append-edit` | originate | command (appends a line to `internal/greet/greet_test.go`), `append_only_paths: ['**/*_test.go']` | issues labelled `ynf:append-edit` | the diff gate refusing an edit of an existing test file: the item escalates with `(append-only: modified)` |
+| `append-add` | originate | command (adds `internal/greet/added_test.go`), the same `append_only_paths` | issues labelled `ynf:append-add` | an addition to an append-only path is accepted |
+| `review-route` | originate | command (appends a line to `internal/greet/greet.go`), `review_paths: ['internal/greet/**']` | issues labelled `ynf:review-route` | routing, not the gate: the pull request opens labelled `ynf:review-paths`, with a `### Touches review paths` section |
 | `reclaim` | originate | command (`gofmt -w`, slowly) | issues labelled `ynf:reclaim` | killing ynf mid-run and a fresh one taking over |
 | `fix-ci` | adopt | ynh, focus `fix-ci` | pull requests labelled `ynf:fix-ci` | adopting someone else's pull request |
 | `gate` | adopt | command (adds a comment line) | pull requests labelled `ynf:gate` | a required check that has not started, from a ruleset: the item stays proposed |
@@ -127,6 +130,9 @@ that package, so a run is judged on the debt it was asked to pay down rather tha
 | `spool-probe` | spool | draft pull request; with ynr, the run's own record arrives with run provenance and its manifest's lane |
 | `spool-image` | spool-image | draft pull request; with ynr, an image user's record arrives with run provenance and its manifest's lane |
 | `spool-flood` | spool-flood | draft pull request; the run's folder is held to the run quota, by its own volume where the host gives one, else by ynf taking the excess away |
+| `append-edit` | append-edit | escalated with `diff gate refused: internal/greet/greet_test.go (append-only: modified)`; no pull request |
+| `append-add` | append-add | draft pull request: a new test file is allowed |
+| `review-route` | review-route | draft pull request labelled `ynf:review-paths`, its body listing the path under `### Touches review paths` |
 | `deps-bump` | deps | ignored |
 | `fix-ci-retry` | fix-ci | an adopted pull request gets a commit, never a force-push |
 | `gate-required-check` | gate | a pull request into `gate/required-checks`, whose ruleset requires `gate-never-runs`, a check no workflow reports. lint, test and docs pass on ynf's commit, and ynf still keeps the item proposed with CI pending, listing the required check as `expected`, read from the ruleset. Never `in_review`. Checked by the required-checks stage of `make e2e`, not by the sweep, because the item never settles |

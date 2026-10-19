@@ -22,11 +22,13 @@ carried out today.
 | `run.command.image_user` | `true` keeps the image's own user and home on a docker executor, as a ynh-built agent image does, instead of running as ynf's user. ynf finds that user's id from the image and names it in the run's spool manifest, so `ynr serve` reads what the run writes there. Default `false` | yes |
 | `run.command.result_file` | A file the command writes with `{outcome, detail, model, session}` | yes |
 | `run.env` | Variables passed into the run by name, such as the model key; values never logged | yes |
-| `run.ynh` | `harness`, `vendor`, `base`, `focus`, `profile`, `sandbox`, `model`, `effort` (`low`, `medium` or `high`; needs ynh 0.10.0 or later), `budgets`, `sensor_scope` (each sensor's declared command narrowed: a path word replaced by one beneath it, or paths appended; a declared command's leading `NAME=value` environment assignments are kept exactly as the harness writes them, expansions included, and a scope that adds, drops, reorders or changes one is refused; anything else is refused before the run), `telemetry_relay`. `harness` is one of three things. The id of an installed harness. A folder in the checkout, or an absolute one (`.` is the harness the repository carries): on docker it is built into an agent image; on `process`, and on `inline` when no harness is installed in the image, it runs from the folder on the host. When the host's ynh lists `agent-run-harness-path` (ynh 0.12.0 or later), ynf passes the folder to `ynh agent run --harness` as an absolute path and installs nothing: ynh reads the manifest from the folder and fetches the harness's git includes at run setup (the feature `agent-run-fetches-includes`), so a folder harness with git includes works. Either way the run has a ynh home of its own (`YNH_HOME` in the run's folder, so yours is never read or written). A path run writes `.schema-version` and the include clones under `cache/` there, and under a `sandbox` a private folder in `run/`; it writes nothing into the harness folder or `HOME`. A ynh that does not list the feature gets the install step instead: ynf installs the folder into that home (`ynh install` fetches the includes too) and runs it by the id ynh gives it. A folder that is there and cannot be read, such as a malformed `plugin.json`, ends the run as `operator_error` with the error, and a readable one is always checked against the lane. Or `<repository>@<tag-or-commit>` (`github.com/org/harness@v1.2.0`, `git@github.com:org/harness@3f9c2e1`, `file:///srv/harness.git@v1`), a harness pinned from git, on `process` and `inline` only. A `host/path` repository is taken as `https://host/path`: ynf makes it that before checking the ref or giving it to ynh, and a URL, an scp-style address and a `file://` URL are used as written. ynf has ynh install exactly that (`ynh install <repository> --ref <tag-or-commit>`) into the run's own home, reads the manifest, focus and budgets from what ynh installed, checks the lane against them, runs it by its id, and records the harness, version and commit in the run record (`harness`, `harness_sha`, `harness_pin`, as the lane wrote it; `harness_pin_url` adds the `https://` form when the lane wrote `host/path`); nothing is copied into the target repository. A branch is refused, because it moves. A pin always takes the install step, whatever ynh lists. The install fetches the repository, so it happens on the host before the run starts and the run's egress is never asked for it; under `inline` the job's own network policy applies to it. On docker a pinned harness is refused with `operator_error`: use a folder in the repository, or `run.image`. A local repository needs a `file://` URL, because ynh refuses `--ref` for a path. `ynf lanes validate` and `ynf lanes show` list each lane's pin, and `ynf harness` installs it into a temporary home and says what it resolves to | yes; the vendor's API host is allowed through the egress proxy without being listed |
+| `run.ynh` | `harness`, `vendor`, `base`, `focus`, `profile`, `sandbox`, `model`, `effort` (`low`, `medium` or `high`; needs ynh 0.10.0 or later), `budgets`, `sensor_scope` (each sensor's declared command narrowed: a path word replaced by one beneath it, or paths appended; a declared command's leading `NAME=value` environment assignments are kept exactly as the harness writes them, expansions included, and a scope that adds, drops, reorders or changes one is refused; anything else is refused before the run), `telemetry_relay`. `harness` is one of three things. The id of an installed harness. A folder in the checkout, or an absolute one (`.` is the harness the repository carries): on docker it is built into an agent image; on `process`, and on `inline` when no harness is installed in the image, it runs from the folder on the host. When the host's ynh lists `agent-run-harness-path` (ynh 0.12.0 or later), ynf passes the folder to `ynh agent run --harness` as an absolute path and installs nothing: ynh reads the manifest from the folder and fetches the harness's git includes at run setup (the feature `agent-run-fetches-includes`), so a folder harness with git includes works. Either way the run has a ynh home of its own (`YNH_HOME` in the run's folder, so yours is never read or written). A path run writes `.schema-version` and the include clones under `cache/` there, and under a `sandbox` a private folder in `run/`; it writes nothing into the harness folder or `HOME`. A ynh that does not list the feature gets the install step instead: ynf installs the folder into that home (`ynh install` fetches the includes too) and runs it by the id ynh gives it. A folder that is there and cannot be read, such as a malformed `plugin.json`, ends the run as `operator_error` with the error, and a readable one is always checked against the lane. Or `<repository>@<tag-or-commit>` (`github.com/org/harness@v1.2.0`, `git@github.com:org/harness@3f9c2e1`, `file:///srv/harness.git@v1`), a harness pinned from git, on `process` and `inline` only. A `host/path` repository is taken as `https://host/path`: ynf makes it that before checking the ref or giving it to ynh, and a URL, an scp-style address and a `file://` URL are used as written. ynf has ynh install exactly that (`ynh install <repository> --ref <tag-or-commit>`) into the run's own home, reads the manifest, focus and budgets from what ynh installed, checks the lane against them, runs it by its id, and records the harness, version and commit in the run record (`harness`, `harness_sha`, `harness_pin`, as the lane wrote it; `harness_pin_url` adds the `https://` form when the lane wrote `host/path`); nothing is copied into the target repository. A branch is refused, because it moves: by `ynf harness`, by a run and by `ynf lanes validate`, with the same message, which reads the pin repository's refs with `git ls-remote` to tell a branch from a tag or a commit. A pin always takes the install step, whatever ynh lists. The install fetches the repository, so it happens on the host before the run starts and the run's egress is never asked for it; under `inline` the job's own network policy applies to it. On docker a pinned harness is refused with `operator_error`: use a folder in the repository, or `run.image`. A local repository needs a `file://` URL, because ynh refuses `--ref` for a path. `ynf lanes validate` and `ynf lanes show` list each lane's pin (`validate` first reads the pin repository's refs, so it needs the network for a pinned lane), and `ynf harness` installs it into a temporary home and says what it resolves to | yes; the vendor's API host is allowed through the egress proxy without being listed |
 | `run.ynh.telemetry_relay` | `true` sets `YNH_TELEMETRY_RELAY=1` for the lane's runs, so `ynh agent run` starts `ynr relay` beside the vendor CLI, which exports only over the network, and the relay writes what it receives into the run's own spool folder (ynr ADR-004). It needs `telemetry.spool` in ynf's configuration (ynf logs a warning when it is on and there is none), and `ynr` in the run's image or on its `PATH`. A lane that names `runner: command` refuses it at load; a lane with both blocks keeps it for when ynh runs. Default `false` | yes |
 | `when` | Reactions to `converged`, `ci_failed`, `no_ci`, `changes_requested` and `outcome.<name>`. `no_ci` takes an `action` only, `escalate` by default | `open_pr` (originate), `push_commit` (adopt), `escalate`, `quarantine`, `comment`, `close`, `retry`/`then`, `resume_with`/`max`; `request_review` escalates |
 | `pr.allowed_paths` | The diff gate refuses changes outside these | yes |
 | `pr.protected_paths` | Refused as well as the built-in protected paths | yes |
+| `pr.append_only_paths` | A path matching one may be added but not modified, deleted, renamed or changed in type. Protected paths still win | yes |
+| `pr.review_paths` | When a run changes one of these, the pull request is labelled `ynf:review-paths` and its body lists the paths touched. Routing only; nothing is refused | yes |
 | `pr.draft` | Open pull requests as drafts | yes (default `true`) |
 | `stop` | Stop conditions (ADR-010) | `max_open_proposals` holds new work while that many proposals await review; `yield_floor` pauses the lane once `min_sample` (default 20) proposals are decided below it; `review_time_ceiling` and `escaped_defects` not yet |
 | `labels` | What ynf writes on the ticket as the item moves (ADR-003) | `on_claim` (taken on), `on_propose` (pull request open), `on_review` (CI green), `on_escalate` (escalated or quarantined) and `on_done` (merged or closed), each `{add: [...], remove: [...]}`, written through the ticket's tracker as the item enters the state. Remove the triggering label in `on_claim` so nothing finds the ticket twice. A failed write is logged and recorded, never fatal. Each reaction falls back to `defaults.labels` on its own |
@@ -97,6 +99,49 @@ Checks, check runs and statuses are read to the last page.
 
 Refused in every lane, whatever `allowed_paths` says: `.github/workflows/**`, `.github/actions/**`,
 `**/CODEOWNERS`, `.agents/**`, `.ynh/**`, `.ynm/**`, `.ynf/**`.
+
+## Append-only paths
+
+`pr.append_only_paths` is a sibling of `protected_paths`, which keeps meaning "never touched". The
+diff gate reads how each changed path changed, as `A`, `M`, `D` or `T` from
+`git diff --cached --name-status --no-renames`, and for a path matching the list it allows `A` and
+refuses the rest. A rename is a deletion and an addition, so it is refused; a mode-only change
+counts as a modification. The run record keeps `changed` as it was and adds `added` and `deleted`
+beside it; a path in `changed` that is in neither was modified, and a record without them reads
+every change as a modification. Shadow mode asks the same question of the same change types, so its
+`gate_accepted` agrees with the live gate.
+
+The refusal names each path and how it changed, and the item escalates with it:
+
+```text
+diff gate refused: internal/x/x_test.go (append-only: modified), internal/y/y_test.go (append-only: deleted)
+```
+
+The built-in protected paths and `protected_paths` are judged first, then `allowed_paths`.
+
+Append-only stops edits, deletions and renames of existing matching files. It does not stop a new
+file from changing how existing tests run: a Go `TestMain` or `init()` in a new `_test.go`, a new
+Python `conftest.py`, a new JavaScript setup file all pass it. The companion answer is on the
+harness side: a "test trust" pack of ynh script sensors, run as convergence verifiers, that checks
+the test set (nothing lost), that a new test fails before the change (red first), and mutation
+testing on the diff.
+
+## Review paths
+
+`pr.review_paths` is routing, not the gate. When the paths a run changed touch any of its globs,
+ynf opens (or pushes to) the pull request exactly as it would, and also adds the label
+`ynf:review-paths` and a section to the body of a pull request it opens:
+
+```text
+### Touches review paths
+
+- `internal/greet/greet.go`
+```
+
+It requests no reviewers, changes no decision, and is not part of replay. Shadow mode opens no pull
+request, so it does nothing for review paths. A pull request that already exists keeps its body and
+gains the label. The enforced version is CODEOWNERS plus a ruleset requiring code-owner review;
+that file is one of the built-in protected paths, so a person maintains it.
 
 ## Outcomes
 
