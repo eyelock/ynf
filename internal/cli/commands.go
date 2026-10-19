@@ -245,6 +245,9 @@ func (a *app) lanesCmd(ctx context.Context, args []string) error {
 		if err != nil {
 			return withCode(ExitPolicy, err)
 		}
+		if err := checkPinRefs(ctx, f.Pins()); err != nil {
+			return err
+		}
 		out := withPins(map[string]any{"valid": true, "file": *file, "lanes": f.Names()}, f.Pins())
 		return a.out(out, fmt.Sprintf("%s: valid, %d lanes (%s)", *file, len(f.Lanes), strings.Join(f.Names(), ", "))+pinLines(f.Pins()))
 	case "show":
@@ -644,6 +647,9 @@ func (a *app) validateMerged(ctx context.Context, repo, file string, doc []byte)
 	rp, err := e.PolicyWithLayer(ctx, repo, doc)
 	if err != nil {
 		return withCode(ExitPolicy, err)
+	}
+	if err := checkPinRefs(ctx, rp.File.Pins()); err != nil {
+		return err
 	}
 	names := rp.File.Names()
 	out := withPins(map[string]any{"valid": true, "file": file, "repo": repo, "lanes": names}, rp.File.Pins())

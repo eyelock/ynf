@@ -68,7 +68,7 @@ func InstallHarness(ctx context.Context, src HarnessSource, ynhHome string) (Ins
 		if strings.HasPrefix(p.Repo, "-") || strings.HasPrefix(p.Ref, "-") {
 			return Installed{}, fmt.Errorf("harness %s: a repository or ref cannot start with a dash", p)
 		}
-		if err := checkPinned(ctx, p); err != nil {
+		if err := p.CheckRef(ctx); err != nil {
 			return Installed{}, err
 		}
 		args = append(args, p.CloneURL(), "--ref", p.Ref)
@@ -120,30 +120,4 @@ func InstallHarness(ctx context.Context, src HarnessSource, ynhHome string) (Ins
 		in.PinURL = src.Pin.Resolved()
 	}
 	return in, nil
-}
-
-// checkPinned refuses a pin whose ref is a branch: it moves, so the run could not be repeated.
-// A ref that is neither a branch nor a tag there is left to ynh, which takes a commit and refuses
-// anything it cannot find.
-func checkPinned(ctx context.Context, p policy.Pin) error {
-	var out, errb bytes.Buffer
-	c := exec.CommandContext(ctx, "git", "ls-remote", "--", p.CloneURL(), "refs/heads/"+p.Ref, "refs/tags/"+p.Ref)
-	c.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	c.Stdout, c.Stderr = &out, &errb
-	if err := c.Run(); err != nil {
-		return fmt.Errorf("harness %s: read its refs: %w: %s", p, err, strings.TrimSpace(errb.String()))
-	}
-	var branch, tag bool
-	for _, l := range strings.Split(out.String(), "\n") {
-		switch {
-		case strings.HasSuffix(l, "\trefs/heads/"+p.Ref):
-			branch = true
-		case strings.HasSuffix(l, "\trefs/tags/"+p.Ref):
-			tag = true
-		}
-	}
-	if branch && !tag {
-		return fmt.Errorf("harness %s: %s is a branch, which moves; pin a tag or a commit", p, p.Ref)
-	}
-	return nil
 }
