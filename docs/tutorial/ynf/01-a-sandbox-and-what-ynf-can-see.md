@@ -141,7 +141,7 @@ ok    config                   /Users/you/ynf-tutorial/config.yaml
 ok    store                    sqlite://state.db
 ok    factory                  <you>/ynf-sandbox-factory at 998570c (.agents/factory)
 ok    repos                    <you>/ynf-sandbox
-ok    lanes <you>/ynf-sandbox .agents/factory on main at 43e2224: deps, detect, doc-drift, fix-ci, gofmt, lint-paydown, outage, reclaim, relaxed, spool, spool-flood, spool-image
+ok    lanes <you>/ynf-sandbox .agents/factory on main at 43e2224: append-add, append-edit, deps, detect, doc-drift, fix-ci, gate, gofmt, lint-paydown, outage, reclaim, relaxed, review-route, spool, spool-flood, spool-image
 ok    forge default            github.com: reached <you>/ynf-sandbox
 ok    tracker tracker          tracker.ynf-sandbox.invalid: its server has the tools it is configured to call
 ok    git                      git version 2.54.0
@@ -160,7 +160,7 @@ ok    memory                   off: memory.provider is none
   records the commit its configuration was read at.
 - **The repositories it enrols:** one, your sandbox.
 - **That repository's lanes,** read from its default branch at a commit (`43e2224`). Lanes are the
-  rules for what ynf does with a ticket. There are twelve; lesson 2 is about them.
+  rules for what ynf does with a ticket. There are sixteen; lesson 2 is about them.
 - **The forge,** GitHub, reached with your token.
 - **The tracker,** by starting its MCP server and checking it has every tool the configuration
   names.
@@ -207,6 +207,10 @@ Expected:
 
 ```text
 <you>/ynf-sandbox
+  ok    append-add: originate lane, command on docker
+        a command, not a harness
+  ok    append-edit: originate lane, command on docker
+        a command, not a harness
   ok    deps (off): originate lane, ynh on docker
         harness ., carried in the repository at ., read when a run checks it out
   ok    detect: originate lane, command (ynh not found) on docker
@@ -215,6 +219,8 @@ Expected:
         harness ., carried in the repository at ., read when a run checks it out
   ok    fix-ci: adopt lane, ynh on docker
         harness ., carried in the repository at ., read when a run checks it out
+  ok    gate: adopt lane, command on docker
+        a command, not a harness
   ok    gofmt: originate lane, command on docker
         a command, not a harness
   ok    lint-paydown: originate lane, ynh on docker
@@ -225,6 +231,8 @@ Expected:
         a command, not a harness
   ok    relaxed: originate lane, ynh on docker
         harness ., carried in the repository at ., read when a run checks it out
+  ok    review-route: originate lane, command on docker
+        a command, not a harness
   ok    spool: originate lane, command on docker
         a command, not a harness
   ok    spool-flood: originate lane, command on docker
@@ -239,7 +247,7 @@ Each lane runs work with a **runner**, on an **executor**. Two runners appear he
 - **`ynh`:** an agent, run by ynh with a harness of instructions and checks. That's the factory
   track.
 
-All twelve run on the `docker` executor: in a container, with a fresh copy of the repository, and no
+All sixteen run on the `docker` executor: in a container, with a fresh copy of the repository, and no
 network beyond what the lane allows.
 
 `detect` names no runner. It has both a `ynh` block and a `command` block, and ynf chooses: ynh when
@@ -277,9 +285,10 @@ pausing is recorded, with who did it and why, and `ynf stats` shows it. Another 
 work, `deps`, is already off, as `harness` showed: the sandbox switches it off in its own lanes.
 Lesson 2 shows how.
 
-That leaves `outage`, `spool`, `spool-image` and `spool-flood`. They are fixtures for `make e2e`, the
-sandbox's acceptance test: command lanes, with no model, that exercise a failing run and a run's
-own telemetry. This track never starts them. Every sweep in it names `--lane gofmt` (or `reclaim`),
+That leaves `outage`, `spool`, `spool-image`, `spool-flood`, `gate`, `append-add`, `append-edit` and
+`review-route`. They are fixtures for `make e2e`, the sandbox's acceptance test: command lanes,
+with no model, that exercise a failing run, a run's own telemetry, a required check that never
+reports and the diff gate. This track never starts them. Every sweep in it names `--lane gofmt` (or `reclaim`),
 so they stay out of the way, and `spool-image` needs an image that only `make e2e` builds.
 
 ## What you know now

@@ -13,7 +13,6 @@ import (
 
 	"github.com/eyelock/ynf/internal/facts"
 	"github.com/eyelock/ynf/internal/forge"
-	"github.com/eyelock/ynf/internal/gate"
 	"github.com/eyelock/ynf/internal/item"
 	"github.com/eyelock/ynf/internal/policy"
 	"github.com/eyelock/ynf/internal/runner"
@@ -481,7 +480,7 @@ func (e *Engine) shadowAttempt(ctx context.Context, run *shadow.Run, t *shadowTa
 		return a
 	}
 	a.Outcome, a.Detail, a.Exit, a.Duration, a.Model, a.Changed, a.Usage, a.RunDir = rec.Outcome, rec.Detail, rec.Exit, rec.Duration, rec.Model, rec.Changed, rec.Usage, rec.StepDir
-	switch err := gate.Check(rec.Changed, t.lane.PR.AllowedPaths, t.lane.PR.ProtectedPaths); {
+	switch err := rec.checkGate(t.lane.PR); {
 	case len(rec.Changed) == 0:
 		a.GateDetail = "no change to propose"
 	case err != nil:

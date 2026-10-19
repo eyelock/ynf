@@ -142,16 +142,51 @@ func (w Workspace) RemoteHas(ctx context.Context, mirror, branch string) bool {
 	return err == nil
 }
 
-// Changed stages everything and lists the changed paths.
-func (w Workspace) Changed(ctx context.Context, wt string) ([]string, error) {
+// Change is one changed path and how it changed: A added, M modified, D deleted, T type changed
+// (a file became a symlink, say). Renames are not detected, so a rename is a D and an A.
+type Change struct {
+	Path   string
+	Status string
+}
+
+// Changes stages everything and lists the changed paths with their change type. It is the one
+// place change types are read, for the live diff gate and shadow mode alike.
+func (w Workspace) Changes(ctx context.Context, wt string) ([]Change, error) {
 	if _, err := w.git(ctx, wt, "add", "-A"); err != nil {
 		return nil, err
 	}
-	out, err := w.git(ctx, wt, "diff", "--cached", "--name-only", "--no-renames")
+	out, err := w.git(ctx, wt, "diff", "--cached", "--name-status", "--no-renames")
 	if err != nil {
 		return nil, err
 	}
-	return lines(out), nil
+	return ParseNameStatus(out), nil
+}
+
+// ParseNameStatus reads git diff --name-status output: a status, a tab, then the path. An unusual
+// status is kept as its first letter; the gate treats anything but A and D as a modification.
+func ParseNameStatus(out string) []Change {
+	var cs []Change
+	for _, l := range lines(out) {
+		st, p, ok := strings.Cut(l, "\t")
+		if !ok || st == "" || p == "" {
+			continue
+		}
+		cs = append(cs, Change{Path: p, Status: st[:1]})
+	}
+	return cs
+}
+
+// Changed stages everything and lists the changed paths.
+func (w Workspace) Changed(ctx context.Context, wt string) ([]string, error) {
+	cs, err := w.Changes(ctx, wt)
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, len(cs))
+	for i, c := range cs {
+		paths[i] = c.Path
+	}
+	return paths, nil
 }
 
 // Commit commits the staged change with message and returns the commit SHA.

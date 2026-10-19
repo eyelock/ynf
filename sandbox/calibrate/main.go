@@ -305,7 +305,11 @@ func (v calibrator) command(f fixture, l lane) (string, error) {
 		if _, err := cmd(wt, argv[0], argv[1:]...); err != nil {
 			return "", fmt.Errorf("%s: %w", strings.Join(argv, " "), err)
 		}
-		if diffs[i], err = cmd(wt, "git", "diff"); err != nil {
+		// Staged, so a file the command adds counts as the change it is.
+		if _, err = cmd(wt, "git", "add", "-A"); err != nil {
+			return "", err
+		}
+		if diffs[i], err = cmd(wt, "git", "diff", "--cached"); err != nil {
 			return "", err
 		}
 	}

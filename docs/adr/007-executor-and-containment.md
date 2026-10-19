@@ -95,6 +95,34 @@ CLI needs and when the vendor refuses it, is ynh's.
 This works with any runner, and with ynh it catches what the `tamper` outcome cannot: changes
 outside the files ynh's baseline knows about.
 
+`protected_paths` means never touched. A lane that wants a path it can grow but not rewrite, such
+as its tests, says so with a sibling list, `pr.append_only_paths`. The gate reads how each path
+changed (`git diff --cached --name-status --no-renames`, recorded on the run as `added` and
+`deleted` beside `changed`) and, for a path matching the list, allows an addition and refuses a
+modification, a deletion or a type change. A rename is a deletion and an addition, so it is
+refused. A mode-only change counts as a modification. Protected paths and the allowed list are
+judged first, so an append-only path is no way round either. The refusal names the path and how it
+changed:
+
+```text
+diff gate refused: internal/x/x_test.go (append-only: modified), internal/y/y_test.go (append-only: deleted)
+```
+
+Append-only stops edits, deletions and renames of existing matching files. It does not stop a new
+file from changing how the existing tests run: a Go `TestMain` or `init()` in a new `_test.go`, a
+new Python `conftest.py`, a new JavaScript setup file. The companion answer sits on the harness
+side, in ynh: a "test trust" pack of script sensors, run as convergence verifiers, that checks the
+test set (nothing lost), that a new test fails before the change (red first), and mutation testing
+on the diff. The gate says which files may not be rewritten; the sensors say whether the tests
+still mean what they did.
+
+`pr.review_paths` is routing, not the gate. When a run's changed paths touch one of its globs, the
+pull request opens or updates as normal, gains the label `ynf:review-paths`, and its body gains a
+`### Touches review paths` section with one bullet per path. Nothing is refused and no reviewer is
+requested; the decider does not see it and shadow mode opens no pull request to decorate. The
+enforced version is a CODEOWNERS file with a ruleset requiring code-owner review, which ynf leaves
+to the repository, because CODEOWNERS is protected from ynf's changes.
+
 **Containment is mandatory for unattended work.** Work whose trigger is not a person at a terminal
 must use `docker`, `inline`, `ecs` or `k8s-job`. `process` is accepted only for attended work:
 `ynf start` run from a terminal, `--interactive`, and `ynf shadow`. `inline` is accepted only

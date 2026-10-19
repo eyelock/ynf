@@ -63,12 +63,14 @@ Read it top to bottom:
 The top of the file has `defaults` that every lane gets unless it says otherwise: the `docker`
 executor, three attempts, thirty days' retention, and three hosts Go needs to download modules.
 
-The file holds the rest of the sandbox's lanes too, twelve in all once the configuration
+The file holds the rest of the sandbox's lanes too, sixteen in all once the configuration
 repository's is counted. Besides `gofmt`, this track uses `reclaim` (lesson 6). The agent lanes
 (`lint-paydown`, `doc-drift`, `fix-ci`) are for the factory track, and `relaxed` is wrong on
-purpose and never runs. `detect` names no runner, and is the next section. The other four,
-`outage`, `spool`, `spool-image` and `spool-flood`, are command lanes that exist for `make e2e`,
-the sandbox's acceptance test: one always fails, and three write telemetry of their own. Their
+purpose and never runs. `detect` names no runner, and is the next section. The other eight,
+`outage`, `spool`, `spool-image`, `spool-flood`, `gate`, `append-add`, `append-edit` and `review-route`, are command lanes that exist for `make e2e`,
+the sandbox's acceptance test: one always fails, three write telemetry of their own, one adopts a
+pull request whose required check never reports, and three exercise the diff gate's
+`append_only_paths` and `review_paths`. Their
 comments in the file say what each is for.
 
 ## A lane with no runner
@@ -209,7 +211,7 @@ ynf lanes validate --repo <you>/ynf-sandbox --file ~/ynf-tutorial/lanes.yaml
 Expected:
 
 ```text
-/Users/you/ynf-tutorial/lanes.yaml: valid, 12 lanes (deps, detect, doc-drift, fix-ci, gofmt, lint-paydown, outage, reclaim, relaxed, spool, spool-flood, spool-image)
+/Users/you/ynf-tutorial/lanes.yaml: valid, 16 lanes (append-add, append-edit, deps, detect, doc-drift, fix-ci, gate, gofmt, lint-paydown, outage, reclaim, relaxed, review-route, spool, spool-flood, spool-image)
 merged over config@998570c of <you>/ynf-sandbox-factory
 ```
 

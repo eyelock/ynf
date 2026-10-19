@@ -27,6 +27,8 @@ carried out today.
 | `when` | Reactions to `converged`, `ci_failed`, `no_ci`, `changes_requested` and `outcome.<name>`. `no_ci` takes an `action` only, `escalate` by default | `open_pr` (originate), `push_commit` (adopt), `escalate`, `quarantine`, `comment`, `close`, `retry`/`then`, `resume_with`/`max`; `request_review` escalates |
 | `pr.allowed_paths` | The diff gate refuses changes outside these | yes |
 | `pr.protected_paths` | Refused as well as the built-in protected paths | yes |
+| `pr.append_only_paths` | A path matching one may be added but not modified, deleted, renamed or changed in type. Protected paths still win | yes |
+| `pr.review_paths` | When a run changes one of these, the pull request is labelled `ynf:review-paths` and its body lists the paths touched. Routing only; nothing is refused | yes |
 | `pr.draft` | Open pull requests as drafts | yes (default `true`) |
 | `stop` | Stop conditions (ADR-010) | `max_open_proposals` holds new work while that many proposals await review; `yield_floor` pauses the lane once `min_sample` (default 20) proposals are decided below it; `review_time_ceiling` and `escaped_defects` not yet |
 | `labels` | What ynf writes on the ticket as the item moves (ADR-003) | `on_claim` (taken on), `on_propose` (pull request open), `on_review` (CI green), `on_escalate` (escalated or quarantined) and `on_done` (merged or closed), each `{add: [...], remove: [...]}`, written through the ticket's tracker as the item enters the state. Remove the triggering label in `on_claim` so nothing finds the ticket twice. A failed write is logged and recorded, never fatal. Each reaction falls back to `defaults.labels` on its own |
@@ -97,6 +99,49 @@ Checks, check runs and statuses are read to the last page.
 
 Refused in every lane, whatever `allowed_paths` says: `.github/workflows/**`, `.github/actions/**`,
 `**/CODEOWNERS`, `.agents/**`, `.ynh/**`, `.ynm/**`, `.ynf/**`.
+
+## Append-only paths
+
+`pr.append_only_paths` is a sibling of `protected_paths`, which keeps meaning "never touched". The
+diff gate reads how each changed path changed, as `A`, `M`, `D` or `T` from
+`git diff --cached --name-status --no-renames`, and for a path matching the list it allows `A` and
+refuses the rest. A rename is a deletion and an addition, so it is refused; a mode-only change
+counts as a modification. The run record keeps `changed` as it was and adds `added` and `deleted`
+beside it; a path in `changed` that is in neither was modified, and a record without them reads
+every change as a modification. Shadow mode asks the same question of the same change types, so its
+`gate_accepted` agrees with the live gate.
+
+The refusal names each path and how it changed, and the item escalates with it:
+
+```text
+diff gate refused: internal/x/x_test.go (append-only: modified), internal/y/y_test.go (append-only: deleted)
+```
+
+The built-in protected paths and `protected_paths` are judged first, then `allowed_paths`.
+
+Append-only stops edits, deletions and renames of existing matching files. It does not stop a new
+file from changing how existing tests run: a Go `TestMain` or `init()` in a new `_test.go`, a new
+Python `conftest.py`, a new JavaScript setup file all pass it. The companion answer is on the
+harness side: a "test trust" pack of ynh script sensors, run as convergence verifiers, that checks
+the test set (nothing lost), that a new test fails before the change (red first), and mutation
+testing on the diff.
+
+## Review paths
+
+`pr.review_paths` is routing, not the gate. When the paths a run changed touch any of its globs,
+ynf opens (or pushes to) the pull request exactly as it would, and also adds the label
+`ynf:review-paths` and a section to the body of a pull request it opens:
+
+```text
+### Touches review paths
+
+- `internal/greet/greet.go`
+```
+
+It requests no reviewers, changes no decision, and is not part of replay. Shadow mode opens no pull
+request, so it does nothing for review paths. A pull request that already exists keeps its body and
+gains the label. The enforced version is CODEOWNERS plus a ruleset requiring code-owner review;
+that file is one of the built-in protected paths, so a person maintains it.
 
 ## Outcomes
 

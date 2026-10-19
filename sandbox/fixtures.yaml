@@ -287,6 +287,58 @@ fixtures:
         - the run writes 20 MiB into its spool folder, past the run quota, and goes on to a draft pull request
         - ynf removes the excess from the folder and says so in its log; the step is unaffected
 
+  - id: append-edit
+    kind: issue
+    title: A run edits a test file the lane keeps append-only
+    body: fixtures/append-edit.md
+    labels: ["ynf:append-edit", "pkg:internal/greet"]
+    lane: append-edit
+    calibrate:
+      command: { deterministic: true }
+    expect:
+      result: escalated
+      reason: "diff gate refused: internal/greet/greet_test.go (append-only: modified)"
+      labels: { present: [ynf:needs-human], absent: [ynf:append-edit, ynf:working] }
+      checks:
+        - the command appends a line to internal/greet/greet_test.go, which exists, and the lane's append_only_paths match **/*_test.go
+        - the gate refuses the change as an edit of an existing file, the item escalates with that reason, and no pull request is opened
+        - no model runs
+
+  - id: append-add
+    kind: issue
+    title: A run adds a test file the lane keeps append-only
+    body: fixtures/append-add.md
+    labels: ["ynf:append-add", "pkg:internal/greet"]
+    lane: append-add
+    calibrate:
+      command: { deterministic: true }
+    expect:
+      result: in_review
+      labels: { present: [ynf:in-review], absent: [ynf:append-add, ynf:working, ynf:proposed] }
+      checks:
+        - the command only adds internal/greet/added_test.go, a new file matching the lane's append_only_paths
+        - the gate accepts an addition, so a draft pull request follows
+        - no model runs
+
+  - id: review-route
+    kind: issue
+    title: A run touches a path the lane routes for review
+    body: fixtures/review-route.md
+    labels: ["ynf:review-route", "pkg:internal/greet"]
+    lane: review-route
+    calibrate:
+      command: { deterministic: true }
+    expect:
+      result: in_review
+      labels: { present: [ynf:in-review], absent: [ynf:review-route, ynf:working, ynf:proposed] }
+      proposal:
+        labels: [ynf:review-paths]
+        body: ["### Touches review paths", "- `internal/greet/greet.go`"]
+      checks:
+        - the command appends a line to internal/greet/greet.go, under the lane's review_paths
+        - the draft pull request opens as usual, labelled ynf:review-paths, with a section in its body listing the path touched
+        - nothing is refused and no reviewer is requested; no model runs
+
   - id: deps-bump
     kind: issue
     title: Bump the Go toolchain

@@ -149,6 +149,30 @@
               "minLength": 1,
               "description": "Text the last run's detail must contain, such as the reason a run was refused before it started."
             },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Text the item's reason must contain, such as the diff gate's refusal. An item with a reason has no pull request."
+            },
+            "proposal": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "What the pull request ynf opened must carry: labels it has, and text its body contains.",
+              "properties": {
+                "labels": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "body": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
             "start": {
               "type": "boolean",
               "description": "make e2e starts this fixture with ynf start --lane <lane> instead of letting a search find it."

@@ -38,8 +38,14 @@ func TestSandboxLanesLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(f.Names(), ",")
-	if got != "deps,detect,doc-drift,fix-ci,gate,gofmt,lint-paydown,outage,reclaim,relaxed,spool,spool-flood,spool-image" {
+	if got != "append-add,append-edit,deps,detect,doc-drift,fix-ci,gate,gofmt,lint-paydown,outage,reclaim,relaxed,review-route,spool,spool-flood,spool-image" {
 		t.Fatalf("lanes %s", got)
+	}
+	if l := f.Lanes["append-edit"]; len(l.PR.AppendOnlyPaths) != 1 || l.PR.AppendOnlyPaths[0] != "**/*_test.go" || len(l.PR.ReviewPaths) != 0 {
+		t.Fatalf("append-edit's pull request settings: %+v", l.PR)
+	}
+	if l := f.Lanes["review-route"]; len(l.PR.ReviewPaths) != 1 || l.PR.ReviewPaths[0] != "internal/greet/**" || len(l.PR.AppendOnlyPaths) != 0 {
+		t.Fatalf("review-route's pull request settings: %+v", l.PR)
 	}
 	if d := f.Lanes["deps"]; d.On() || d.Kind != "originate" || len(d.Intake) != 1 {
 		t.Fatalf("deps comes from the configuration repository and is switched off here: %+v", d)

@@ -27,6 +27,7 @@ import (
 	"github.com/eyelock/ynf/internal/store"
 	"github.com/eyelock/ynf/internal/telemetry"
 	"github.com/eyelock/ynf/internal/tracker"
+	"github.com/eyelock/ynf/internal/workspace"
 )
 
 // Git is what the engine needs from the workspace.
@@ -35,7 +36,7 @@ type Git interface {
 	Checkout(ctx context.Context, mirror, ref, dir string) (string, error)
 	RemoveCheckout(dir string) error
 	RemoteHas(ctx context.Context, mirror, branch string) bool
-	Changed(ctx context.Context, wt string) ([]string, error)
+	Changes(ctx context.Context, wt string) ([]workspace.Change, error)
 	Commit(ctx context.Context, wt, message string) (string, error)
 	Push(ctx context.Context, wt, repo, branch string) error
 	Head(ctx context.Context, wt string) (string, error)

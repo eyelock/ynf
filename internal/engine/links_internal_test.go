@@ -21,10 +21,10 @@ func TestPullRequestsAreNamedForTheirTicket(t *testing.T) {
 		t.Fatalf("%s %s %s", prLink(gh, 12), prLink(jira, 12), prLink(other, 12))
 	}
 	run := &RunRecord{Runner: "command", Executor: "docker"}
-	if b := prBody(gh, policy.Lane{Name: "l"}, run); !strings.HasPrefix(b, "Closes #7.") {
+	if b := prBody(gh, policy.Lane{Name: "l"}, run, nil); !strings.HasPrefix(b, "Closes #7.") {
 		t.Fatal(b)
 	}
-	if b := prBody(jira, policy.Lane{Name: "l"}, run); !strings.HasPrefix(b, "For example.atlassian.net/PLAT-881.") || strings.Contains(b, "Closes") {
+	if b := prBody(jira, policy.Lane{Name: "l"}, run, nil); !strings.HasPrefix(b, "For example.atlassian.net/PLAT-881.") || strings.Contains(b, "Closes") {
 		t.Fatal(b)
 	}
 }
