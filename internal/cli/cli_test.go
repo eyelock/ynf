@@ -128,6 +128,43 @@ func TestUsageAndVersion(t *testing.T) {
 	}
 }
 
+// TestLanesValidateChecksPinRefs: a lane that pins its harness has the pin's refs read, so a branch
+// and an unreachable repository are refused (exit 30) and a tag is accepted.
+func TestLanesValidateChecksPinRefs(t *testing.T) {
+	e := setup(t)
+	root := t.TempDir()
+	src, bare := filepath.Join(root, "src"), filepath.Join(root, "h.git")
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main", src},
+		{"-C", src, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "h"},
+		{"-C", src, "tag", "v1"},
+		{"clone", "-q", "--bare", src, bare},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	lane := func(harness string) string {
+		f := filepath.Join(e.dir, "pinned.yaml")
+		doc := "version: 1\nlanes:\n  tidy:\n    kind: originate\n    intake: [{github.search: \"label:ynf:tidy\", every: 5m}]\n" +
+			"    run: {runner: ynh, executor: process, ynh: {harness: \"" + harness + "\"}}\n    when: {converged: open_pr}\n"
+		if err := os.WriteFile(f, []byte(doc), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+	url := "file://" + bare
+	if code, out, stderr := e.run("lanes", "validate", "--file", lane(url+"@v1")); code != 0 || !strings.Contains(out, "valid, 1 lanes") {
+		t.Fatalf("a tag: %d %s %s", code, out, stderr)
+	}
+	if code, _, stderr := e.run("lanes", "validate", "--file", lane(url+"@main")); code != cli.ExitPolicy || !strings.Contains(stderr, "lane tidy: harness "+url+"@main: main is a branch, which moves; pin a tag or a commit") {
+		t.Fatalf("a branch: %d %s", code, stderr)
+	}
+	if code, _, stderr := e.run("lanes", "validate", "--file", lane("file://"+filepath.Join(root, "gone.git")+"@v1")); code != cli.ExitPolicy || !strings.Contains(stderr, "read its refs") {
+		t.Fatalf("unreachable: %d %s", code, stderr)
+	}
+}
+
 func TestLanesValidate(t *testing.T) {
 	e := setup(t)
 	good := filepath.Join(e.dir, "lanes.yaml")
