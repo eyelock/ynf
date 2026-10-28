@@ -7,7 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.47.3
 	github.com/aws/aws-sdk-go-v2/config v1.33.9
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.3
-	github.com/aws/smithy-go v1.28.5
+	github.com/aws/smithy-go v1.28.6
 	github.com/bmatcuk/doublestar/v4 v4.10.3
 	github.com/eyelock/ynr/spoolexporter v0.2.0
 	github.com/google/go-github/v84 v84.0.0
