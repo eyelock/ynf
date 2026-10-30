@@ -170,9 +170,11 @@ path `/run/ynr/spool`, and nothing else of the spool: not the root, not `manifes
 `factory/`, not another run's folder. The run needs no network path to a collector, so egress is
 what it was. Under `inline`, the run user is handed its own folder for the run and takes nothing
 else of the spool; the root must let it reach its folder (mode `0711`, so it cannot list its
-neighbours). The manifest naming the run's lane, harness, focus, item and step is written to
+neighbours). The manifest naming the run's lane, harness, focus, item and step, and the folder's
+budget as `run_quota_bytes` (from `telemetry.run_quota`), is written to
 `manifests/<run id>.json`, which the run cannot reach, before the run starts: ynr stamps those
-names from it, so a run cannot claim another factory. When the run writes as a user other than the
+names from it, so a run cannot claim another factory, and stops reading a folder that exceeds the
+budget. When the run writes as a user other than the
 folder's owner, the manifest also names that user as `uid`, and ynr reads the files that user owns
 in that run's folder. ynf finds the uid from the executor, never from the run: under `docker` with
 an image that keeps its own user (a harness image built by ynh, or a command lane with

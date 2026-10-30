@@ -65,6 +65,9 @@ type Manifest struct {
 	// the run's folder. It comes from the image or the executor's own setting, never from the run,
 	// and is omitted when the run writes as the folder's owner.
 	UID *uint32 `json:"uid,omitempty"`
+	// RunQuotaBytes is the budget the run's folder is held to, so ynr stops reading a folder that
+	// exceeds it. WriteManifest fills it from the spool's Quota when the caller leaves it zero.
+	RunQuotaBytes int64 `json:"run_quota_bytes,omitempty"`
 }
 
 // Spool is the spool root as ynf uses it.
@@ -160,6 +163,9 @@ func (s *Spool) WriteManifest(m Manifest) error {
 		return fmt.Errorf("manifest: %q is not a run id ynr reads", m.Run)
 	case m.Lane == "":
 		return errors.New("manifest: no lane id")
+	}
+	if m.RunQuotaBytes == 0 {
+		m.RunQuotaBytes = s.Quota
 	}
 	b, err := json.Marshal(m)
 	if err != nil {
