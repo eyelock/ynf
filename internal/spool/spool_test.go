@@ -117,9 +117,17 @@ func TestManifestIsWhatYnrReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got map[string]string
-	if err := json.Unmarshal(b, &got); err != nil {
+	var raw map[string]any
+	if err := json.Unmarshal(b, &raw); err != nil {
 		t.Fatal(err)
+	}
+	if raw["run_quota_bytes"] != float64(s.Quota) || s.Quota != 1<<10 {
+		t.Errorf("run_quota_bytes = %v, want the configured %d", raw["run_quota_bytes"], s.Quota)
+	}
+	delete(raw, "run_quota_bytes")
+	got := map[string]string{}
+	for k, v := range raw {
+		got[k], _ = v.(string)
 	}
 	want := map[string]string{"run": "01JABC-1", "lane": "github.com/example-org/factory-config#lint", "harness": "h@1.0", "focus": "go", "item": "github.com/example-org/app#7", "step": "01JABC"}
 	if len(got) != len(want) {
@@ -635,5 +643,26 @@ func TestRunsAreIsolatedFromEachOther(t *testing.T) {
 	defer b.End(t.TempDir())
 	if a.Dir == b.Dir || strings.HasPrefix(b.Dir, a.Dir+string(filepath.Separator)) {
 		t.Errorf("run folders overlap: %s %s", a.Dir, b.Dir)
+	}
+}
+
+func TestManifestCarriesDefaultQuota(t *testing.T) {
+	s, err := New(filepath.Join(t.TempDir(), "spool"), 0, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WriteManifest(Manifest{Run: "01JABC-1", Lane: "l"}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(s.Root, "manifests", "01JABC-1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Manifest
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.RunQuotaBytes != DefaultQuota {
+		t.Errorf("run_quota_bytes = %d, want %d", got.RunQuotaBytes, DefaultQuota)
 	}
 }

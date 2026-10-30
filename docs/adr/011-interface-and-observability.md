@@ -140,7 +140,7 @@ Nothing in ynf reads telemetry.
 *The spool and the collector in a factory job.* With a spool root, ynf lays it out as ynr reads it
 (ynr ADR-003): `factory/` for its own writer, `runs/<run id>/` for each run, and
 `manifests/<run id>.json` for each run, which names the run's lane id, harness, focus, item and
-step. Before a run starts, ynf makes its folder and writes its manifest (to a temporary name, then
+step, and the budget of its folder (`run_quota_bytes`). Before a run starts, ynf makes its folder and writes its manifest (to a temporary name, then
 renamed, never over a link), and starts the run with `YNR_SPOOL` set to its folder, `TRACEPARENT`
 and `TRACESTATE`, and without the operator's `OTEL_EXPORTER_OTLP_*` when the collector is on.
 ADR-007 says how a run is kept to its folder. A lane with `run.ynh.telemetry_relay` also sets

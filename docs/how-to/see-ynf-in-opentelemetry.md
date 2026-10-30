@@ -103,7 +103,8 @@ The spool root then holds three things:
   it is the only part of the spool the container has, at `/run/ynr/spool`, so the run needs no
   network path to a collector);
 - `manifests/<run id>.json`, one for each run, which the run cannot reach. It names the run's lane,
-  harness, focus, item and step, and `ynr serve` stamps those on everything from the run's folder
+  harness, focus, item and step, and the budget of its folder (`run_quota_bytes`, from
+  `telemetry.run_quota`), and `ynr serve` stamps those on everything from the run's folder
   (`ynf.lane`, `ynf.lane.harness`, `ynf.lane.focus`, `ynf.item.key`, `ynf.step.id`, `ynf.run.id`),
   with `ynr.provenance=run`. A run cannot claim another lane.
 
