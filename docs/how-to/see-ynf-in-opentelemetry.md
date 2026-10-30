@@ -103,7 +103,8 @@ The spool root then holds three things:
   it is the only part of the spool the container has, at `/run/ynr/spool`, so the run needs no
   network path to a collector);
 - `manifests/<run id>.json`, one for each run, which the run cannot reach. It names the run's lane,
-  harness, focus, item and step, and `ynr serve` stamps those on everything from the run's folder
+  harness, focus, item and step, and the budget of its folder (`run_quota_bytes`, from
+  `telemetry.run_quota`), and `ynr serve` stamps those on everything from the run's folder
   (`ynf.lane`, `ynf.lane.harness`, `ynf.lane.focus`, `ynf.item.key`, `ynf.step.id`, `ynf.run.id`),
   with `ynr.provenance=run`. A run cannot claim another lane.
 
@@ -157,11 +158,11 @@ of its own, put on the `PATH` for that shell only. The full-chain check below al
 `ynr-stub-vendor`, from the same release:
 
 ```bash
-gh release download v0.2.2 -R eyelock/ynr \
-  -p 'ynr_0.2.2_darwin_arm64.tar.gz' -p 'ynr-stub-vendor_0.2.2_darwin_arm64.tar.gz' -p checksums.txt
+gh release download v0.3.2 -R eyelock/ynr \
+  -p 'ynr_0.3.2_darwin_arm64.tar.gz' -p 'ynr-stub-vendor_0.3.2_darwin_arm64.tar.gz' -p checksums.txt
 shasum -a 256 --check --ignore-missing checksums.txt
-mkdir ynr-bin && tar -xzf ynr_0.2.2_darwin_arm64.tar.gz -C ynr-bin ynr
-tar -xzf ynr-stub-vendor_0.2.2_darwin_arm64.tar.gz -C ynr-bin ynr-stub-vendor
+mkdir ynr-bin && tar -xzf ynr_0.3.2_darwin_arm64.tar.gz -C ynr-bin ynr
+tar -xzf ynr-stub-vendor_0.3.2_darwin_arm64.tar.gz -C ynr-bin ynr-stub-vendor
 PATH="$PWD/ynr-bin:$PATH" make conformance
 ```
 
@@ -189,7 +190,7 @@ the collector on, and a receiver of its own as `ynr serve`'s upstream. HOME, `XD
 `YNH_HOME` are its own. It uses no model, no network and no docker.
 
 The lane runs on the `process` executor, which ynf allows with `--interactive`. Its harness is `.`,
-the one the repository carries in `.agents/harness/`. ynh 0.12.0 lists `agent-run-harness-path`,
+the one the repository carries in `.agents/harness/`. ynh 0.14.0 lists `agent-run-harness-path`,
 so ynf passes the folder to `ynh agent run --harness` as a path and installs nothing, with a ynh home
 of the run's own (never yours); the focus is read from the checkout. The check asserts the run
 converged, that the record shows an absolute `--harness` path and the ynh features, and that your

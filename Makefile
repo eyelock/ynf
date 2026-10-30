@@ -7,7 +7,8 @@
 #                 use ~/.ynh/bin and ~/.ynm/bin); put it on your PATH
 #   make docs     serve the documentation at http://localhost:$(DOCS_PORT) (ctrl-c to stop)
 #   make conformance  ynr conformance (ynr ADR-008) against ynf's own scenarios, offline; ynr must
-#                 be on your PATH, at the version CI pins (YNR_VERSION in .github/workflows/ci.yml)
+#                 be on your PATH, at the version CI pins (YNR_VERSION in .github/workflows/ci.yml); with ynm
+#                 on PATH too (YNM_VERSION in images/factory/versions.env) rule 13 runs as well
 #   make fullchain  the full-chain check (.ynr/fullchain): a ynf step runs a ynh lane with the relay
 #                 on, and what ynr serve ships is one trace with the run's records stamped; ynr and
 #                 ynh must be on your PATH, at the versions CI pins (YNR_VERSION, YNH_VERSION)

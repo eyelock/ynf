@@ -10,9 +10,9 @@ concurrency:
   cancel-in-progress: true
 env:
   # The ynr release that `conformance` runs, without the leading v. The one place it is pinned.
-  YNR_VERSION: 0.2.2
+  YNR_VERSION: 0.3.2
   # The ynh release the full-chain check runs, without the leading v.
-  YNH_VERSION: 0.12.0
+  YNH_VERSION: 0.14.0
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -70,10 +70,28 @@ jobs:
           tar -xzf "$ynr" -C "$bin" ynr
           tar -xzf "$stub" -C "$bin" ynr-stub-vendor
           echo "$bin" >> "$GITHUB_PATH"
+      - name: ynm, checked against the release's checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          . images/factory/versions.env
+          dl="$RUNNER_TEMP/ynm-download"
+          bin="$RUNNER_TEMP/ynm-bin"
+          mkdir -p "$dl" "$bin"
+          ynm="ynm_${YNM_VERSION}_linux_amd64.tar.gz"
+          gh release download "v${YNM_VERSION}" -R eyelock/ynm -D "$dl" -p "$ynm" -p checksums.txt
+          cd "$dl"
+          grep -E " ${ynm}\$" checksums.txt > wanted.txt
+          [ "$(wc -l < wanted.txt)" -eq 1 ]
+          sha256sum --check --strict wanted.txt
+          tar -xzf "$ynm" -C "$bin" ynm
+          echo "$bin" >> "$GITHUB_PATH"
       - name: ynr conformance
         run: |
           set -euo pipefail
           ynr version
+          ynm --version
           make conformance CONFORMANCE_FORMAT=json | tee "$RUNNER_TEMP/conformance.json"
       - name: ynh, checked against the release's checksums
         env:
