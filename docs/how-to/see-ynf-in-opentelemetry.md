@@ -158,11 +158,11 @@ of its own, put on the `PATH` for that shell only. The full-chain check below al
 `ynr-stub-vendor`, from the same release:
 
 ```bash
-gh release download v0.3.1 -R eyelock/ynr \
-  -p 'ynr_0.3.1_darwin_arm64.tar.gz' -p 'ynr-stub-vendor_0.3.1_darwin_arm64.tar.gz' -p checksums.txt
+gh release download v0.3.2 -R eyelock/ynr \
+  -p 'ynr_0.3.2_darwin_arm64.tar.gz' -p 'ynr-stub-vendor_0.3.2_darwin_arm64.tar.gz' -p checksums.txt
 shasum -a 256 --check --ignore-missing checksums.txt
-mkdir ynr-bin && tar -xzf ynr_0.3.1_darwin_arm64.tar.gz -C ynr-bin ynr
-tar -xzf ynr-stub-vendor_0.3.1_darwin_arm64.tar.gz -C ynr-bin ynr-stub-vendor
+mkdir ynr-bin && tar -xzf ynr_0.3.2_darwin_arm64.tar.gz -C ynr-bin ynr
+tar -xzf ynr-stub-vendor_0.3.2_darwin_arm64.tar.gz -C ynr-bin ynr-stub-vendor
 PATH="$PWD/ynr-bin:$PATH" make conformance
 ```
 
