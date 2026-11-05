@@ -3,7 +3,7 @@ module github.com/eyelock/ynf
 go 1.26.0
 
 require (
-	cel.dev/cel-go v0.32.0
+	cel.dev/cel-go v0.33.2
 	github.com/aws/aws-sdk-go-v2 v1.47.5
 	github.com/aws/aws-sdk-go-v2/config v1.33.9
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.6
