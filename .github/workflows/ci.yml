@@ -3,11 +3,15 @@ on:
   pull_request:
   push:
     branches: [main, develop]
+  # The merge queue builds each queued PR on top of the ones ahead of it and waits for All Clear.
+  merge_group:
 permissions:
   contents: read
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Only PR runs are superseded: every commit that lands on main or develop, or is built by the merge
+  # queue, is checked to the end.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   # The ynr release that `conformance` runs, without the leading v. The one place it is pinned.
   YNR_VERSION: 0.3.2

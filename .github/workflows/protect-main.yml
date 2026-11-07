@@ -7,6 +7,9 @@ permissions:
 on:
   pull_request:
     branches: [main]
+  # Main's ruleset requires "Verify PR source branch" in its merge queue too, so it must report there.
+  merge_group:
+    branches: [main]
 
 jobs:
   check-source-branch:
@@ -16,7 +19,13 @@ jobs:
       - name: Check that PR targets main only from develop, hotfix/*, or release/*
         env:
           SOURCE: ${{ github.head_ref }}
+          EVENT: ${{ github.event_name }}
         run: |
+          # The PR was checked when it entered the queue; a merge_group run has no head_ref.
+          if [[ "$EVENT" == "merge_group" ]]; then
+            echo "✅ Merge queue entry: the source branch was verified on the pull request"
+            exit 0
+          fi
           echo "PR source branch: $SOURCE"
 
           if [[ "$SOURCE" == "develop" ]] || [[ "$SOURCE" == hotfix/* ]] || [[ "$SOURCE" == release/* ]]; then

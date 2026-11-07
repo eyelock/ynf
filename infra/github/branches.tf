@@ -14,12 +14,14 @@ locals {
   # runs only on PRs into main.
   rulesets = {
     develop = {
-      name   = "Develop Branch Protection"
-      checks = ["All Clear"]
+      name         = "Develop Branch Protection"
+      checks       = ["All Clear"]
+      merge_method = "SQUASH"
     }
     main = {
-      name   = "Main Branch Protection"
-      checks = ["All Clear", "Verify PR source branch"]
+      name         = "Main Branch Protection"
+      checks       = ["All Clear", "Verify PR source branch"]
+      merge_method = "MERGE"
     }
   }
 }
@@ -50,6 +52,21 @@ resource "github_repository_ruleset" "this" {
       require_code_owner_review         = false
       require_last_push_approval        = false
       required_review_thread_resolution = true
+    }
+
+    # Every PR merges through the merge queue, so each commit is checked on top of the queue ahead of
+    # it before it lands. A queue merges with the one method its ruleset names: develop squashes, as
+    # feature PRs always have; main makes merge commits, as release and hotfix PRs do. The one
+    # back-merge per release, main into develop, must be a true merge, so an admin merges it around
+    # the queue (the ruleset's admin bypass). The required workflows run on merge_group (ci.yml, protect-main.yml).
+    merge_queue {
+      merge_method                      = each.value.merge_method
+      grouping_strategy                 = "ALLGREEN"
+      min_entries_to_merge              = 1
+      max_entries_to_merge              = 5
+      min_entries_to_merge_wait_minutes = 5
+      max_entries_to_build              = 5
+      check_response_timeout_minutes    = 60
     }
 
     required_status_checks {

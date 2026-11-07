@@ -54,7 +54,8 @@ changes land on `develop` through feature pull requests, and a release branch ca
    `gh release edit vX.Y.Z --notes-file <notes>`.
 
 7. **Back-merge into `develop` once the release works,** with a pull request from `main` into
-   `develop`, merged with **Create a merge commit**. Waiting means a hotfix the release needed
+   `develop`, merged by a repository admin with **Create a merge commit**, bypassing the `develop`
+   queue (which squashes; a back-merge must stay a true merge). Waiting means a hotfix the release needed
    reaches `develop` in the same back-merge.
 
 If the release workflow fails before publishing anything, fix it with a hotfix, then move the
@@ -68,7 +69,7 @@ The version is the tag: `ynf version` prints it, and a build from anything but a
 
 Branch `hotfix/<what>` from the release tag, fix, and open a pull request into `main`. Merge it
 with **Create a merge commit**, tag the next patch version on `main`, and back-merge `main` into
-`develop` once that release works.
+`develop` once that release works, merged by an admin around the queue as in the steps above.
 
 ## The docs site
 
