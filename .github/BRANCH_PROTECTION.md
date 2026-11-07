@@ -20,6 +20,7 @@ sure that never extends to losing a branch.
 Both rulesets also turn on the **merge queue**: a PR is added to the queue instead of merged, and is
 built on top of the PRs ahead of it. The `ci` and `Protect Main` workflows run on `merge_group`, and
 `cancel-in-progress` applies to pull requests only, so every commit that lands is checked to the end.
+A queue merges with the one method its ruleset names: `develop` squashes, `main` makes merge commits.
 
 **All Clear** is the last job of the CI workflow. It depends on every other job and fails if any of
 them failed or was cancelled. Add or rename CI jobs freely; only All Clear is required for CI.
@@ -38,5 +39,9 @@ and passes only when the source is `develop`, `release/*` or `hotfix/*`.
 
 ## Merging
 
-Feature pull requests into `develop` are squash-merged. Release and hotfix pull requests into
-`main` are true merges, so the back-merge into `develop` is clean. Rebase merging is off.
+Feature pull requests into `develop` are squash-merged, by the `develop` queue. Release and hotfix
+pull requests into `main` are true merges, by the `main` queue. Rebase merging is off.
+
+The back-merge from `main` into `develop`, once per release, must also be a true merge, but the
+`develop` queue squashes. A repository admin merges that one pull request with **Create a merge
+commit**, bypassing the queue (the rulesets let admins bypass).
