@@ -52,6 +52,18 @@ resource "github_repository_ruleset" "this" {
       required_review_thread_resolution = true
     }
 
+    # Every PR merges through the merge queue, so each commit is checked on top of the queue ahead of
+    # it before it lands. The required workflows run on merge_group (ci.yml, protect-main.yml).
+    merge_queue {
+      merge_method                      = "MERGE"
+      grouping_strategy                 = "ALLGREEN"
+      min_entries_to_merge              = 1
+      max_entries_to_merge              = 5
+      min_entries_to_merge_wait_minutes = 5
+      max_entries_to_build              = 5
+      check_response_timeout_minutes    = 60
+    }
+
     required_status_checks {
       strict_required_status_checks_policy = false
       do_not_enforce_on_create             = false

@@ -17,6 +17,10 @@ sure that never extends to losing a branch.
 
 ## Required checks
 
+Both rulesets also turn on the **merge queue**: a PR is added to the queue instead of merged, and is
+built on top of the PRs ahead of it. The `ci` and `Protect Main` workflows run on `merge_group`, and
+`cancel-in-progress` applies to pull requests only, so every commit that lands is checked to the end.
+
 **All Clear** is the last job of the CI workflow. It depends on every other job and fails if any of
 them failed or was cancelled. Add or rename CI jobs freely; only All Clear is required for CI.
 
