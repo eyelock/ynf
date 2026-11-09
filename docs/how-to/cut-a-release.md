@@ -25,8 +25,8 @@ changes land on `develop` through feature pull requests, and a release branch ca
    ```
 
 4. **Open a pull request from `release/vX.Y.Z` into `main`,** with the release notes as its
-   description, and merge it with **Create a merge commit** (not squash) once CI is green. GitHub
-   deletes the release branch when it merges.
+   description, and merge it with **Merge when ready** once CI is green. `main`'s merge queue makes
+   the merge commit (never a squash). GitHub deletes the release branch when it merges.
 
 5. **Tag `vX.Y.Z` on `main` and push the tag.**
 
@@ -68,7 +68,7 @@ The version is the tag: `ynf version` prints it, and a build from anything but a
 ## A hotfix
 
 Branch `hotfix/<what>` from the release tag, fix, and open a pull request into `main`. Merge it
-with **Create a merge commit**, tag the next patch version on `main`, and back-merge `main` into
+with **Merge when ready** (`main`'s queue makes the merge commit), tag the next patch version on `main`, and back-merge `main` into
 `develop` once that release works, merged by an admin around the queue as in the steps above.
 
 ## The docs site

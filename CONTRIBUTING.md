@@ -32,7 +32,10 @@ change goes through a branch and a pull request.
 Branch names use a slash: `feat/…`, `fix/…`, `docs/…`, `ci/…`, `chore/…`, `infra/…`,
 `hotfix/…`. `develop` is the default branch. Feature pull requests are squash-merged, titled and
 described by the pull request, so its `Closes #n` lines close issues; release and hotfix pull
-requests into `main` use a true merge, so the back-merge into `develop` is clean. `main` accepts
+requests into `main` use a true merge, so the back-merge into `develop` is clean. Both branches
+have a merge queue: press **Merge when ready** and the queue merges the pull request once its
+checks pass on the queued result. The one exception is the release back-merge of `main` into
+`develop`: a repository admin merges it as a merge commit, around `develop`'s queue (which squashes). `main` accepts
 pull requests only from `develop`, `release/*` or `hotfix/*` (the "Verify PR source branch" check
 enforces it), and release tags are cut from `main`.
 
