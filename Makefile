@@ -30,7 +30,8 @@ DOCS_PORT   ?= 3100
 CONFORMANCE_FORMAT ?= text
 
 include images/factory/versions.env
-# The golangci-lint release `lint` and CI run. The one place it is pinned: CI reads the same file.
+# The golangci-lint release `lint`, CI and the sandbox agent image run. The one place it is pinned:
+# CI reads the same file, and sandbox/Makefile passes it to the agent image build.
 GOLANGCI_LINT_VERSION := $(shell cat .golangci-lint-version)
 FACTORY_IMAGE ?= ynf-factory:dev
 YNH_SRC       ?=

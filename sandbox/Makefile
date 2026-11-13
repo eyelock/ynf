@@ -106,6 +106,8 @@ e2e-only: settings
 	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(LANES) -hide-ynh=$(HIDE_YNH) -shadow=$(SHADOW) -gate=$(GATE)
 
 YNH_BASE ?= ghcr.io/eyelock/ynh:0.14.0
+# The golangci-lint release the agent image installs: the repository's one pin.
+GOLANGCI_LINT_VERSION := $(shell cat ../.golangci-lint-version)
 YNH_SRC ?=
 AGENT_IMAGE ?= ynf-sandbox-agent:latest
 
@@ -118,7 +120,7 @@ agent-image:
 	  git -C $(YNH_SRC) worktree add -q --detach "$$ctx/src" origin/develop; \
 	  (cd "$$ctx/src" && CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -o "$$ctx/ynh/ynh" ./cmd/ynh); \
 	fi; \
-	docker build -q --build-arg YNH_BASE=$(YNH_BASE) -t $(AGENT_IMAGE) "$$ctx"; \
+	docker build -q --build-arg YNH_BASE=$(YNH_BASE) --build-arg GOLANGCI_LINT_VERSION=$(GOLANGCI_LINT_VERSION) -t $(AGENT_IMAGE) "$$ctx"; \
 	docker run --rm --network none --entrypoint ynh $(AGENT_IMAGE) version
 
 FACTORY_BASE    ?= ynf-factory:dev
@@ -136,7 +138,7 @@ e2e-memory-outage: reset settings
 e2e-factory: reset
 	@set -e; ctx=$$(mktemp -d); trap 'rm -rf "$$ctx"' EXIT; \
 	cp images/agent/Dockerfile "$$ctx/"; mkdir -p "$$ctx/ynh"; \
-	docker build -q --build-arg YNH_BASE=$(FACTORY_BASE) -t ynf-sandbox-agent:factory "$$ctx" >/dev/null; \
+	docker build -q --build-arg YNH_BASE=$(FACTORY_BASE) --build-arg GOLANGCI_LINT_VERSION=$(GOLANGCI_LINT_VERSION) -t ynf-sandbox-agent:factory "$$ctx" >/dev/null; \
 	ynh image ynf-sandbox --from seed --base ynf-sandbox-agent:factory --entrypoint agent --tag $(FACTORY_HARNESS) >/dev/null; \
 	echo "built $(FACTORY_HARNESS) on $(FACTORY_BASE)"
 	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(FACTORY_LANES) -shadow=$(SHADOW_AFTER_RESET) -gate=false -image $(FACTORY_HARNESS)
