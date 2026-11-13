@@ -6,8 +6,12 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A pull-request run shares a group with the rest of its ref and is cancelled when a newer one starts.
+  # A push run on develop or main gets a group of its own, keyed on the commit, so it is never cancelled
+  # and, because a group keeps only one waiting run, never replaced by a newer push before it starts:
+  # every commit that lands is checked.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || 'pr' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   # The ynr release that `conformance` runs, without the leading v. The one place it is pinned.
   YNR_VERSION: 0.3.2
