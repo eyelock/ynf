@@ -10,7 +10,7 @@ concurrency:
   # A push run on develop or main gets a group of its own, keyed on the commit, so it is never cancelled
   # and, because a group keeps only one waiting run, never replaced by a newer push before it starts:
   # every commit that lands is checked.
-  group: ci-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || 'pr' }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || 'pr' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   # The ynr release that `conformance` runs, without the leading v. The one place it is pinned.
