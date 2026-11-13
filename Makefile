@@ -1,6 +1,7 @@
 # ynf: your named factory.
 #   make help     this list
-#   make deps     check the prerequisites (Go, golangci-lint) and download the modules
+#   make deps     check the prerequisites (Go, and golangci-lint at the version in
+#                 .golangci-lint-version, which CI reads too) and download the modules
 #   make check    format, vet, lint, tests with the race detector, and the coverage gate
 #   make build    bin/ynf
 #   make install  bin/ynf and its linux builds into $(INSTALL_DIR) (~/.ynf/bin, as ynh and ynm
@@ -29,6 +30,8 @@ DOCS_PORT   ?= 3100
 CONFORMANCE_FORMAT ?= text
 
 include images/factory/versions.env
+# The golangci-lint release `lint` and CI run. The one place it is pinned: CI reads the same file.
+GOLANGCI_LINT_VERSION := $(shell cat .golangci-lint-version)
 FACTORY_IMAGE ?= ynf-factory:dev
 YNH_SRC       ?=
 YNM_SRC       ?=
@@ -42,7 +45,7 @@ help:
 
 deps:
 	@command -v go >/dev/null 2>&1 || { echo "Installing Go..."; brew install go; }
-	@command -v golangci-lint >/dev/null 2>&1 || { echo "Installing golangci-lint..."; brew install golangci-lint; }
+	@golangci-lint version 2>/dev/null | grep -q "version $(GOLANGCI_LINT_VERSION:v%=%) " || { echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)..."; go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); }
 	go mod download
 	cd sandbox/e2e && go mod download
 	@echo "All prerequisites installed."
@@ -71,6 +74,7 @@ cover:
 	@scripts/coverage.sh $(COVERAGE)
 
 lint:
+	@golangci-lint version 2>/dev/null | grep -q "version $(GOLANGCI_LINT_VERSION:v%=%) " || { echo "lint: golangci-lint $(GOLANGCI_LINT_VERSION) is required (CI's version); run 'make deps'"; exit 1; }
 	golangci-lint run ./...
 
 vet:
