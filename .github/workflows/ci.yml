@@ -6,8 +6,12 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A pull-request run shares a group with the rest of its ref and is cancelled when a newer one starts.
+  # A push run on develop or main gets a group of its own, keyed on the commit, so it is never cancelled
+  # and, because a group keeps only one waiting run, never replaced by a newer push before it starts:
+  # every commit that lands is checked.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || 'pr' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   # The ynr release that `conformance` runs, without the leading v. The one place it is pinned.
   YNR_VERSION: 0.3.2
@@ -21,9 +25,12 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - name: golangci-lint version
+        id: golangci
+        run: echo "version=$(cat .golangci-lint-version)" >> "$GITHUB_OUTPUT"
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          version: ${{ steps.golangci.outputs.version }}
           install-only: true
       - name: make check
         run: make check

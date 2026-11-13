@@ -1568,7 +1568,9 @@ func TestALiveHoldersHeartbeatKeepsItsItem(t *testing.T) {
 		if n, err := b.RunDue(context.Background()); err != nil || n != 0 {
 			if n != 0 {
 				_ = os.WriteFile(gate, nil, 0o644)
-				<-done
+				if err := <-done; err != nil {
+					t.Log(err)
+				}
 			}
 			t.Fatalf("another instance stepped a live holder's item: %d %v", n, err)
 		}

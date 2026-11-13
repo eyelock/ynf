@@ -57,7 +57,9 @@ harness itself, with `ynh image`, which installs it and makes ynh's agent run th
 
 ```bash
 ctx=$(mktemp -d) && cp "$YNF_SRC/sandbox/images/agent/Dockerfile" "$ctx/" && mkdir -p "$ctx/ynh"
-docker build -q --build-arg YNH_BASE=ynf-factory:dev -t ynf-sandbox-agent:factory "$ctx"
+docker build -q --build-arg YNH_BASE=ynf-factory:dev \
+  --build-arg GOLANGCI_LINT_VERSION="$(cat "$YNF_SRC/.golangci-lint-version")" \
+  -t ynf-sandbox-agent:factory "$ctx"
 git -C "$TUTORIAL/ynf-sandbox" pull -q
 ynh image ynf-sandbox --from "$TUTORIAL/ynf-sandbox" --base ynf-sandbox-agent:factory \
   --entrypoint agent --tag ynf-sandbox-harness:factory
