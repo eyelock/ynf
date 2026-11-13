@@ -2,8 +2,12 @@
 # harness's sensors run, golangci-lint and the Go toolchain. `ynh image --base` builds each harness
 # image on it.
 ARG YNH_BASE=ghcr.io/eyelock/ynh:0.14.0
+# The golangci-lint release is the repository's one pin, .golangci-lint-version: the sandbox
+# Makefile passes it as this build arg, so a bump there reaches this image too.
 FROM golang:1.27-alpine AS go
-RUN wget -qO- https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b /out v2.12.2
+ARG GOLANGCI_LINT_VERSION
+RUN test -n "$GOLANGCI_LINT_VERSION" || { echo "build with --build-arg GOLANGCI_LINT_VERSION=\$(cat .golangci-lint-version)"; exit 1; }
+RUN wget -qO- https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b /out "$GOLANGCI_LINT_VERSION"
 
 FROM ${YNH_BASE}
 USER root
