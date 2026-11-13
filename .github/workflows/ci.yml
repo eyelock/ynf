@@ -7,7 +7,9 @@ permissions:
   contents: read
 concurrency:
   group: ci-${{ github.ref }}
-  # Only a superseded pull-request run is cancelled: every push run on develop and main runs to the end.
+  # A pull-request run is cancelled when a newer one starts. A push run on develop or main is never
+  # cancelled once running, but a group keeps at most one waiting run, so a newer push replaces a run
+  # still waiting behind it: a run that has started finishes, a waiting one may never start.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   # The ynr release that `conformance` runs, without the leading v. The one place it is pinned.
