@@ -17,7 +17,9 @@ jobs:
           go-version-file: go.mod
       - uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.12.2
+          # The seeded repository stands alone, so it cannot read ynf's .golangci-lint-version;
+          # keep this in step with that file (the agent image's pin) when it changes.
+          version: v2.15.0
           args: --config .golangci.ci.yml --new-from-merge-base=origin/${{ github.base_ref || 'main' }}
   test:
     runs-on: ubuntu-latest
