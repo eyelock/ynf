@@ -2,6 +2,8 @@ module github.com/eyelock/ynf
 
 go 1.26.0
 
+toolchain go1.26.11
+
 require (
 	cel.dev/cel-go v0.33.2
 	github.com/aws/aws-sdk-go-v2 v1.48.0
