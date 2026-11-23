@@ -691,6 +691,38 @@ func TestYnhRunnerOnTheHost(t *testing.T) {
 	}
 }
 
+// TestYnhRefusalIsNotRetried: ynh exit 1 means it refused before any worker started, so the run is
+// an operator_error and a lane's `outcome.error: {retry: N}` does not run it again.
+func TestYnhRefusalIsNotRetried(t *testing.T) {
+	h := newHarness(t)
+	dir := t.TempDir()
+	calls := filepath.Join(dir, "calls")
+	script := "#!/bin/sh\necho x >> \"" + calls + "\"\necho '{\"exit_code\":1,\"reason\":\"refused\"}'\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(dir, "ynh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	h.f.lanes = strings.Replace(lanesYAML, `      ynh: {harness: ".", focus: tidy}
+    when: {converged: open_pr}`, `      ynh: {harness: ".", focus: tidy}
+    when: {converged: open_pr, outcome.error: {retry: 2, then: escalate}}`, 1)
+	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "sk-test"}[k] }
+	h.f.labels[1] = []string{"ynf:agentic"}
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		if err := h.e.Sweep(ctx); err != nil {
+			t.Fatal(err)
+		}
+		h.advance(10 * time.Minute)
+	}
+	it := h.item(t, 1)
+	if it.State != item.Escalated || it.LastRun.Outcome != "operator_error" {
+		t.Fatalf("%s %+v", it.State, it.LastRun)
+	}
+	if b, _ := os.ReadFile(calls); strings.Count(string(b), "x") != 1 {
+		t.Fatalf("ynh should run once, not be retried: %q", b)
+	}
+}
+
 // installs records what InstallHarness was asked, standing in for `ynh install` into the run's home.
 type installs struct {
 	dirs, homes []string
