@@ -1,0 +1,47 @@
+name: bump-ynr
+# Opens a pull request when ynr publishes a release newer than the one `conformance` runs
+# (YNR_VERSION in ci.yml), so conformance runs against the latest ynr. The pull request's own
+# CI run is the proof: it is merged only if conformance passes.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: develop
+      - name: Open a bump pull request when a newer ynr release exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          latest="$(gh release view -R eyelock/ynr --json tagName -q .tagName)"
+          latest="${latest#v}"
+          current="$(sed -n 's/^  YNR_VERSION: \([0-9][0-9.]*\)$/\1/p' .github/workflows/ci.yml)"
+          [ -n "$current" ]
+          echo "ynr: pinned $current, latest $latest"
+          if [ "$latest" = "$current" ] || [ "$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -n1)" = "$current" ]; then
+            echo "Pin is current."
+            exit 0
+          fi
+          branch="deps/ynr-$latest"
+          if [ -n "$(gh pr list --head "$branch" --state open --json number -q '.[].number')" ]; then
+            echo "A bump pull request for $latest is already open."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          sed -i "s/^  YNR_VERSION: .*/  YNR_VERSION: $latest/" .github/workflows/ci.yml
+          sed -i "s/$current/$latest/g" docs/how-to/see-ynf-in-opentelemetry.md
+          git commit -am "deps: bump ynr to $latest"
+          git push -u origin "$branch"
+          gh pr create --base develop --head "$branch" \
+            --title "deps: bump ynr to $latest" \
+            --body "Bumps the ynr release that conformance runs, from $current to $latest (ynr release v$latest). Merge only if the conformance job passes."
