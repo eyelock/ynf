@@ -2518,3 +2518,31 @@ func TestWaitingDecisionUpdatesReason(t *testing.T) {
 		}
 	}
 }
+
+// TestAWebhookDuringARunDoesNotCancelIt: a webhook for an item this process is already stepping
+// (ynf's own label or comment write comes back as one) must not re-claim the lease, which carries
+// the same owner, or the run's next renewal loses it and the run is cancelled.
+func TestAWebhookDuringARunDoesNotCancelIt(t *testing.T) {
+	h := newHarness(t)
+	h.e.Heartbeat = 20 * time.Millisecond
+	gate, done := startSlow(t, h)
+	before := h.item(t, 1).Lease
+	if before == nil {
+		t.Fatal("the running item holds no lease")
+	}
+	body := []byte(`{"repository":{"full_name":"o/r"},"issue":{"number":1}}`)
+	if _, err := h.e.HandleGitHubEvent(context.Background(), "issues", body); err != nil {
+		t.Fatal(err)
+	}
+	if after := h.item(t, 1).Lease; after == nil || after.StepID != before.StepID || after.Epoch != before.Epoch {
+		t.Fatalf("the webhook re-claimed the lease: %+v -> %+v", before, after)
+	}
+	time.Sleep(100 * time.Millisecond) // several heartbeats: a lost lease would cancel the run by now
+	_ = os.WriteFile(gate, nil, 0o644)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Proposed || it.Attempts != 0 {
+		t.Fatalf("the run did not finish cleanly: %s attempts=%d %s", it.State, it.Attempts, it.Reason)
+	}
+}
