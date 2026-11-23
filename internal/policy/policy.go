@@ -379,6 +379,19 @@ func (l Lane) NoCIWait() time.Duration {
 	return d
 }
 
+// DefaultRetention is how long a lane keeps its step run folders when it does not say (ADR-010).
+const DefaultRetention = 90 * 24 * time.Hour
+
+// RetentionFor is the lane's retention as a duration: DefaultRetention when it is empty or cannot
+// be read.
+func (l Lane) RetentionFor() time.Duration {
+	d, err := ParseDuration(l.Retention)
+	if l.Retention == "" || err != nil || d <= 0 {
+		return DefaultRetention
+	}
+	return d
+}
+
 // ParseDuration accepts the schema's durations, including days.
 func ParseDuration(s string) (time.Duration, error) {
 	if d, ok := strings.CutSuffix(s, "d"); ok {
