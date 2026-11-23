@@ -18,7 +18,10 @@ func (YnhRunner) Name() string { return "ynh" }
 
 // ynhOutcomes maps `ynh agent run` exit codes (ynh docs/agent.md) to ynf outcomes.
 var ynhOutcomes = map[int]string{
-	0:  Converged,
+	0: Converged,
+	// 1: ynh refused before any worker started (docs/agent.md): the invocation is wrong, so a retry
+	// would be refused the same way.
+	1:  OperatorError,
 	10: Budget, 11: Budget, 12: Budget, 15: Budget,
 	13: Stuck,
 	14: Tamper,

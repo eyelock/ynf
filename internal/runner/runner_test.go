@@ -57,7 +57,7 @@ func TestYnhRunner(t *testing.T) {
 			t.Errorf("argv lacks %q: %s", want, joined)
 		}
 	}
-	for exit, want := range map[int]string{0: "converged", 11: "budget", 13: "stuck", 14: "tamper", 22: "operator_error", 31: "aborted", 99: "error"} {
+	for exit, want := range map[int]string{0: "converged", 1: "operator_error", 11: "budget", 13: "stuck", 14: "tamper", 22: "operator_error", 31: "aborted", 99: "error"} {
 		if got := y.Interpret(exit, []byte(`{"reason":"r","session_id":"s","backend":"claude","model":"m"}`), ""); got.Outcome != want {
 			t.Errorf("exit %d: %s, want %s", exit, got.Outcome, want)
 		}

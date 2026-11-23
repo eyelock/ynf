@@ -41,7 +41,7 @@ result and trajectory schemas and its capabilities version, which ynh versions f
 | `budget` | a cap stopped it (`bound_by` says which) | 10, 11, 12, 15 |
 | `stuck` | the run detected it was making no progress | 13 |
 | `tamper` | the run altered what it is judged against; never retried | 14 |
-| `operator_error` | configuration or gate fault; a human must fix something | 22 |
+| `operator_error` | configuration or gate fault, or an invocation ynh refused before any worker started; a human must fix something | 1, 22 |
 | `error` | the runner failed (worker crash, resume failure) | 20, 21 |
 | `aborted` | stopped on purpose (plan rejected, interrupted by ynf) | 30, 31 |
 
