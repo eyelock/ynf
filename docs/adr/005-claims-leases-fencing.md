@@ -8,8 +8,8 @@ Satisfies: FR-15, FR-16, FR-17, NFR-2, NFR-6
 Many ynf instances may see the same item at once: a pool of workers sharing a store, a
 developer's machine and a worker, or two CI workflow runs triggered by a push and a check completing a second apart. When
 one of them picks an item, the others must not, and if that instance dies, the item must not be
-stuck forever. A step can last an hour, because `ynh agent run` defaults to a 60 minute wall-clock
-budget.
+stuck forever. A step can last as long as its lane's `max_wall` plus a five minute margin (an hour
+when the lane sets none), because an agent run can run that long, and a lane may allow days.
 
 ## Decision
 
@@ -93,3 +93,5 @@ optimisation; the lease is the authority, because sweeps and webhooks race acros
 ## History
 
 - 2026-10-03: drafted.
+- 2026-11-23: a step's length is the lane's `max_wall` plus five minutes, not a fixed hour (ynf #222); the
+  lease and its renewal are unchanged, as they never depended on the length.

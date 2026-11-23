@@ -719,7 +719,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	case errors.Is(err, executor.ErrEgress):
 		rec.Outcome, rec.Detail = runner.OperatorError, err.Error()
 	case err != nil:
-		rec.Outcome, rec.Detail = runner.Error, err.Error()
+		rec.Outcome, rec.Detail = executorOutcome(err), err.Error()
 	default:
 		s.result = r.Interpret(out.Exit, out.Stdout, runDir)
 		rec.Exit, rec.Outcome, rec.Detail = out.Exit, s.result.Outcome, s.result.Detail
@@ -765,6 +765,9 @@ func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, ynhH
 		}
 	}
 	y, isYnh := r.(runner.YnhRunner)
+	if isYnh {
+		job.Timeout = runTimeout(e.RunTimeout, y.Cfg.Budgets)
+	}
 	if !isYnh {
 		job.ImageUser = r.Name() == "command" && lane.Run.Command != nil && lane.Run.Command.ImageUser
 		return job, false, nil
@@ -1290,4 +1293,31 @@ func anyList(ss []string) []any {
 		out[i] = s
 	}
 	return out
+}
+
+// wallMargin is how long past a run's max_wall the executor waits before it kills the run, so the
+// runner's own max_wall stop, which reports a budget, comes first.
+const wallMargin = 5 * time.Minute
+
+// runTimeout is how long the executor lets a run live: the run's max_wall plus wallMargin when it
+// has one, so a long budget is not cut short by a fixed hour, and base, the engine's default,
+// when it has none.
+func runTimeout(base time.Duration, b *policy.Budgets) time.Duration {
+	if b == nil || b.MaxWall == "" {
+		return base
+	}
+	wall, err := policy.ParseDuration(b.MaxWall)
+	if err != nil || wall <= 0 {
+		return base
+	}
+	return wall + wallMargin
+}
+
+// executorOutcome is the outcome of a run the executor failed: a deadline is the run spending its
+// wall-clock budget, anything else is an error.
+func executorOutcome(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return runner.Budget
+	}
+	return runner.Error
 }
