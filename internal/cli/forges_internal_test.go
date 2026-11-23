@@ -45,8 +45,25 @@ func TestForgeWorkspaceFollowsTheAPIHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ghe := forgeWorkspace(t.TempDir(), "t", a, fg.Host())
+	ghe := forgeWorkspace(t.TempDir(), "t", a, fg.GitHost())
 	if ghe.Host != "ghe.example.internal" || ghe.RemoteURL("o/r") != "https://ghe.example.internal/o/r.git" {
 		t.Fatalf("ghe: %+v %s", ghe, ghe.RemoteURL("o/r"))
+	}
+	port, err := forge.NewGitHub("t", "https://ghes.example.internal:8443/api/v3/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pw := forgeWorkspace(t.TempDir(), "t", a, port.GitHost())
+	if pw.Host != "ghes.example.internal:8443" || pw.RemoteURL("o/r") != "https://ghes.example.internal:8443/o/r.git" {
+		t.Fatalf("ghes port: %+v %s", pw, pw.RemoteURL("o/r"))
+	}
+	for _, api := range []string{"http://127.0.0.1:4010", "http://localhost:4010", "http://[::1]:4010"} {
+		lo, err := forge.NewGitHub("t", api)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if w := forgeWorkspace(t.TempDir(), "t", a, lo.GitHost()); w.Host != "" || w.RemoteURL != nil {
+			t.Fatalf("a loopback API %s keeps the github.com defaults: %+v", api, w)
+		}
 	}
 }

@@ -375,7 +375,7 @@ func (a *app) engine() (*engine.Engine, error) {
 		MemoryLevel:     level,
 		Store:           st, Forge: fg, ForgeHost: fg.Host(),
 		Trackers:          map[string]tracker.Tracker{fg.Host(): forge.IssueTracker(fg)},
-		Git:               forgeWorkspace(c.WorkPath(), token, workspace.Author{Name: name, Email: email}, fg.Host()),
+		Git:               forgeWorkspace(c.WorkPath(), token, workspace.Author{Name: name, Email: email}, fg.GitHost()),
 		NewForge:          newForge(c.WorkPath(), workspace.Author{Name: name, Email: email}, githubAPI),
 		NewTracker:        newTracker,
 		Executor:          a.executor,
