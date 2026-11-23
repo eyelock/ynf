@@ -3,8 +3,9 @@ name: bump-ynr
 # (YNR_VERSION in ci.yml), so conformance runs against the latest ynr. The pull request's own
 # CI run is the proof: it is merged only if conformance passes.
 on:
-  schedule:
-    - cron: "17 6 * * 1"
+  # The weekly schedule (cron "17 6 * * 1") is held back until ynf #238 brings the GitHub App
+  # token: with github.token the push of ci.yml is refused, so a scheduled run would fail every
+  # week. Put the schedule back together with the token.
   workflow_dispatch:
 permissions:
   contents: write
