@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/eyelock/ynf/internal/policy"
 )
@@ -70,8 +69,8 @@ func (h Harness) check(y policy.Ynh, labels []string) error {
 			problems = append(problems, fmt.Sprintf("max_tokens %d loosens the harness's %d", b.MaxTokens, h.Agent.MaxTokens))
 		}
 		if b.MaxWall != "" && h.Agent.MaxWall != "" {
-			lw, err1 := time.ParseDuration(b.MaxWall)
-			hw, err2 := time.ParseDuration(h.Agent.MaxWall)
+			lw, err1 := policy.ParseDuration(b.MaxWall)
+			hw, err2 := policy.ParseDuration(h.Agent.MaxWall)
 			if err1 != nil {
 				problems = append(problems, fmt.Sprintf("max_wall %q is not a duration", b.MaxWall))
 			} else if err2 == nil && lw > hw {

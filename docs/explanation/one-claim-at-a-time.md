@@ -22,7 +22,8 @@ conflict and move on.
 
 ## Holding it
 
-A step can last an hour, because an agent run can. So the holder renews its lease every thirty
+A step can last as long as its lane's `max_wall` (plus a five minute margin), because an agent run
+can: an hour when the lane sets none, and days when it says so. So the holder renews its lease every thirty
 seconds. If it cannot renew, it assumes another instance has taken over and stops: it tells the
 running agent to interrupt, and writes nothing more.
 

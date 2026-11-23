@@ -1299,7 +1299,7 @@ func runTimeout(base time.Duration, b *policy.Budgets) time.Duration {
 	if b == nil || b.MaxWall == "" {
 		return base
 	}
-	wall, err := time.ParseDuration(b.MaxWall)
+	wall, err := policy.ParseDuration(b.MaxWall)
 	if err != nil || wall <= 0 {
 		return base
 	}
