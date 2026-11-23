@@ -21,8 +21,11 @@ type Author struct{ Name, Email string }
 
 // Workspace manages mirrors and checkouts under Root.
 type Workspace struct {
-	Root   string
-	Token  string
+	Root  string
+	Token string
+	// Host is the forge host the token is for, as in the clone URL. The token's auth header is
+	// scoped to https://<Host>/, so it never goes to another host. Default github.com.
+	Host   string
 	Author Author
 	// RemoteURL maps owner/name to a clone URL. Default https://github.com/<repo>.git.
 	RemoteURL func(repo string) string
@@ -231,6 +234,13 @@ func (w Workspace) Push(ctx context.Context, wt, repo, branch string) error {
 	return err
 }
 
+func (w Workspace) host() string {
+	if w.Host != "" {
+		return w.Host
+	}
+	return "github.com"
+}
+
 func (w Workspace) url(repo string) string {
 	if w.RemoteURL != nil {
 		return w.RemoteURL(repo)
@@ -252,7 +262,7 @@ func (w Workspace) gitIn(ctx context.Context, dir string, stdin *strings.Reader,
 		c.Env = append(c.Env,
 			"GIT_CONFIG_COUNT=2",
 			"GIT_CONFIG_KEY_0=credential.helper", "GIT_CONFIG_VALUE_0=",
-			"GIT_CONFIG_KEY_1=http.https://github.com/.extraheader", "GIT_CONFIG_VALUE_1=AUTHORIZATION: basic "+auth,
+			"GIT_CONFIG_KEY_1=http.https://"+w.host()+"/.extraheader", "GIT_CONFIG_VALUE_1=AUTHORIZATION: basic "+auth,
 		)
 	}
 	if stdin != nil {

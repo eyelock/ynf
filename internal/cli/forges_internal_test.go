@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/eyelock/ynf/internal/forge"
 	"github.com/eyelock/ynf/internal/workspace"
 )
 
@@ -29,5 +30,40 @@ func TestNewForge(t *testing.T) {
 	ws := inst.Git.(workspace.Workspace)
 	if ws.Token != "t0k" || ws.RemoteURL("ghe.example.internal/example-org/x") != "https://ghe.example.internal/example-org/x.git" {
 		t.Fatalf("%+v %s", ws, ws.RemoteURL("ghe.example.internal/example-org/x"))
+	}
+}
+
+// TestForgeWorkspaceFollowsTheAPIHost: with YNF_GITHUB_API on an Enterprise Server, the main
+// forge's workspace clones from that host and scopes its token to it; github.com keeps defaults.
+func TestForgeWorkspaceFollowsTheAPIHost(t *testing.T) {
+	a := workspace.Author{Name: "ynf"}
+	pub := forgeWorkspace(t.TempDir(), "t", a, "github.com")
+	if pub.Host != "" || pub.RemoteURL != nil {
+		t.Fatalf("github.com: %+v", pub)
+	}
+	fg, err := forge.NewGitHub("t", "https://ghe.example.internal/api/v3/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ghe := forgeWorkspace(t.TempDir(), "t", a, fg.GitHost())
+	if ghe.Host != "ghe.example.internal" || ghe.RemoteURL("o/r") != "https://ghe.example.internal/o/r.git" {
+		t.Fatalf("ghe: %+v %s", ghe, ghe.RemoteURL("o/r"))
+	}
+	port, err := forge.NewGitHub("t", "https://ghes.example.internal:8443/api/v3/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pw := forgeWorkspace(t.TempDir(), "t", a, port.GitHost())
+	if pw.Host != "ghes.example.internal:8443" || pw.RemoteURL("o/r") != "https://ghes.example.internal:8443/o/r.git" {
+		t.Fatalf("ghes port: %+v %s", pw, pw.RemoteURL("o/r"))
+	}
+	for _, api := range []string{"http://127.0.0.1:4010", "http://localhost:4010", "http://[::1]:4010"} {
+		lo, err := forge.NewGitHub("t", api)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if w := forgeWorkspace(t.TempDir(), "t", a, lo.GitHost()); w.Host != "" || w.RemoteURL != nil {
+			t.Fatalf("a loopback API %s keeps the github.com defaults: %+v", api, w)
+		}
 	}
 }
