@@ -1036,7 +1036,8 @@ func TestAdoptStartsAgainWhenTheAuthorPushesMeanwhile(t *testing.T) {
 	ctx := context.Background()
 	head := h.prBranch(t)
 	h.adoptPR(t, head)
-	t.Setenv("RACE_REMOTE", h.remote)
+	// A process run keeps none of the host's environment but an allow-list, so the lane names the remote.
+	h.f.lanes = strings.ReplaceAll(h.f.lanes, "$RACE_REMOTE", h.remote)
 	if err := h.e.Sweep(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -1510,7 +1511,8 @@ func (s *syncBuffer) String() string {
 func startSlow(t *testing.T, h *harness) (gate string, done chan error) {
 	t.Helper()
 	gate = filepath.Join(t.TempDir(), "gate")
-	t.Setenv("SLOW_GATE", gate)
+	// A process run keeps none of the host's environment but an allow-list, so the lane names the gate.
+	h.f.lanes = strings.ReplaceAll(h.f.lanes, "$SLOW_GATE", gate)
 	h.f.labels[1] = []string{"ynf:slow"}
 	done = make(chan error, 1)
 	go func() { done <- h.e.Sweep(context.Background()) }()

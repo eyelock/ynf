@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 
@@ -71,5 +73,26 @@ func TestFindBesideFollowsHomebrewLayout(t *testing.T) {
 	}
 	if findBeside(link, "nope") != "" {
 		t.Fatal("missing binary found")
+	}
+}
+
+// TestAttended: a run is attended only when it is not detached and its input is a terminal, so a
+// script or CI job (a pipe, a file, /dev/null) is not taken for a person (ADR-007).
+func TestAttended(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = r.Close() })
+	t.Cleanup(func() { _ = w.Close() })
+	null, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = null.Close() })
+	for name, in := range map[string]io.Reader{"reader": strings.NewReader(""), "pipe": r, "dev/null": null} {
+		if attended(false, in) {
+			t.Errorf("%s: input that is no terminal counted as attended", name)
+		}
 	}
 }

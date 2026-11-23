@@ -10,7 +10,7 @@ ynf [global flags] <command> [flags]
 |---|---|---|
 | `--config <path>` | `config.yaml` in `~/.agents/factory/`, `~/.ynh/ynf/`, `~/.ynm/ynf/` or `~/.ynf/` | The config file. `YNF_CONFIG` is the fallback. |
 | `--format text\|json` | `text` | `json` prints one object per command. `YNF_FORMAT` is the fallback. |
-| `--interactive` | off | Allows the uncontained `process` executor (ADR-007). |
+| `--interactive` | off | Allows the uncontained `process` executor (ADR-007). `ynf start` sets it itself only when its input is a terminal; a script or CI job passes it. A process run keeps only an allow-listed part of the host's environment (`PATH`, `HOME`, locale, proxy and `OTEL_*` settings), not its tokens or credentials. |
 | `--log-file <path>` | none | Also write the log to this file, as it happens. `YNF_LOG_FILE` is the fallback. |
 | `--log-format text\|json` | `text` | `text` is logfmt for people; `json` is one object per line for tools. `YNF_LOG_FORMAT` is the fallback. |
 | `-v` | off | Debug logging to stderr. |

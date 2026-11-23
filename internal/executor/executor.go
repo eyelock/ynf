@@ -297,7 +297,7 @@ func (Process) Run(ctx context.Context, j Job) (Output, error) {
 		return Output{}, errors.New("empty command")
 	}
 	cache := filepath.Join(j.RunDir, "cache")
-	environ := os.Environ()
+	environ := hostEnv(os.Environ())
 	if j.NoOTLP {
 		environ = spool.StripOTLP(environ)
 	}
@@ -309,6 +309,30 @@ func (Process) Run(ctx context.Context, j Job) (Output, error) {
 	)
 	env = appendJobEnv(env, j)
 	return run(ctx, j.Timeout, j.Worktree, j.Argv[0], j.Argv[1:], env)
+}
+
+// hostEnvKeys are the host variables a process run keeps: what a command needs to find its tools
+// and behave in a terminal, and the proxy and telemetry settings the run's network and trace need.
+// Everything else, GITHUB_TOKEN, YNF_START_TOKEN and cloud credentials among it, is left out; a
+// run gets a secret only when its lane names it (the job's Env and Secrets).
+var hostEnvKeys = map[string]bool{
+	"PATH": true, "HOME": true, "USER": true, "LOGNAME": true, "SHELL": true, "TERM": true,
+	"LANG": true, "TZ": true, "TMPDIR": true,
+	"XDG_CONFIG_HOME": true, "XDG_DATA_HOME": true, "XDG_STATE_HOME": true,
+	"HTTPS_PROXY": true, "HTTP_PROXY": true, "NO_PROXY": true,
+	"https_proxy": true, "http_proxy": true, "no_proxy": true,
+}
+
+// hostEnv filters environ down to the variables a process run may inherit.
+func hostEnv(environ []string) []string {
+	out := make([]string, 0, len(hostEnvKeys))
+	for _, kv := range environ {
+		k, _, _ := strings.Cut(kv, "=")
+		if hostEnvKeys[k] || strings.HasPrefix(k, "LC_") || strings.HasPrefix(k, "OTEL_") {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 func run(ctx context.Context, timeout time.Duration, dir, name string, args, env []string) (Output, error) {
