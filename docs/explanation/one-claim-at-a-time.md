@@ -20,6 +20,10 @@ To claim an item, an instance writes a lease into it: its name, an expiry ninety
 an **epoch** one higher than the last. Only one compare-and-swap can win. The losers see a
 conflict and move on.
 
+One case the lease cannot settle is a second step in the same process: it carries the same name
+as the first, so the lease looks like a restart's. Within one process the engine keeps its own
+list of the items it is stepping, and drops a second event for one of them before it claims.
+
 ## Holding it
 
 A step can last an hour, because an agent run can. So the holder renews its lease every thirty

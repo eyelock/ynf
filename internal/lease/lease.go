@@ -61,8 +61,12 @@ type Holder struct {
 	lost    bool
 }
 
-// Claim takes the item if no live lease is held on it. stepID identifies this step's side
-// effects (ADR-005: idempotency per step).
+// Claim takes the item unless a live lease held by another owner is on it. It does take over a
+// live lease whose Owner is the same: that is a restart of this instance, which has lost the step
+// the lease was for. The lease cannot tell that from a second step of this very process, so a
+// caller that may step one item concurrently in one process must keep a second step off it before
+// claiming (engine.Handle's in-flight set does), or the running step loses its lease on its next
+// renewal. stepID identifies this step's side effects (ADR-005: idempotency per step).
 func Claim(ctx context.Context, s store.Store, key, owner, stepID string, ttl time.Duration, now func() time.Time) (*Holder, error) {
 	it, v, err := Load(ctx, s, key)
 	if err != nil {

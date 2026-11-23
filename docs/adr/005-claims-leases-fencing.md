@@ -27,7 +27,12 @@ instance owns an item only once this write succeeds:
 ```
 
 The write is `Put(item, doc, ifVersion)` and only succeeds when there is no lease or the lease
-has expired. Every successful claim increments `epoch` and mints a new `step_id`.
+has expired, or the lease names the same owner (a restart of this instance, which has lost the
+step the lease was for). Every successful claim increments `epoch` and mints a new `step_id`.
+
+The lease cannot tell a restart from a second step of the same process, as both carry the owner.
+Within one process, then, the engine's in-flight set, not the lease, keeps a second step off an
+item that is running; a webhook for it is dropped before it claims (ynf #217).
 
 **Heartbeat.** The holder renews by compare-and-swap on the same epoch every 30 seconds, with a 90
 second TTL (default, 2026-10-03). If renewal fails, or has not succeeded for 70% of the TTL, the

@@ -145,6 +145,13 @@ type ActionRecord struct {
 // item's previous step and to the intake of the event that started it, and leaves its own span on
 // the item for the next step to link to.
 func (e *Engine) Handle(ctx context.Context, key string, ev event.Event) (err error) {
+	// A step of this process already holds the item: its lease names our Owner, so lease.Claim
+	// would take it over and the running step's next renewal would lose it.
+	if _, busy := e.inFlight.LoadOrStore(key, struct{}{}); busy {
+		e.log().Debug("already stepping in this process", "item", key)
+		return nil
+	}
+	defer e.inFlight.Delete(key)
 	stepID := e.NewID()
 	itemKey := attribute.String(telemetry.AttrItemKey, key)
 	var links []trace.Link
