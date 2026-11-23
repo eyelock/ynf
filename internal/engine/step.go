@@ -546,7 +546,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		_ = s.g.RemoveCheckout(s.wt)
 		s.wt = ""
 	}
-	stepDir := filepath.Join(e.WorkDir, "steps", strings.NewReplacer("/", "_", "#", "_").Replace(it.Key), runID)
+	stepDir := filepath.Join(e.WorkDir, "steps", stepsKey(it.Key), runID)
 	runDir := filepath.Join(stepDir, "run")
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return fail(runner.Error, err)

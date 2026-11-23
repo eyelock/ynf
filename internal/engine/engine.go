@@ -372,6 +372,9 @@ func (e *Engine) wantLane(name string) bool {
 // Sweep runs every enrolled repository's lane searches and starts a step for each new ticket.
 func (e *Engine) Sweep(ctx context.Context) error {
 	e.FlushMemory(ctx)
+	if err := e.Prune(ctx); err != nil {
+		e.log().Warn("pruning expired step folders and seen keys failed", "err", err)
+	}
 	repos, err := e.Enrolled(ctx)
 	if err != nil {
 		return err

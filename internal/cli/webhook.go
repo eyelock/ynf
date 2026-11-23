@@ -105,7 +105,11 @@ func (w *webhooks) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if id != "" {
-		if _, err := w.e.Store.Put(r.Context(), "seen/github/"+id, []byte("{}"), ""); errors.Is(err, store.ErrConflict) {
+		seenAt := time.Now()
+		if w.e.Now != nil {
+			seenAt = w.e.Now()
+		}
+		if _, err := w.e.Store.Put(r.Context(), "seen/github/"+id, engine.SeenDoc(seenAt), ""); errors.Is(err, store.ErrConflict) {
 			w.e.MirrorDelivery(ctx, name, id, "", telemetry.OutcomeDeduplicated)
 			_, _ = io.WriteString(rw, "duplicate\n")
 			return
