@@ -375,7 +375,7 @@ func (a *app) engine() (*engine.Engine, error) {
 		MemoryLevel:     level,
 		Store:           st, Forge: fg, ForgeHost: fg.Host(),
 		Trackers:          map[string]tracker.Tracker{fg.Host(): forge.IssueTracker(fg)},
-		Git:               workspace.Workspace{Root: c.WorkPath(), Token: token, Author: workspace.Author{Name: name, Email: email}},
+		Git:               forgeWorkspace(c.WorkPath(), token, workspace.Author{Name: name, Email: email}, fg.Host()),
 		NewForge:          newForge(c.WorkPath(), workspace.Author{Name: name, Email: email}, githubAPI),
 		NewTracker:        newTracker,
 		Executor:          a.executor,
@@ -426,6 +426,19 @@ func configRepo(c *config.Config) string {
 	return c.Factory.Repo
 }
 
+// forgeWorkspace is the git workspace for the forge at host: it clones and pushes to that host,
+// and sends the token only there. github.com keeps the workspace's defaults.
+func forgeWorkspace(root, token string, author workspace.Author, host string) workspace.Workspace {
+	ws := workspace.Workspace{Root: root, Token: token, Author: author}
+	if host != "github.com" {
+		ws.Host = host
+		ws.RemoteURL = func(repo string) string {
+			return "https://" + host + "/" + strings.TrimPrefix(repo, host+"/") + ".git"
+		}
+	}
+	return ws
+}
+
 // githubAPI is a GitHub instance's API: api.github.com for the public service, /api/v3 on an
 // Enterprise Server.
 func githubAPI(host string) string {
@@ -455,10 +468,7 @@ func newForge(root string, author workspace.Author, api func(host string) string
 		if err != nil {
 			return engine.ForgeInstance{}, err
 		}
-		ws := workspace.Workspace{Root: root, Token: token, Author: author, RemoteURL: func(repo string) string {
-			return "https://" + host + "/" + strings.TrimPrefix(repo, host+"/") + ".git"
-		}}
-		return engine.ForgeInstance{Host: host, Forge: fg, Git: ws, Tracker: forge.IssueTracker(fg)}, nil
+		return engine.ForgeInstance{Host: host, Forge: fg, Git: forgeWorkspace(root, token, author, host), Tracker: forge.IssueTracker(fg)}, nil
 	}
 }
 
