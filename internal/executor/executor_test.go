@@ -352,3 +352,27 @@ func TestDockerGitInsideTheCheckout(t *testing.T) {
 		t.Fatalf("git in the container saw:\n%s", got)
 	}
 }
+
+// TestProcessKeepsSecretsOut: a process run starts from an allow-listed environment, so the host's
+// tokens and credentials never reach it, while its lane's own Env and Secrets do.
+func TestProcessKeepsSecretsOut(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ghp_host")
+	t.Setenv("YNF_START_TOKEN", "start_host")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "aws_host")
+	t.Setenv("LC_ALL", "C")
+	wt, rd := t.TempDir(), t.TempDir()
+	out, err := executor.Process{}.Run(context.Background(), executor.Job{
+		Argv:     []string{"sh", "-c", `printf "%s|%s|%s|%s|%s|%s" "$GITHUB_TOKEN" "$YNF_START_TOKEN" "$AWS_SECRET_ACCESS_KEY" "$LC_ALL" "$PATH" "$LANE_TOKEN"`},
+		Worktree: wt, RunDir: rd, Secrets: map[string]string{"LANE_TOKEN": "lane"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Split(string(out.Stdout), "|")
+	if len(got) != 6 || got[0] != "" || got[1] != "" || got[2] != "" {
+		t.Fatalf("host secrets reached the run: %q", got)
+	}
+	if got[3] != "C" || got[4] == "" || got[5] != "lane" {
+		t.Fatalf("the run lost an allowed or lane variable: %q", got)
+	}
+}
