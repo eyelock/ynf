@@ -96,6 +96,17 @@ jobs:
           sha256sum --check --strict wanted.txt
           tar -xzf "$ynm" -C "$bin" ynm
           echo "$bin" >> "$GITHUB_PATH"
+      - name: ynm reads a Wheelhouse's committed config (the sync block)
+        # The factory image pairs with this ynm (images/factory/versions.env). A ynm that refuses the
+        # `sync` block a Wheelhouse commits fails a factory run in that repository (ynf #216).
+        run: |
+          set -euo pipefail
+          repo="$(mktemp -d)"
+          git -C "$repo" init -q
+          mkdir "$repo/.ynm"
+          printf '{"anchor":"5ec94d2278ce7ea710543f2a305a63e74aeb98a0","sync":{"auto":true,"intervalMinutes":5}}\n' > "$repo/.ynm/config.json"
+          cd "$repo"
+          YNM_HOME="$repo/home" ynm status --json > /dev/null
       - name: ynr conformance
         run: |
           set -euo pipefail
