@@ -82,7 +82,8 @@
           "$ref": "#/$defs/attempts"
         },
         "retention": {
-          "$ref": "#/$defs/duration"
+          "$ref": "#/$defs/duration",
+          "description": "How long a finished step's run folder under <work_dir>/steps (task text, trajectories, logs, the run's ynh home) is kept before ynf removes it, at the start of each sweep. Default 90d; defaults.retention applies when the lane sets none."
         },
         "no_ci_after": {
           "$ref": "#/$defs/duration",
@@ -181,7 +182,8 @@
           "$ref": "#/$defs/attempts"
         },
         "retention": {
-          "$ref": "#/$defs/duration"
+          "$ref": "#/$defs/duration",
+          "description": "How long a finished step's run folder under <work_dir>/steps (task text, trajectories, logs, the run's ynh home) is kept before ynf removes it, at the start of each sweep. Default 90d; defaults.retention applies when the lane sets none."
         },
         "no_ci_after": {
           "$ref": "#/$defs/duration",
