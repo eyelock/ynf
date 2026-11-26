@@ -294,3 +294,23 @@ func TestYnhEffort(t *testing.T) {
 		t.Fatalf("%+v", r.Usage)
 	}
 }
+
+// TestYnhMaxWall: ynh takes Go durations only, so a day count is converted before the call, a Go
+// duration passes as written, and one ynf cannot read is refused before ynh is called.
+func TestYnhMaxWall(t *testing.T) {
+	for in, want := range map[string]string{"2d": "48h0m0s", "10m": "10m", "1h30m": "1h30m", "90s": "90s"} {
+		y := runner.YnhRunner{Cfg: policy.Ynh{Harness: "h", Budgets: &policy.Budgets{MaxWall: in}}}
+		argv, err := y.Command(runner.Spec{TaskFile: "t", RunDir: "r"})
+		if err != nil {
+			t.Fatalf("%s: %v", in, err)
+		}
+		i := slices.Index(argv, "--max-wall")
+		if i < 0 || argv[i+1] != want {
+			t.Errorf("max_wall %s: got %v, want --max-wall %s", in, argv, want)
+		}
+	}
+	y := runner.YnhRunner{Cfg: policy.Ynh{Harness: "h", Budgets: &policy.Budgets{MaxWall: "soon"}}}
+	if _, err := y.Command(runner.Spec{}); err == nil || !strings.Contains(err.Error(), `"soon"`) {
+		t.Fatalf("invalid max_wall: %v", err)
+	}
+}

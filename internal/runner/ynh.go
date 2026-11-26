@@ -111,7 +111,13 @@ func (y YnhRunner) Command(s Spec) ([]string, error) {
 			argv = append(argv, "--max-tokens", strconv.Itoa(b.MaxTokens))
 		}
 		if b.MaxWall != "" {
-			argv = append(argv, "--max-wall", b.MaxWall)
+			// ynh takes Go durations only, so a day count (2d) is converted here; a value already in
+			// Go form is passed as written.
+			wall, err := goDuration(b.MaxWall)
+			if err != nil {
+				return nil, fmt.Errorf("max_wall %q is not a duration: %w", b.MaxWall, err)
+			}
+			argv = append(argv, "--max-wall", wall)
 		}
 	}
 	if len(y.Cfg.SensorScope) > 0 {
@@ -130,6 +136,19 @@ func (y YnhRunner) Command(s Spec) ([]string, error) {
 		argv = append(argv, "--sensor-overlay", string(b))
 	}
 	return argv, nil
+}
+
+// goDuration returns s as a duration ynh accepts: it is refused when ynf cannot read it, converted
+// when it counts days, and otherwise returned unchanged.
+func goDuration(s string) (string, error) {
+	d, err := policy.ParseDuration(s)
+	if err != nil {
+		return "", err
+	}
+	if strings.HasSuffix(s, "d") {
+		return d.String(), nil
+	}
+	return s, nil
 }
 
 // Interpret implements Runner. ynh prints one JSON object on every path with --format json.
