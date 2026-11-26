@@ -197,7 +197,7 @@ converged, that the record shows an absolute `--harness` path and the ynh featur
 ynh home is as it was. `ynf.lane.harness` holds what the lane names, `.`.
 
 The check then runs a second lane, whose harness is pinned from a local bare repository at a tag
-(`file://.../chain.git@v0.1.0`), with a target repository that carries no harness at all. A pin
+(`file://.../chain.git@<full-sha>`), with a target repository that carries no harness at all. A pin
 always takes the install step: ynf has ynh install that tag into the run's own home, and the check
 asserts the run converged, that the run record names the harness, its version, the pin and the
 commit the tag points at, and that your ynh home is as it was. `ynf.lane.harness` holds the id ynh

@@ -19,6 +19,11 @@ import (
 type HarnessSource struct {
 	Dir string
 	Pin *policy.Pin
+	// Trust has ynh record the acceptance of what the harness runs as it installs it
+	// (`ynh install --trust`). The caller sets it for a ynh that has the trust gate; the lane's
+	// own pin is held to a full SHA before, and ynh refuses --trust when anything else that runs
+	// is not pinned to one.
+	Trust bool
 }
 
 func (s HarnessSource) String() string {
@@ -76,6 +81,9 @@ func InstallHarness(ctx context.Context, src HarnessSource, ynhHome string) (Ins
 		args = append(args, src.Dir)
 	default:
 		return Installed{}, errors.New("no harness to install")
+	}
+	if src.Trust {
+		args = append(args, "--trust")
 	}
 	if err := os.MkdirAll(ynhHome, 0o755); err != nil {
 		return Installed{}, err

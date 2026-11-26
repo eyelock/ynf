@@ -310,7 +310,7 @@ func newHarness(t *testing.T) *harness {
 	if err := os.MkdirAll(filepath.Join(src, ".agents/harness"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(src, ".agents/harness/plugin.json"), []byte(testManifest), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(src, ".agents/harness/plugin.json"), []byte(seedManifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	git(t, src, "add", "-A")
@@ -726,6 +726,7 @@ func TestYnhRefusalIsNotRetried(t *testing.T) {
 // installs records what InstallHarness was asked, standing in for `ynh install` into the run's home.
 type installs struct {
 	dirs, homes []string
+	trusts      []bool // whether each install asked ynh to record the acceptance (--trust)
 	pins        []policy.Pin
 	result      runner.Installed // what a pin installs; the id is local/installed unless it says
 	err         error
@@ -733,6 +734,7 @@ type installs struct {
 
 func (in *installs) install(_ context.Context, src runner.HarnessSource, home string) (runner.Installed, error) {
 	in.homes = append(in.homes, home)
+	in.trusts = append(in.trusts, src.Trust)
 	if src.Pin != nil {
 		in.pins = append(in.pins, *src.Pin)
 	} else {
@@ -1439,6 +1441,10 @@ func TestMemoryOutageNeverStopsAStep(t *testing.T) {
 		t.Fatalf("a memory outage stopped the step: %s %s", it.State, it.Reason)
 	}
 }
+
+// seedManifest is the harness newHarness commits to the test repository; a test sets it first to
+// run a lane against another.
+var seedManifest = testManifest
 
 // testManifest is the test repository's harness, which an image built from it carries.
 const testManifest = `{"name":"h","env_passthrough":["ANTHROPIC_API_KEY","HTTPS_PROXY","HTTP_PROXY","NO_PROXY"],"focuses":{"tidy":{"prompt":"TIDY FOCUS PROMPT","profile":"careful"}},"agent":{"max_turns":12,"max_wall":"30m"},"sensors":{"lint":{},"test":{}}}`
@@ -2578,5 +2584,114 @@ func TestAWebhookDuringARunDoesNotCancelIt(t *testing.T) {
 	}
 	if it := h.item(t, 1); it.State != item.Proposed || it.Attempts != 0 {
 		t.Fatalf("the run did not finish cleanly: %s attempts=%d %s", it.State, it.Attempts, it.Reason)
+	}
+}
+
+// trustedYnh is a detected ynh that has the trust gate and runs a folder by path.
+func trustedYnh(context.Context) runner.Detection {
+	return runner.Detection{Found: true, Version: "0.19.0", Capabilities: runner.TrustGateCapabilities, Features: []string{runner.FeatureHarnessPath}}
+}
+
+// TestFolderRunPassesTrustOnAYnhWithTheGate: a folder lane run by path gets --trust on ynh agent
+// run when ynh has the trust gate, and not on a ynh that does not know the flag (ynf #241).
+func TestFolderRunPassesTrustOnAYnhWithTheGate(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		det  func(context.Context) runner.Detection
+		want bool
+	}{
+		{"gate", trustedYnh, true},
+		{"no gate", func(context.Context) runner.Detection {
+			return runner.Detection{Found: true, Version: "0.12.0", Capabilities: "0.10.0", Features: []string{runner.FeatureHarnessPath}}
+		}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("YNH_HOME", t.TempDir())
+			h := newHarness(t)
+			calls := fakeYnh(t)
+			h.e.InstallHarness = (&installs{}).install
+			h.e.DetectYnh = c.det
+			h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "sk-test"}[k] }
+			h.f.labels[1] = []string{"ynf:agentic"}
+			if err := h.e.Sweep(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if it := h.item(t, 1); it.State != item.Proposed {
+				t.Fatalf("%s %s", it.State, it.Reason)
+			}
+			if got := strings.Contains(string(callsOf(t, calls)), " --trust "); got != c.want {
+				t.Errorf("--trust passed: %v, want %v:\n%s", got, c.want, callsOf(t, calls))
+			}
+		})
+	}
+}
+
+// TestFolderInstallAsksForTrustOnAYnhWithTheGate: a folder installed for a ynh that takes only an
+// id, and a pin, are installed with --trust when ynh has the gate.
+func TestFolderInstallAsksForTrustOnAYnhWithTheGate(t *testing.T) {
+	t.Setenv("YNH_HOME", t.TempDir())
+	h := newHarness(t)
+	fakeYnh(t)
+	in := &installs{}
+	h.e.InstallHarness = in.install
+	h.e.DetectYnh = func(context.Context) runner.Detection {
+		return runner.Detection{Found: true, Version: "0.19.0", Capabilities: runner.TrustGateCapabilities}
+	}
+	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "sk-test"}[k] }
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(in.trusts) != 1 || !in.trusts[0] {
+		t.Errorf("the folder install should ask for --trust: %v", in.trusts)
+	}
+}
+
+// TestFolderWithAFloatingIncludeIsAnOperatorError: a folder harness that includes another
+// repository at a tag or branch is refused before ynh starts, naming each include.
+func TestFolderWithAFloatingIncludeIsAnOperatorError(t *testing.T) {
+	old := seedManifest
+	seedManifest = strings.Replace(testManifest, `"focuses"`, `"includes":[{"git":"github.com/o/skills","ref":"v1"}],"focuses"`, 1)
+	t.Cleanup(func() { seedManifest = old })
+	t.Setenv("YNH_HOME", t.TempDir())
+	h := newHarness(t)
+	calls := fakeYnh(t)
+	h.e.InstallHarness = (&installs{}).install
+	h.e.DetectYnh = trustedYnh
+	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "sk-test"}[k] }
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	it := h.item(t, 1)
+	if it.State != item.Escalated || it.LastRun.Outcome != "operator_error" || !strings.Contains(it.LastRun.Detail, "github.com/o/skills@v1: not a full 40-character commit SHA") {
+		t.Fatalf("%s %+v", it.State, it.LastRun)
+	}
+	if b, _ := os.ReadFile(calls); len(b) != 0 {
+		t.Errorf("ynh should not have started:\n%s", b)
+	}
+}
+
+// TestUntrustedRefusalEndsAsOperatorError: ynh's trust-gate refusal (exit 1, error_code untrusted)
+// ends the run as operator_error, which is not retried.
+func TestUntrustedRefusalEndsAsOperatorError(t *testing.T) {
+	t.Setenv("YNH_HOME", t.TempDir())
+	h := newHarness(t)
+	dir := t.TempDir()
+	script := "#!/bin/sh\necho '{\"exit_code\":1,\"error_code\":\"untrusted\",\"reason\":\"refusing to run h: ynh trust accept\"}'\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(dir, "ynh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	h.e.InstallHarness = (&installs{}).install
+	h.e.DetectYnh = trustedYnh
+	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "sk-test"}[k] }
+	h.f.labels[1] = []string{"ynf:agentic"}
+	if err := h.e.Sweep(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	it := h.item(t, 1)
+	if it.State != item.Escalated || it.LastRun.Outcome != "operator_error" || !strings.Contains(it.LastRun.Detail, "untrusted: refusing to run h") {
+		t.Fatalf("%s %+v", it.State, it.LastRun)
 	}
 }

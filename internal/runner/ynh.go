@@ -84,6 +84,9 @@ func (y YnhRunner) Command(s Spec) ([]string, error) {
 	if profile == "" && s.Focus != nil {
 		profile = s.Focus.Profile
 	}
+	if s.Trust && !s.InImage {
+		argv = append(argv, "--trust")
+	}
 	if profile != "" {
 		argv = append(argv, "--profile", profile)
 	}
@@ -159,7 +162,10 @@ func (y YnhRunner) Interpret(exit int, stdout []byte, _ string) Result {
 	}
 	r := Result{Outcome: outcome}
 	var res struct {
-		Reason    string `json:"reason"`
+		Reason string `json:"reason"`
+		// ErrorCode is ynh's structured code of a refusal: "untrusted" when the trust gate
+		// refused the harness.
+		ErrorCode string `json:"error_code"`
 		SessionID string `json:"session_id"`
 		Backend   string `json:"backend"`
 		Model     string `json:"model"`
@@ -188,6 +194,12 @@ func (y YnhRunner) Interpret(exit int, stdout []byte, _ string) Result {
 	}
 	if json.Unmarshal(stdout, &res) == nil {
 		r.Detail, r.Session = res.Reason, res.SessionID
+		// A harness nobody accepted is the operator's to fix, whatever exit code carried it, and a
+		// retry would be refused the same way. The detail leads with the code so a record says why.
+		if res.ErrorCode == "untrusted" {
+			r.Outcome = OperatorError
+			r.Detail = "untrusted: " + res.Reason
+		}
 		if res.Model != "" {
 			r.Model = res.Backend + "/" + res.Model
 		}

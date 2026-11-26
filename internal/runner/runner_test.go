@@ -314,3 +314,75 @@ func TestYnhMaxWall(t *testing.T) {
 		t.Fatalf("invalid max_wall: %v", err)
 	}
 }
+
+// TestYnhTrustFlag: --trust goes to `ynh agent run` for a folder run when asked, never inside an
+// image, whose harness ynh accepted when it built it (ynf #241).
+func TestYnhTrustFlag(t *testing.T) {
+	y := runner.YnhRunner{Cfg: policy.Ynh{Harness: "/work/h"}}
+	argv, err := y.Command(runner.Spec{TaskFile: "t", RunDir: "r", Trust: true})
+	if err != nil || !slices.Contains(argv, "--trust") {
+		t.Errorf("a folder run on a ynh with the gate should pass --trust: %v %v", argv, err)
+	}
+	argv, _ = y.Command(runner.Spec{TaskFile: "t", RunDir: "r"})
+	if slices.Contains(argv, "--trust") {
+		t.Errorf("--trust was not asked for: %v", argv)
+	}
+	argv, _ = y.Command(runner.Spec{TaskFile: "t", RunDir: "r", Trust: true, InImage: true})
+	if slices.Contains(argv, "--trust") {
+		t.Errorf("an image's harness is accepted at build; no --trust: %v", argv)
+	}
+}
+
+// TestYnhUntrustedIsAnOperatorError: ynh's trust-gate refusal (exit 1, error_code untrusted) ends
+// as operator_error, never retried, and its detail says why.
+func TestYnhUntrustedIsAnOperatorError(t *testing.T) {
+	out := []byte(`{"exit_code":1,"error_code":"untrusted","reason":"refusing to run chain: ynh trust accept local/chain"}`)
+	for _, exit := range []int{1, 20} {
+		r := runner.YnhRunner{}.Interpret(exit, out, "")
+		if r.Outcome != runner.OperatorError || !strings.HasPrefix(r.Detail, "untrusted: refusing to run chain") {
+			t.Errorf("exit %d: %+v", exit, r)
+		}
+	}
+}
+
+// TestFloatingIncludes: a remote include is held to a full SHA; an include of the harness's own
+// repository, and one pinned at a full SHA, are not listed.
+func TestFloatingIncludes(t *testing.T) {
+	sha := strings.Repeat("a", 40)
+	h, err := runner.ParseManifest([]byte(`{"includes":[
+		{"git":"github.com/o/floats"},
+		{"git":"github.com/o/tagged","ref":"v1"},
+		{"git":"github.com/o/short","ref":"3f9c2e1"},
+		{"git":"github.com/o/pinned","ref":"` + sha + `"},
+		{"git":"."},{"local":"./x"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := h.FloatingIncludes()
+	if len(got) != 3 || !strings.HasPrefix(got[0], "github.com/o/floats: no ref") || !strings.HasPrefix(got[1], "github.com/o/tagged@v1") || !strings.HasPrefix(got[2], "github.com/o/short@3f9c2e1") {
+		t.Errorf("%q", got)
+	}
+	if h.CheckIncludes() == nil {
+		t.Error("floating includes should be refused")
+	}
+	ok, _ := runner.ParseManifest([]byte(`{"includes":[{"git":"github.com/o/pinned","ref":"` + sha + `"}]}`))
+	if err := ok.CheckIncludes(); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestDetectionTrusts(t *testing.T) {
+	for _, c := range []struct {
+		d    runner.Detection
+		want bool
+	}{
+		{runner.Detection{Found: true, Capabilities: "0.11.0"}, true},
+		{runner.Detection{Found: true, Capabilities: "0.12.0"}, true},
+		{runner.Detection{Found: true, Capabilities: "0.10.0"}, false},
+		{runner.Detection{Capabilities: "0.11.0"}, false},
+	} {
+		if got := c.d.Trusts(); got != c.want {
+			t.Errorf("%+v: %v", c.d, got)
+		}
+	}
+}

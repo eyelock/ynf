@@ -43,6 +43,10 @@ type Spec struct {
 	// HostAutoApprove is --auto-approve asked for by the person who started the work, for a run on
 	// their own machine (ADR-007). A lane's setting never applies outside containment.
 	HostAutoApprove string
+	// Trust passes --trust to `ynh agent run`, for a harness run from a folder on a ynh that has
+	// the trust gate: ynh then accepts the folder's remote includes if each is pinned to a full
+	// SHA, and refuses the run if one floats. An installed harness never takes it at run time.
+	Trust bool
 }
 
 // Result is a run's outcome in ynf's terms.

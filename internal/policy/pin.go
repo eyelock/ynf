@@ -11,9 +11,10 @@ import (
 )
 
 // Pin is a harness pinned from a repository: the repository and the tag or commit to take from it.
-// A lane writes it as run.ynh.harness: <repository>@<tag-or-commit>, such as
-// github.com/org/harness@v1.2.0 or file:///srv/harness.git@3f9c2e1. ynh takes the same two things
-// as `ynh install <repository> --ref <tag-or-commit>`.
+// A lane writes it as run.ynh.harness: <repository>@<full-sha>, such as
+// github.com/org/harness@0123456789abcdef0123456789abcdef01234567. ynh takes the same two things
+// as `ynh install <repository> --ref <full-sha>`. A tag or a short SHA parses, and CheckRef refuses it
+// with the full SHA it points to.
 type Pin struct {
 	Repo string `json:"repo"`
 	Ref  string `json:"ref"`
@@ -45,12 +46,15 @@ var (
 	scpRepo = regexp.MustCompile(`^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[^\s]+$`)
 	// hostRepo is a host and a path, such as github.com/org/repo.
 	hostRepo = regexp.MustCompile(`^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+/[^\s]+$`)
+	// fullSHA is a commit SHA written out in full; shortSHA is an abbreviation of one.
+	fullSHA  = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
+	shortSHA = regexp.MustCompile(`^[0-9a-fA-F]{4,39}$`)
 )
 
-// isRepo reports whether s names a repository ynh can clone: a URL with a scheme, an scp-like
+// IsRepo reports whether s names a repository ynh can clone: a URL with a scheme, an scp-like
 // address, or a host and a path. An installed harness's id, such as local/name@1.0, or a folder,
 // is not one.
-func isRepo(s string) bool {
+func IsRepo(s string) bool {
 	return strings.Contains(s, "://") && !strings.ContainsAny(s, " \t\n") || scpRepo.MatchString(s) || hostRepo.MatchString(s)
 }
 
@@ -64,7 +68,7 @@ func ParsePin(harness string) (p Pin, ok bool, err error) {
 		return p, false, nil
 	}
 	repo, ref := harness[:i], harness[i+1:]
-	if !isRepo(repo) || strings.Contains(ref, ":") {
+	if !IsRepo(repo) || strings.Contains(ref, ":") {
 		return p, false, nil
 	}
 	if strings.HasPrefix(repo, "-") {
@@ -80,32 +84,129 @@ func ParsePin(harness string) (p Pin, ok bool, err error) {
 	return p, true, nil
 }
 
-// CheckRef refuses a pin whose ref is a branch: it moves, so a run could not be repeated. It reads
-// the pin repository's refs with git ls-remote against CloneURL, so it needs the repository; one it
-// cannot reach is an error, not a pass. A ref that is neither a branch nor a tag there is left to
-// ynh, which takes a commit and refuses anything it cannot find. `ynf harness`, a run and
-// `ynf lanes validate` all use this one check.
+// IsFullSHA reports whether s is a full commit SHA: 40 hexadecimal digits. A tag, a branch and a
+// short SHA are not, because each can name another commit tomorrow (ynh's trust gate takes only
+// the full form as a pin, ynf #241).
+func IsFullSHA(s string) bool { return fullSHA.MatchString(s) }
+
+// CheckRef refuses a pin that is not a full commit SHA, and says which commit the ref it was given
+// points to now, so the lane file can be corrected by copying the SHA from the refusal. A tag is
+// resolved (an annotated tag to the commit it tags), a branch to the commit at its tip, a short SHA
+// to the commit it abbreviates. It reads the pin repository's refs with git ls-remote against
+// CloneURL, so it needs the repository; one it cannot reach is an error, not a pass. `ynf harness`,
+// a run and `ynf lanes validate` all use this one check.
 func (p Pin) CheckRef(ctx context.Context) error {
+	refs, err := lsRemote(ctx, p.CloneURL(), "refs/heads/"+p.Ref, "refs/tags/"+p.Ref, "refs/tags/"+p.Ref+"^{}")
+	if err != nil {
+		return fmt.Errorf("harness %s: read its refs: %w", p, err)
+	}
+	if IsFullSHA(p.Ref) {
+		return nil
+	}
+	var branch, tag, peeled string
+	for _, r := range refs {
+		switch r.name {
+		case "refs/heads/" + p.Ref:
+			branch = r.sha
+		case "refs/tags/" + p.Ref:
+			tag = r.sha
+		case "refs/tags/" + p.Ref + "^{}":
+			peeled = r.sha
+		}
+	}
+	switch {
+	case tag != "":
+		if peeled != "" {
+			tag = peeled
+		}
+		return p.notFullSHA("a tag, which can be moved to another commit", tag)
+	case branch != "":
+		return p.notFullSHA("a branch, which moves", branch)
+	case shortSHA.MatchString(p.Ref):
+		sha, err := p.resolveShort(ctx)
+		if err != nil {
+			return fmt.Errorf("harness %s: %s is a short SHA, which does not pin a commit, and ynf could not find the commit it abbreviates: %w; pin the full 40-character SHA", p, p.Ref, err)
+		}
+		return p.notFullSHA("a short SHA, which does not pin a commit", sha)
+	}
+	return fmt.Errorf("harness %s: %s is not a full commit SHA, and the repository has no tag or branch of that name; pin the full 40-character SHA of the commit to run", p, p.Ref)
+}
+
+// notFullSHA is the refusal of a ref that is not a full SHA: it names the 40-character SHA the ref
+// resolved to, in the form a lane file takes.
+func (p Pin) notFullSHA(what, sha string) error {
+	return fmt.Errorf("harness %s: %s is %s; a lane pins its harness to a full 40-character commit SHA. %s points to %s now: write the pin as %s@%s",
+		p, p.Ref, what, p.Ref, sha, p.Repo, sha)
+}
+
+type remoteRef struct{ sha, name string }
+
+// lsRemote lists the refs of url that match patterns (all of them with none), as git ls-remote does.
+func lsRemote(ctx context.Context, url string, patterns ...string) ([]remoteRef, error) {
 	var out, errb bytes.Buffer
-	c := exec.CommandContext(ctx, "git", "ls-remote", "--", p.CloneURL(), "refs/heads/"+p.Ref, "refs/tags/"+p.Ref)
+	c := exec.CommandContext(ctx, "git", append([]string{"ls-remote", "--", url}, patterns...)...)
 	c.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	c.Stdout, c.Stderr = &out, &errb
 	if err := c.Run(); err != nil {
-		return fmt.Errorf("harness %s: read its refs: %w: %s", p, err, strings.TrimSpace(errb.String()))
+		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(errb.String()))
 	}
-	var branch, tag bool
+	var refs []remoteRef
 	for _, l := range strings.Split(out.String(), "\n") {
-		switch {
-		case strings.HasSuffix(l, "\trefs/heads/"+p.Ref):
-			branch = true
-		case strings.HasSuffix(l, "\trefs/tags/"+p.Ref):
-			tag = true
+		if sha, name, ok := strings.Cut(strings.TrimSpace(l), "\t"); ok {
+			refs = append(refs, remoteRef{sha: sha, name: name})
 		}
 	}
-	if branch && !tag {
-		return fmt.Errorf("harness %s: %s is a branch, which moves; pin a tag or a commit", p, p.Ref)
+	return refs, nil
+}
+
+// resolveShort finds the one commit a short SHA abbreviates: among the tips of the repository's
+// refs first, then, as a short SHA is usually an older commit, in a bare copy of its history
+// fetched without file contents.
+func (p Pin) resolveShort(ctx context.Context) (string, error) {
+	refs, err := lsRemote(ctx, p.CloneURL())
+	if err != nil {
+		return "", err
 	}
-	return nil
+	found := map[string]bool{}
+	for _, r := range refs {
+		if strings.HasPrefix(strings.ToLower(r.sha), strings.ToLower(p.Ref)) {
+			found[r.sha] = true
+		}
+	}
+	if len(found) == 1 {
+		for sha := range found {
+			return sha, nil
+		}
+	}
+	if len(found) > 1 {
+		return "", fmt.Errorf("it is ambiguous: more than one ref tip starts with it")
+	}
+	dir, err := os.MkdirTemp("", "ynf-pin-")
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	git := func(args ...string) (string, error) {
+		var out, errb bytes.Buffer
+		c := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+		c.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+		c.Stdout, c.Stderr = &out, &errb
+		if err := c.Run(); err != nil {
+			return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(errb.String()))
+		}
+		return strings.TrimSpace(out.String()), nil
+	}
+	if _, err := git("init", "-q", "--bare"); err != nil {
+		return "", err
+	}
+	if _, err := git("fetch", "-q", "--no-tags", "--filter=blob:none", p.CloneURL(), "+refs/heads/*:refs/remotes/o/*", "+refs/tags/*:refs/tags/*"); err != nil {
+		return "", err
+	}
+	sha, err := git("rev-parse", "--verify", "--quiet", p.Ref+"^{commit}")
+	if err != nil || !IsFullSHA(sha) {
+		return "", fmt.Errorf("no commit of the repository starts with %s", p.Ref)
+	}
+	return sha, nil
 }
 
 // Pins returns the harness each lane pins, by lane name.

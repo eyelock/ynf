@@ -128,8 +128,9 @@ func TestUsageAndVersion(t *testing.T) {
 	}
 }
 
-// TestLanesValidateChecksPinRefs: a lane that pins its harness has the pin's refs read, so a branch
-// and an unreachable repository are refused (exit 30) and a tag is accepted.
+// TestLanesValidateChecksPinRefs: a lane that pins its harness has the pin's refs read, so a branch,
+// a tag, a short SHA and an unreachable repository are refused (exit 30), the refusal printing the
+// full SHA a tag or a short SHA points to, and a full SHA is accepted.
 func TestLanesValidateChecksPinRefs(t *testing.T) {
 	e := setup(t)
 	root := t.TempDir()
@@ -154,11 +155,20 @@ func TestLanesValidateChecksPinRefs(t *testing.T) {
 		return f
 	}
 	url := "file://" + bare
-	if code, out, stderr := e.run("lanes", "validate", "--file", lane(url+"@v1")); code != 0 || !strings.Contains(out, "valid, 1 lanes") {
-		t.Fatalf("a tag: %d %s %s", code, out, stderr)
+	revOut, err := exec.Command("git", "-C", src, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if code, _, stderr := e.run("lanes", "validate", "--file", lane(url+"@main")); code != cli.ExitPolicy || !strings.Contains(stderr, "lane tidy: harness "+url+"@main: main is a branch, which moves; pin a tag or a commit") {
-		t.Fatalf("a branch: %d %s", code, stderr)
+	sha := strings.TrimSpace(string(revOut))
+	if code, out, stderr := e.run("lanes", "validate", "--file", lane(url+"@"+sha)); code != 0 || !strings.Contains(out, "valid, 1 lanes") {
+		t.Fatalf("a full SHA: %d %s %s", code, out, stderr)
+	}
+	// A tag, a short SHA and a branch are refused, and each refusal prints the full SHA to copy.
+	for _, ref := range []string{"v1", sha[:7], "main"} {
+		code, _, stderr := e.run("lanes", "validate", "--file", lane(url+"@"+ref))
+		if code != cli.ExitPolicy || !strings.Contains(stderr, "lane tidy: harness "+url+"@"+ref+": "+ref+" is a") || !strings.Contains(stderr, "write the pin as "+url+"@"+sha) {
+			t.Fatalf("%s: %d %s", ref, code, stderr)
+		}
 	}
 	if code, _, stderr := e.run("lanes", "validate", "--file", lane("file://"+filepath.Join(root, "gone.git")+"@v1")); code != cli.ExitPolicy || !strings.Contains(stderr, "read its refs") {
 		t.Fatalf("unreachable: %d %s", code, stderr)

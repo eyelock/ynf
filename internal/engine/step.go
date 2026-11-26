@@ -597,7 +597,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 			// A harness pinned from a repository: installed into a ynh home of this run's own
 			// before the run starts, then read from what ynh installed, so the lane is held to
 			// exactly the harness that runs, and nothing is copied into the checkout.
-			inst, err := s.installFor(runner.HarnessSource{Pin: &pin}, y.Cfg.Harness, runDir)
+			inst, err := s.installFor(runner.HarnessSource{Pin: &pin, Trust: ynhHost.Trusts()}, y.Cfg.Harness, runDir)
 			if err != nil {
 				return fail(runner.OperatorError, err)
 			}
@@ -634,7 +634,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 				// A harness folder on the host, and a ynh that takes only an id: install the
 				// folder into a ynh home of this run's own, and run with that home. The operator's
 				// is never touched, and the run record and telemetry keep the folder the lane names.
-				inst, err := s.installFor(runner.HarnessSource{Dir: harnessDir(wt, y.Cfg.Harness)}, y.Cfg.Harness, runDir)
+				inst, err := s.installFor(runner.HarnessSource{Dir: harnessDir(wt, y.Cfg.Harness), Trust: ynhHost.Trusts()}, y.Cfg.Harness, runDir)
 				if err != nil {
 					return fail(runner.OperatorError, err)
 				}
@@ -655,6 +655,12 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 			}
 			if err := h.CheckLane(y.Cfg); err != nil {
 				return fail(runner.OperatorError, err)
+			}
+			if h.ID == "" && !inImage {
+				// A folder run: ynh accepts its remote includes only at full SHAs (ynf #241).
+				if err := h.CheckIncludes(); err != nil {
+					return fail(runner.OperatorError, fmt.Errorf("lane %s: %w", lane.Name, err))
+				}
 			}
 		}
 		if y.Cfg.Focus != "" {
@@ -689,7 +695,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 			return fail(runner.OperatorError, err)
 		}
 	}
-	argv, err := r.Command(runner.Spec{Lane: lane, Labels: labels, TaskFile: cr + "/task.md", RunDir: cr, Feedback: feedback, InImage: inImage, Contained: ex.Contained(), Focus: focus, HostAutoApprove: e.HostAutoApprove})
+	argv, err := r.Command(runner.Spec{Lane: lane, Labels: labels, TaskFile: cr + "/task.md", RunDir: cr, Feedback: feedback, InImage: inImage, Contained: ex.Contained(), Focus: focus, HostAutoApprove: e.HostAutoApprove, Trust: viaPath && ynhHost.Trusts()})
 	if err != nil {
 		return fail(runner.OperatorError, err)
 	}

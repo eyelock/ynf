@@ -23,8 +23,9 @@ func fakeInstallingYnh(t *testing.T) {
 case "$1" in
 install)
   mkdir -p "$YNH_HOME/harnesses"
+  echo "$*" > "$YNH_HOME/install-args"
   if [ "$3" = --ref ]; then
-    git clone -q --branch "$4" "$2" "$YNH_HOME/harnesses/local--chain" 2>&1 >/dev/null || { echo "Remote branch $4 not found in upstream origin" >&2; exit 1; }
+    git clone -q "$2" "$YNH_HOME/harnesses/local--chain" 2>&1 >/dev/null && git -C "$YNH_HOME/harnesses/local--chain" -c advice.detachedHead=false checkout -q "$4" 2>&1 >/dev/null || { rm -rf "$YNH_HOME/harnesses/local--chain"; echo "Remote branch $4 not found in upstream origin" >&2; exit 1; }
     sha=$(git -C "$YNH_HOME/harnesses/local--chain" rev-parse HEAD)
     echo "{\"source\":\"$2\",\"sha\":\"$sha\"}" > "$YNH_HOME/from.json"
   else
@@ -119,12 +120,12 @@ func TestInstallPinnedHarness(t *testing.T) {
 	t.Setenv("YNH_HOME", operator)
 	url, commit := harnessRepo(t)
 	home := filepath.Join(t.TempDir(), "run", "ynh")
-	pin := policy.Pin{Repo: url, Ref: "v1.2.0"}
+	pin := policy.Pin{Repo: url, Ref: commit}
 	in, err := runner.InstallHarness(context.Background(), runner.HarnessSource{Pin: &pin}, home)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if in.ID != "local/chain" || in.Name != "chain" || in.Version != "1.2.0" || in.Commit != commit || in.Pin != url+"@v1.2.0" {
+	if in.ID != "local/chain" || in.Name != "chain" || in.Version != "1.2.0" || in.Commit != commit || in.Pin != url+"@"+commit {
 		t.Errorf("%+v, want commit %s", in, commit)
 	}
 	h, err := runner.ReadHarness(in.Path)
@@ -142,14 +143,14 @@ func TestInstallPinnedHarness(t *testing.T) {
 	}
 }
 
-// TestInstallPinnedHarnessAtAWrongTag: a tag the repository does not have fails the install with
+// TestInstallPinnedHarnessAtAWrongTag: a commit the repository does not have fails the install with
 // ynh's reason, and installs nothing.
 func TestInstallPinnedHarnessAtAWrongTag(t *testing.T) {
 	fakeInstallingYnh(t)
 	url, _ := harnessRepo(t)
 	home := filepath.Join(t.TempDir(), "run", "ynh")
-	_, err := runner.InstallHarness(context.Background(), runner.HarnessSource{Pin: &policy.Pin{Repo: url, Ref: "v9.9.9"}}, home)
-	if err == nil || !strings.Contains(err.Error(), "v9.9.9 not found") {
+	_, err := runner.InstallHarness(context.Background(), runner.HarnessSource{Pin: &policy.Pin{Repo: url, Ref: strings.Repeat("0", 40)}}, home)
+	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("%v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, "harnesses", "local--chain")); err == nil {
@@ -158,7 +159,7 @@ func TestInstallPinnedHarnessAtAWrongTag(t *testing.T) {
 }
 
 // TestInstallPinnedHarnessRefusesABranch: a branch moves, so it is not a pin; the install is
-// refused before ynh is asked, and says to use a tag or a commit.
+// refused before ynh is asked, and names the full SHA the branch is at.
 func TestInstallPinnedHarnessRefusesABranch(t *testing.T) {
 	fakeInstallingYnh(t)
 	url, _ := harnessRepo(t)
@@ -177,22 +178,68 @@ func TestInstallPinnedHarnessForms(t *testing.T) {
 	t.Setenv("YNH_HOME", t.TempDir())
 	file, commit := harnessRepo(t)
 	for _, c := range []struct{ name, repo, cloned, pin string }{
-		{"url", "https://example.test/org/chain.git", "https://example.test/org/chain.git", "https://example.test/org/chain.git@v1.2.0"},
-		{"host/path", "example.test/org/chain", "https://example.test/org/chain", "example.test/org/chain@v1.2.0"},
-		{"scp-style", "git@example.test:org/chain.git", "git@example.test:org/chain.git", "git@example.test:org/chain.git@v1.2.0"},
-		{"file", file, file, file + "@v1.2.0"},
+		{"url", "https://example.test/org/chain.git", "https://example.test/org/chain.git", "https://example.test/org/chain.git@" + commit},
+		{"host/path", "example.test/org/chain", "https://example.test/org/chain", "example.test/org/chain@" + commit},
+		{"scp-style", "git@example.test:org/chain.git", "git@example.test:org/chain.git", "git@example.test:org/chain.git@" + commit},
+		{"file", file, file, file + "@" + commit},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Setenv("GIT_CONFIG_COUNT", "1")
 			t.Setenv("GIT_CONFIG_KEY_0", "url."+file+".insteadOf")
 			t.Setenv("GIT_CONFIG_VALUE_0", c.cloned)
-			pin := policy.Pin{Repo: c.repo, Ref: "v1.2.0"}
+			pin := policy.Pin{Repo: c.repo, Ref: commit}
 			in, err := runner.InstallHarness(context.Background(), runner.HarnessSource{Pin: &pin}, filepath.Join(t.TempDir(), "ynh"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if in.Commit != commit || in.Pin != c.pin || in.PinURL != c.cloned+"@v1.2.0" {
-				t.Errorf("%+v, want commit %s, pin %s, url %s", in, commit, c.pin, c.cloned+"@v1.2.0")
+			if in.Commit != commit || in.Pin != c.pin || in.PinURL != c.cloned+"@"+commit {
+				t.Errorf("%+v, want commit %s, pin %s, url %s", in, commit, c.pin, c.cloned+"@"+commit)
+			}
+		})
+	}
+}
+
+// TestInstallPinnedHarnessRefusesATagAndNamesItsSHA: a tag is not a pin, so the install is refused
+// before ynh is asked, and the refusal prints the full 40-character SHA the tag points to now.
+func TestInstallPinnedHarnessRefusesATagAndNamesItsSHA(t *testing.T) {
+	fakeInstallingYnh(t)
+	t.Setenv("YNH_HOME", t.TempDir())
+	url, commit := harnessRepo(t)
+	home := filepath.Join(t.TempDir(), "ynh")
+	_, err := runner.InstallHarness(context.Background(), runner.HarnessSource{Pin: &policy.Pin{Repo: url, Ref: "v1.2.0"}, Trust: true}, home)
+	if err == nil || !strings.Contains(err.Error(), "v1.2.0 is a tag") || !strings.Contains(err.Error(), url+"@"+commit) {
+		t.Fatalf("%v, want a refusal naming %s", err, commit)
+	}
+	if _, serr := os.Stat(filepath.Join(home, "install-args")); serr == nil {
+		t.Error("ynh was asked to install a tag pin")
+	}
+}
+
+// TestInstallPassesTrustOnlyWhenAsked: --trust goes to ynh install for a pin and for a folder when
+// the caller says the ynh has the trust gate, and never otherwise.
+func TestInstallPassesTrustOnlyWhenAsked(t *testing.T) {
+	fakeInstallingYnh(t)
+	url, commit := harnessRepo(t)
+	for _, c := range []struct {
+		name  string
+		src   runner.HarnessSource
+		trust bool
+		want  string
+	}{
+		{"pin", runner.HarnessSource{Pin: &policy.Pin{Repo: url, Ref: commit}, Trust: true}, true, "install " + url + " --ref " + commit + " --trust"},
+		{"folder", runner.HarnessSource{Dir: "/the/checkout", Trust: true}, true, "install /the/checkout --trust"},
+		{"pin without", runner.HarnessSource{Pin: &policy.Pin{Repo: url, Ref: commit}}, false, "install " + url + " --ref " + commit},
+		{"folder without", runner.HarnessSource{Dir: "/the/checkout"}, false, "install /the/checkout"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("YNH_HOME", t.TempDir())
+			home := filepath.Join(t.TempDir(), "ynh")
+			if _, err := runner.InstallHarness(context.Background(), c.src, home); err != nil {
+				t.Fatal(err)
+			}
+			b, _ := os.ReadFile(filepath.Join(home, "install-args"))
+			if got := strings.TrimSpace(string(b)); got != c.want {
+				t.Errorf("ynh was run as %q, want %q", got, c.want)
 			}
 		})
 	}
