@@ -145,6 +145,13 @@ type ActionRecord struct {
 // item's previous step and to the intake of the event that started it, and leaves its own span on
 // the item for the next step to link to.
 func (e *Engine) Handle(ctx context.Context, key string, ev event.Event) (err error) {
+	// A step of this process already holds the item: its lease names our Owner, so lease.Claim
+	// would take it over and the running step's next renewal would lose it.
+	if _, busy := e.inFlight.LoadOrStore(key, struct{}{}); busy {
+		e.log().Debug("already stepping in this process", "item", key)
+		return nil
+	}
+	defer e.inFlight.Delete(key)
 	stepID := e.NewID()
 	itemKey := attribute.String(telemetry.AttrItemKey, key)
 	var links []trace.Link
@@ -546,7 +553,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 		_ = s.g.RemoveCheckout(s.wt)
 		s.wt = ""
 	}
-	stepDir := filepath.Join(e.WorkDir, "steps", strings.NewReplacer("/", "_", "#", "_").Replace(it.Key), runID)
+	stepDir := filepath.Join(e.WorkDir, "steps", stepsKey(it.Key), runID)
 	runDir := filepath.Join(stepDir, "run")
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return fail(runner.Error, err)
@@ -712,7 +719,7 @@ func (s *step) runLane(it item.Item, rp *RepoPolicy, lane policy.Lane, feedback 
 	case errors.Is(err, executor.ErrEgress):
 		rec.Outcome, rec.Detail = runner.OperatorError, err.Error()
 	case err != nil:
-		rec.Outcome, rec.Detail = runner.Error, err.Error()
+		rec.Outcome, rec.Detail = executorOutcome(err), err.Error()
 	default:
 		s.result = r.Interpret(out.Exit, out.Stdout, runDir)
 		rec.Exit, rec.Outcome, rec.Detail = out.Exit, s.result.Outcome, s.result.Detail
@@ -758,6 +765,9 @@ func (s *step) job(lane policy.Lane, r runner.Runner, ex executor.Executor, ynhH
 		}
 	}
 	y, isYnh := r.(runner.YnhRunner)
+	if isYnh {
+		job.Timeout = runTimeout(e.RunTimeout, y.Cfg.Budgets)
+	}
 	if !isYnh {
 		job.ImageUser = r.Name() == "command" && lane.Run.Command != nil && lane.Run.Command.ImageUser
 		return job, false, nil
@@ -1283,4 +1293,31 @@ func anyList(ss []string) []any {
 		out[i] = s
 	}
 	return out
+}
+
+// wallMargin is how long past a run's max_wall the executor waits before it kills the run, so the
+// runner's own max_wall stop, which reports a budget, comes first.
+const wallMargin = 5 * time.Minute
+
+// runTimeout is how long the executor lets a run live: the run's max_wall plus wallMargin when it
+// has one, so a long budget is not cut short by a fixed hour, and base, the engine's default,
+// when it has none.
+func runTimeout(base time.Duration, b *policy.Budgets) time.Duration {
+	if b == nil || b.MaxWall == "" {
+		return base
+	}
+	wall, err := policy.ParseDuration(b.MaxWall)
+	if err != nil || wall <= 0 {
+		return base
+	}
+	return wall + wallMargin
+}
+
+// executorOutcome is the outcome of a run the executor failed: a deadline is the run spending its
+// wall-clock budget, anything else is an error.
+func executorOutcome(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return runner.Budget
+	}
+	return runner.Error
 }

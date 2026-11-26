@@ -260,3 +260,45 @@ func TestBaseOfAMerge(t *testing.T) {
 		t.Fatalf("agent patch should include a new file: %q %v", agent, err)
 	}
 }
+
+// fakeGit puts a git on PATH that records its arguments and the GIT_CONFIG_* environment it was
+// given, so a test can see where the token goes without a network.
+func fakeGit(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "log")
+	script := "#!/bin/sh\n{ echo \"ARGS $*\"; env | grep '^GIT_CONFIG_' ; } >> " + log + "\n" +
+		"if [ \"$1\" = clone ]; then for last; do :; done; mkdir -p \"$last\"; fi\n"
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return log
+}
+
+// TestTokenIsScopedToTheForgeHost: the auth header is keyed by the workspace's own host, so a
+// GitHub Enterprise Server's clones and pushes carry its token, and github.com's carry theirs.
+func TestTokenIsScopedToTheForgeHost(t *testing.T) {
+	for _, tc := range []struct{ host, key string }{
+		{"", "http.https://github.com/.extraheader"},
+		{"github.com", "http.https://github.com/.extraheader"},
+		{"ghe.example.internal", "http.https://ghe.example.internal/.extraheader"},
+	} {
+		log := fakeGit(t)
+		w := workspace.Workspace{Root: t.TempDir(), Token: "secret", Host: tc.host,
+			RemoteURL: func(repo string) string { return "https://" + tc.host + "/" + repo + ".git" }}
+		if _, err := w.Mirror(context.Background(), "o/r"); err != nil {
+			t.Fatal(err)
+		}
+		b, _ := os.ReadFile(log)
+		if !strings.Contains(string(b), "GIT_CONFIG_KEY_1="+tc.key+"\n") {
+			t.Errorf("host %q: want key %s, got:\n%s", tc.host, tc.key, b)
+		}
+		if tc.host != "" && !strings.Contains(string(b), "ARGS clone -q --no-checkout https://"+tc.host+"/o/r.git") {
+			t.Errorf("host %q: clone not from that host:\n%s", tc.host, b)
+		}
+		if tc.host == "ghe.example.internal" && strings.Contains(string(b), "https://github.com/.extraheader") {
+			t.Errorf("token still scoped to github.com:\n%s", b)
+		}
+	}
+}

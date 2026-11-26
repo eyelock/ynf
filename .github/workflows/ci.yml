@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   # The ynr release that `conformance` runs, without the leading v. The one place it is pinned.
-  YNR_VERSION: 0.3.2
+  YNR_VERSION: 0.5.0
   # The ynh release the full-chain check runs, without the leading v.
   YNH_VERSION: 0.14.0
 jobs:
@@ -36,6 +36,17 @@ jobs:
         run: make check
       - name: build
         run: make build && ./bin/ynf version
+
+  govulncheck:
+    # Fails on a known vulnerability in code ynf calls, so a dependency fix is not missed (ynf #236).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
 
   registry:
     # ynf's telemetry registry is an OpenTelemetry Weaver registry (ynr ADR-007): Weaver checks it.
@@ -96,6 +107,17 @@ jobs:
           sha256sum --check --strict wanted.txt
           tar -xzf "$ynm" -C "$bin" ynm
           echo "$bin" >> "$GITHUB_PATH"
+      - name: ynm reads a Wheelhouse's committed config (the sync block)
+        # The factory image pairs with this ynm (images/factory/versions.env). A ynm that refuses the
+        # `sync` block a Wheelhouse commits fails a factory run in that repository (ynf #216).
+        run: |
+          set -euo pipefail
+          repo="$(mktemp -d)"
+          git -C "$repo" init -q
+          mkdir "$repo/.ynm"
+          printf '{"anchor":"5ec94d2278ce7ea710543f2a305a63e74aeb98a0","sync":{"auto":true,"intervalMinutes":5}}\n' > "$repo/.ynm/config.json"
+          cd "$repo"
+          YNM_HOME="$repo/home" ynm status --json > /dev/null
       - name: ynr conformance
         run: |
           set -euo pipefail
@@ -129,7 +151,7 @@ jobs:
     # fails: a skipped required check counts as passing, so without if: always() a red PR could merge.
     name: All Clear
     runs-on: ubuntu-latest
-    needs: [check, registry, conformance]
+    needs: [check, govulncheck, registry, conformance]
     if: always()
     steps:
       - name: Check results

@@ -406,9 +406,10 @@ func TestShadowPinsTheHarnessFromTheDefaultBranch(t *testing.T) {
 	if p.Runner != "ynh" || p.Executor != "process" || p.Harness != "." {
 		t.Fatalf("pins %+v", p)
 	}
-	// ynh is not installed here, so the run itself fails; what matters is that the harness was
-	// read from the pinned folder (an unreadable one is an operator error) and the run started.
-	if a := h.attempts(t, run)[0]; a.Outcome != runner.Error {
+	// ynh is not installed here, so the run itself fails (a ynh that is installed refuses the
+	// invocation, exit 1, which is an operator_error); what matters is that the harness was read
+	// from the pinned folder (an unreadable one is an operator error) and the run started.
+	if a := h.attempts(t, run)[0]; a.Outcome != runner.Error && a.Outcome != runner.OperatorError {
 		t.Fatalf("outcome %s (%s)", a.Outcome, a.Detail)
 	}
 	if len(h.o.calls) != 0 {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/eyelock/ynf/internal/engine"
@@ -45,8 +46,8 @@ func (a *app) start(ctx context.Context, args []string) error {
 	if *approve != "" && *detach {
 		return withCode(ExitUsage, errors.New("--auto-approve is for work run here, not --detach"))
 	}
-	if !*detach {
-		a.interactive = true // a person at a terminal started it (ADR-007)
+	if attended(*detach, a.stdin) {
+		a.interactive = true // a person at a terminal started it (ADR-007); a script says --interactive
 	}
 	e, err := a.engine()
 	if err != nil {
@@ -72,6 +73,11 @@ func (a *app) start(ctx context.Context, args []string) error {
 	}
 	return a.out(it, startSummary(it, *detach))
 }
+
+// attended reports whether a person started this run: not detached, and the input is a terminal.
+// A script or CI job has none, so it gets the uncontained process executor only by saying
+// --interactive.
+func attended(detach bool, stdin io.Reader) bool { return !detach && isTerminal(stdin) }
 
 // checkAutoApprove validates --auto-approve, for the commands that run work attended.
 func checkAutoApprove(level string) error {

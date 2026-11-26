@@ -691,6 +691,38 @@ func TestYnhRunnerOnTheHost(t *testing.T) {
 	}
 }
 
+// TestYnhRefusalIsNotRetried: ynh exit 1 means it refused before any worker started, so the run is
+// an operator_error and a lane's `outcome.error: {retry: N}` does not run it again.
+func TestYnhRefusalIsNotRetried(t *testing.T) {
+	h := newHarness(t)
+	dir := t.TempDir()
+	calls := filepath.Join(dir, "calls")
+	script := "#!/bin/sh\necho x >> \"" + calls + "\"\necho '{\"exit_code\":1,\"reason\":\"refused\"}'\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(dir, "ynh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	h.f.lanes = strings.Replace(lanesYAML, `      ynh: {harness: ".", focus: tidy}
+    when: {converged: open_pr}`, `      ynh: {harness: ".", focus: tidy}
+    when: {converged: open_pr, outcome.error: {retry: 2, then: escalate}}`, 1)
+	h.e.Getenv = func(k string) string { return map[string]string{"ANTHROPIC_API_KEY": "sk-test"}[k] }
+	h.f.labels[1] = []string{"ynf:agentic"}
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		if err := h.e.Sweep(ctx); err != nil {
+			t.Fatal(err)
+		}
+		h.advance(10 * time.Minute)
+	}
+	it := h.item(t, 1)
+	if it.State != item.Escalated || it.LastRun.Outcome != "operator_error" {
+		t.Fatalf("%s %+v", it.State, it.LastRun)
+	}
+	if b, _ := os.ReadFile(calls); strings.Count(string(b), "x") != 1 {
+		t.Fatalf("ynh should run once, not be retried: %q", b)
+	}
+}
+
 // installs records what InstallHarness was asked, standing in for `ynh install` into the run's home.
 type installs struct {
 	dirs, homes []string
@@ -1036,7 +1068,8 @@ func TestAdoptStartsAgainWhenTheAuthorPushesMeanwhile(t *testing.T) {
 	ctx := context.Background()
 	head := h.prBranch(t)
 	h.adoptPR(t, head)
-	t.Setenv("RACE_REMOTE", h.remote)
+	// A process run keeps none of the host's environment but an allow-list, so the lane names the remote.
+	h.f.lanes = strings.ReplaceAll(h.f.lanes, "$RACE_REMOTE", h.remote)
 	if err := h.e.Sweep(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -1510,7 +1543,8 @@ func (s *syncBuffer) String() string {
 func startSlow(t *testing.T, h *harness) (gate string, done chan error) {
 	t.Helper()
 	gate = filepath.Join(t.TempDir(), "gate")
-	t.Setenv("SLOW_GATE", gate)
+	// A process run keeps none of the host's environment but an allow-list, so the lane names the gate.
+	h.f.lanes = strings.ReplaceAll(h.f.lanes, "$SLOW_GATE", gate)
 	h.f.labels[1] = []string{"ynf:slow"}
 	done = make(chan error, 1)
 	go func() { done <- h.e.Sweep(context.Background()) }()
@@ -2516,5 +2550,33 @@ func TestWaitingDecisionUpdatesReason(t *testing.T) {
 		if !r.Same {
 			t.Errorf("decision %s differs on replay", r.EntryID)
 		}
+	}
+}
+
+// TestAWebhookDuringARunDoesNotCancelIt: a webhook for an item this process is already stepping
+// (ynf's own label or comment write comes back as one) must not re-claim the lease, which carries
+// the same owner, or the run's next renewal loses it and the run is cancelled.
+func TestAWebhookDuringARunDoesNotCancelIt(t *testing.T) {
+	h := newHarness(t)
+	h.e.Heartbeat = 20 * time.Millisecond
+	gate, done := startSlow(t, h)
+	before := h.item(t, 1).Lease
+	if before == nil {
+		t.Fatal("the running item holds no lease")
+	}
+	body := []byte(`{"repository":{"full_name":"o/r"},"issue":{"number":1}}`)
+	if _, err := h.e.HandleGitHubEvent(context.Background(), "issues", body); err != nil {
+		t.Fatal(err)
+	}
+	if after := h.item(t, 1).Lease; after == nil || after.StepID != before.StepID || after.Epoch != before.Epoch {
+		t.Fatalf("the webhook re-claimed the lease: %+v -> %+v", before, after)
+	}
+	time.Sleep(100 * time.Millisecond) // several heartbeats: a lost lease would cancel the run by now
+	_ = os.WriteFile(gate, nil, 0o644)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if it := h.item(t, 1); it.State != item.Proposed || it.Attempts != 0 {
+		t.Fatalf("the run did not finish cleanly: %s attempts=%d %s", it.State, it.Attempts, it.Reason)
 	}
 }

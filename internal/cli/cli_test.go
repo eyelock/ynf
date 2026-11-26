@@ -250,9 +250,22 @@ func TestSweepUntilSettledAndDoctor(t *testing.T) {
 	}
 }
 
+// workingDocker puts a docker on PATH that answers `version`, so a doctor test does not depend on
+// whether this machine has a docker daemon running: the default lanes run in docker, and doctor
+// fails when it cannot be reached.
+func workingDocker(t *testing.T) {
+	t.Helper()
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte("#!/bin/sh\necho 27.0.0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 // TestDoctorSaysWhenRequiredChecksCannotBeRead: the fake GitHub serves neither branch protection nor
 // rulesets, so doctor names the repository and says every check gates. It is a warning, as ynf works.
 func TestDoctorSaysWhenRequiredChecksCannotBeRead(t *testing.T) {
+	workingDocker(t)
 	e := setup(t)
 	code, out, _ := e.run("--format", "json", "doctor")
 	var rep struct {
@@ -285,6 +298,7 @@ func TestDoctorSaysWhenRequiredChecksCannotBeRead(t *testing.T) {
 // the workflows, none or some workflow files. With none, doctor warns that no CI will report; it is
 // a warning, not a failure, and it is not said when there are workflows.
 func TestDoctorWarnsOfARepositoryWithNoCI(t *testing.T) {
+	workingDocker(t)
 	workflows := []any{}
 	t.Cleanup(func() { apiHook = nil })
 	apiHook = func(w http.ResponseWriter, path string) bool {
@@ -357,6 +371,7 @@ func TestDoctorSaysWhyMemoryIsOff(t *testing.T) {
 // TestDoctorReportsQueuedMemoryWrites: nothing is said when the queue is empty; when writes wait
 // for ynm, doctor says how many and since when, as a warning, not a failure.
 func TestDoctorReportsQueuedMemoryWrites(t *testing.T) {
+	workingDocker(t)
 	e := setup(t)
 	if code, out, _ := e.run("doctor"); strings.Contains(out, "memory queue") {
 		t.Fatalf("an empty queue is not reported: %d %s", code, out)

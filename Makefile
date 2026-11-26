@@ -46,7 +46,17 @@ help:
 
 deps:
 	@command -v go >/dev/null 2>&1 || { echo "Installing Go..."; brew install go; }
-	@golangci-lint version 2>/dev/null | grep -q "version $(GOLANGCI_LINT_VERSION:v%=%) " || { echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)..."; go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); }
+	@want="$(GOLANGCI_LINT_VERSION:v%=%)"; \
+	golangci-lint version 2>/dev/null | grep -q "version $$want " || { \
+	  echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)..."; \
+	  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) || exit 1; \
+	  golangci-lint version 2>/dev/null | grep -q "version $$want " || { \
+	    bindir=$$(go env GOBIN); bindir=$${bindir:-$$(go env GOPATH)/bin}; \
+	    echo "deps: installed golangci-lint $(GOLANGCI_LINT_VERSION) in $$bindir, but the golangci-lint that runs is not it."; \
+	    found=$$(command -v golangci-lint || true); \
+	    if [ -n "$$found" ]; then echo "  first on PATH: $$found ($$(golangci-lint version 2>&1 | head -1))"; else echo "  no golangci-lint is on PATH"; fi; \
+	    echo "  fix: put $$bindir first on PATH, or remove the other golangci-lint."; \
+	    exit 1; }; }
 	go mod download
 	cd sandbox/e2e && go mod download
 	@echo "All prerequisites installed."

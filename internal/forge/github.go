@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -77,6 +78,20 @@ func (g *GitHub) Host() string {
 		return h
 	}
 	return "github.com"
+}
+
+// GitHost is the host git clones from and the token is scoped to, with its port: github.com for
+// the public service and for a loopback API (a test double, whose repositories are not served
+// over https there), otherwise the Enterprise Server's host as the API names it.
+func (g *GitHub) GitHost() string {
+	h := g.Host()
+	if h == "github.com" {
+		return h
+	}
+	if ip := net.ParseIP(h); h == "localhost" || (ip != nil && ip.IsLoopback()) {
+		return "github.com"
+	}
+	return g.c.BaseURL.Host
 }
 
 // SetLabels implements Issues: labels already present or already absent are left alone.

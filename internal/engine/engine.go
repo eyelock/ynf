@@ -136,6 +136,11 @@ type Engine struct {
 	trackerHosts map[string]string
 	// forgeNames maps a declared forge's name to its host, for listing.
 	forgeNames map[string]string
+
+	// inFlight holds the keys of the items this process is stepping now. The lease cannot tell a
+	// second step of this process from a restart of it, as both carry Owner, so Handle checks here
+	// before claiming: a webhook for a running item must not re-claim its lease and cancel the run.
+	inFlight sync.Map
 }
 
 // HostYnh is what detecting ynh on the host found: nothing when no detection is wired.
@@ -372,6 +377,9 @@ func (e *Engine) wantLane(name string) bool {
 // Sweep runs every enrolled repository's lane searches and starts a step for each new ticket.
 func (e *Engine) Sweep(ctx context.Context) error {
 	e.FlushMemory(ctx)
+	if err := e.Prune(ctx); err != nil {
+		e.log().Warn("pruning expired step folders and seen keys failed", "err", err)
+	}
 	repos, err := e.Enrolled(ctx)
 	if err != nil {
 		return err
