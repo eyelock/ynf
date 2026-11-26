@@ -1,5 +1,6 @@
 # Authoritative: a label created in the UI and not listed here is removed on apply. GitHub's
-# defaults; ynf's own labels arrive with the features that use them.
+# defaults, the labels Dependabot creates, and the labels the seats use (merge:, priority:, audit, security).
+# Colours and descriptions are copied from the live labels, so applying changes nothing.
 locals {
   labels = {
     "accessibility"    = { color = "f143ab", description = "Barrier affecting people with disabilities" }
@@ -12,6 +13,22 @@ locals {
     "invalid"          = { color = "e4e669", description = "This doesn't seem right" }
     "question"         = { color = "d876e3", description = "Further information is requested" }
     "wontfix"          = { color = "ffffff", description = "This will not be worked on" }
+
+    # Labels Dependabot creates.
+    "dependencies"   = { color = "0366d6", description = "Pull requests that update a dependency file" }
+    "go"             = { color = "16e2e2", description = "Pull requests that update go code" }
+    "github_actions" = { color = "000000", description = "Pull requests that update GitHub Actions code" }
+    "terraform"      = { color = "5C4EE5", description = "Pull requests that update terraform code" }
+
+    # Labels the review and planning seats read; declared so an apply never deletes them.
+    "merge: squash"       = { color = "0E8A16", description = "Merge this pull request with squash" }
+    "merge: merge commit" = { color = "5319e7", description = "Merge with a merge commit" }
+    "audit: 2026-11"      = { color = "5319e7", description = "Finding of the 2026-11-21 engineering audit" }
+    "priority: P1"        = { color = "b60205", description = "Fix in the next patch release" }
+    "priority: P2"        = { color = "d93f0b", description = "Fix in the next minor release" }
+    "priority: P3"        = { color = "fbca04", description = "Worth doing; next minor or later" }
+    "priority: P4"        = { color = "c2e0c6", description = "Low; when convenient" }
+    "security"            = { color = "ee0701", description = "Security or privacy" }
   }
 }
 
