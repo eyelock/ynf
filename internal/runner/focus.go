@@ -36,6 +36,41 @@ type Harness struct {
 	} `json:"agent"`
 	// Sensors are the sensors the harness declares, by name; a lane may only scope these.
 	Sensors map[string]json.RawMessage `json:"sensors"`
+	// Includes are the harness's includes: ynf reads which come from another repository and where
+	// each is pinned.
+	Includes []struct {
+		Git string `json:"git"`
+		Ref string `json:"ref"`
+	} `json:"includes"`
+}
+
+// FloatingIncludes lists, one line each, the harness's includes from another repository that are
+// not pinned to a full commit SHA. ynh's trust gate (ynh #950) accepts the commands a remote
+// include brings only at a full SHA, for a lane's unattended run, and which includes bring commands
+// is known only once they are fetched, so ynf holds every remote include to the rule: a lane's
+// harness must be reproducible whatever its includes carry (ynf #241). An include of the harness's
+// own repository is the harness's own, and is not listed.
+func (h Harness) FloatingIncludes() []string {
+	var out []string
+	for _, in := range h.Includes {
+		if !policy.IsRepo(in.Git) || policy.IsFullSHA(in.Ref) {
+			continue
+		}
+		if in.Ref == "" {
+			out = append(out, in.Git+": no ref, so it floats with the default branch")
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s@%s: not a full 40-character commit SHA", in.Git, in.Ref))
+	}
+	return out
+}
+
+// CheckIncludes refuses a harness that includes another repository at anything but a full SHA.
+func (h Harness) CheckIncludes() error {
+	if bad := h.FloatingIncludes(); len(bad) > 0 {
+		return fmt.Errorf("the harness includes repositories that are not pinned to a full commit SHA, so what runs could change under a lane's trust (pin each to a 40-character commit SHA):\n  %s", strings.Join(bad, "\n  "))
+	}
+	return nil
 }
 
 // ParseManifest reads a harness manifest.

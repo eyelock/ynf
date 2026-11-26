@@ -35,6 +35,16 @@ type Detection struct {
 	Features []string `json:"features,omitempty"`
 }
 
+// TrustGateCapabilities is the capabilities version that has the trust gate (ynh #950): `ynh run`
+// and `ynh agent run` refuse a harness nobody accepted, with the error code `untrusted`, and
+// `--trust` on `ynh install` and on a folder `ynh agent run` accepts what a full-SHA-pinned
+// harness runs. ynh lists no feature name for it, so it is gated on by this version.
+const TrustGateCapabilities = "0.11.0"
+
+// Trusts reports whether this ynh has the trust gate, so ynf passes `--trust`; an older ynh does
+// not know the flag.
+func (d Detection) Trusts() bool { return d.Found && AtLeast(d.Capabilities, TrustGateCapabilities) }
+
 // The ynh features ynf uses.
 const (
 	// FeatureHarnessPath is `ynh agent run --harness <path>`: a folder runs without an install.

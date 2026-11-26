@@ -59,10 +59,10 @@ const (
 // and receiver, so the two cannot see each other's records.
 type scenario struct {
 	name string
-	// pinned means the lane's harness is pinned from a local repository (file://...@v0.1.0), and
+	// pinned means the lane's harness is pinned from a local repository (file://...@<full commit SHA>), and
 	// the target repository carries no harness at all: nothing is copied into it.
 	pinned bool
-	// hostPath means the pin is written as host/path (example.test/org/chain@v0.1.0), which ynf has
+	// hostPath means the pin is written as host/path (example.test/org/chain@<full commit SHA>), which ynf has
 	// to make https://example.test/org/chain before git or ynh sees it.
 	hostPath bool
 	// includes means the folder harness has an include from a local repository (a file:// URL), which
@@ -82,7 +82,7 @@ var scenarios = []scenario{
 	{name: "a harness folder with a git include from a local repository", includes: true, want: ".", harness: "chain@0.1.0"},
 }
 
-// pinTag is the tag the pinned scenario's lane names.
+// pinTag is a tag the pinned scenario's harness repository carries; the lane pins the commit it names.
 const pinTag = "v0.1.0"
 
 // hostPathPin is the repository the host/path scenario writes, without a scheme.
@@ -260,31 +260,38 @@ const pluginJSON = `{
 }
 `
 
-// manifestWith is the harness manifest, with an include from the repository at url when given.
-func manifestWith(url string) string {
+// manifestWith is the harness manifest, with an include from the repository at url, pinned to the
+// full commit SHA sha (ynf refuses a lane's harness that includes anything less), when given.
+func manifestWith(url, sha string) string {
 	if url == "" {
 		return pluginJSON
 	}
-	return strings.Replace(pluginJSON, `  "agent":`, fmt.Sprintf("  \"includes\": [{\"git\": %q}],\n  \"agent\":", url), 1)
+	return strings.Replace(pluginJSON, `  "agent":`, fmt.Sprintf("  \"includes\": [{\"git\": %q, \"ref\": %q}],\n  \"agent\":", url, sha), 1)
 }
 
 // makeInclude makes the repository the include scenario's harness includes: one skill, in a
-// repository of its own, which ynh clones from its file:// URL.
-func makeInclude(t string, env []string) (string, error) {
+// repository of its own, which ynh clones from its file:// URL. It returns the URL and the commit.
+func makeInclude(t string, env []string) (url, sha string, err error) {
 	inc := filepath.Join(t, "include")
 	if err := os.MkdirAll(filepath.Join(inc, "skills", "greet"), 0o755); err != nil {
-		return "", err
+		return "", "", err
 	}
 	skill := "---\nname: greet\ndescription: Greets.\n---\nSay hello.\n"
 	if err := os.WriteFile(filepath.Join(inc, "skills", "greet", "SKILL.md"), []byte(skill), 0o644); err != nil {
-		return "", err
+		return "", "", err
 	}
 	for _, a := range [][]string{{"init", "-q", "-b", "main"}, {"add", "."}, {"commit", "-q", "-m", "include"}} {
 		if err := sh(inc, env, "git", a...); err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
-	return "file://" + inc, nil
+	rev := exec.Command("git", "rev-parse", "HEAD")
+	rev.Dir, rev.Env = inc, env
+	out, err := rev.Output()
+	if err != nil {
+		return "", "", err
+	}
+	return "file://" + inc, strings.TrimSpace(string(out)), nil
 }
 
 func lanesYAML(harness string) string {
@@ -357,26 +364,27 @@ func run(sc scenario) error {
 		if err := sh(hsrc, henv, "git", "clone", "-q", "--bare", hsrc, hbare); err != nil {
 			return err
 		}
-		laneHarness = "file://" + hbare + "@" + pinTag
-		if sc.hostPath {
-			laneHarness, hostPathBare = hostPathPin+"@"+pinTag, hbare
-		}
 		rev := exec.Command("git", "rev-parse", pinTag+"^{commit}")
 		rev.Dir, rev.Env = hsrc, henv
 		b, err := rev.Output()
 		if err != nil {
 			return err
 		}
+		// A lane pins a full commit SHA: a tag is refused (ynf #241).
+		laneHarness = "file://" + hbare + "@" + strings.TrimSpace(string(b))
+		if sc.hostPath {
+			laneHarness, hostPathBare = hostPathPin+"@"+strings.TrimSpace(string(b)), hbare
+		}
 		pinSHA = strings.TrimSpace(string(b))
 	} else {
 		manifest := pluginJSON
 		if sc.includes {
-			url, err := makeInclude(t, append(cleanEnv(), "HOME="+filepath.Join(t, "home"), "GIT_CONFIG_NOSYSTEM=1",
+			url, isha, err := makeInclude(t, append(cleanEnv(), "HOME="+filepath.Join(t, "home"), "GIT_CONFIG_NOSYSTEM=1",
 				"GIT_AUTHOR_NAME=chain", "GIT_AUTHOR_EMAIL=chain@example.com", "GIT_COMMITTER_NAME=chain", "GIT_COMMITTER_EMAIL=chain@example.com"))
 			if err != nil {
 				return err
 			}
-			manifest = manifestWith(url)
+			manifest = manifestWith(url, isha)
 		}
 		if err := os.WriteFile(filepath.Join(src, ".agents", "harness", "plugin.json"), []byte(manifest), 0o644); err != nil {
 			return err
@@ -529,7 +537,7 @@ func checkRunRecord(log []byte, sc scenario, pinSHA string) error {
 		return fmt.Errorf("a pinned harness should be run by the id ynh installed it as, %s: --harness %q", sc.want, passed)
 	}
 	if sc.hostPath {
-		if rec.HarnessPin != hostPathPin+"@"+pinTag || rec.PinURL != "https://"+hostPathPin+"@"+pinTag {
+		if rec.HarnessPin != hostPathPin+"@"+pinSHA || rec.PinURL != "https://"+hostPathPin+"@"+pinSHA {
 			return fmt.Errorf("the run record should keep the pin as the lane wrote it and say the https form used: harness_pin %q, harness_pin_url %q", rec.HarnessPin, rec.PinURL)
 		}
 		if rec.HarnessSHA != pinSHA {
@@ -540,7 +548,7 @@ func checkRunRecord(log []byte, sc scenario, pinSHA string) error {
 	if rec.PinURL != "" {
 		return fmt.Errorf("a pin that needed no change should not say another form: harness_pin_url %q", rec.PinURL)
 	}
-	if rec.HarnessSHA != pinSHA || !strings.HasSuffix(rec.HarnessPin, "@"+pinTag) || !strings.HasPrefix(rec.HarnessPin, "file://") {
+	if rec.HarnessSHA != pinSHA || !strings.HasSuffix(rec.HarnessPin, "@"+pinSHA) || !strings.HasPrefix(rec.HarnessPin, "file://") {
 		return fmt.Errorf("the run record should say the pin and the commit the tag points at (%s): harness_pin %q, harness_sha %q", pinSHA, rec.HarnessPin, rec.HarnessSHA)
 	}
 	return nil
