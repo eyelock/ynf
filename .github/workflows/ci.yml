@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   # The ynr release that `conformance` runs, without the leading v. The one place it is pinned.
-  YNR_VERSION: 0.5.0
+  YNR_VERSION: 0.6.0
   # The ynh release the full-chain check runs, without the leading v.
   YNH_VERSION: 0.14.0
 jobs:
