@@ -39,6 +39,9 @@ type CheckSensor struct {
 	// Unbaselined is true for a failing sensor ynh gave no counts for: ynh counts new and known
 	// failures only when a baseline exists, so with none the sensor failed and every failure is new.
 	Unbaselined bool `json:"unbaselined,omitempty"`
+	// CountDelta is how far a count-ratchet sensor's total has moved since the baseline; positive is
+	// new findings. ynh sets it for such a sensor only.
+	CountDelta int `json:"count_delta,omitempty"`
 	// Exit, Stdout, Stderr and Note say what the sensor did when ynh gave no new_output.
 	Exit   int    `json:"exit,omitempty"`
 	Stdout string `json:"stdout,omitempty"`
@@ -62,6 +65,7 @@ func ParseCheck(check, explain []byte) (*Check, error) {
 			Status    string `json:"status"`
 			NewCount  *int   `json:"new_count"`
 			KnownCnt  *int   `json:"known_count"`
+			Delta     *int   `json:"count_delta"`
 			NewOutput string `json:"new_output"`
 			ExitCode  int    `json:"exit_code"`
 			Stdout    string `json:"stdout"`
@@ -89,7 +93,23 @@ func ParseCheck(check, explain []byte) (*Check, error) {
 		if s.KnownCnt != nil {
 			cs.Known = *s.KnownCnt
 		}
-		cs.Unbaselined = s.Status == "fail" && s.NewCount == nil
+		if s.Delta != nil {
+			cs.CountDelta = *s.Delta
+		}
+		// ynh omits new_count when it is zero, and sets no counts without a baseline. A failing sensor
+		// with a known count or a count delta has a baseline: a count-ratchet sensor that regressed has
+		// no new lines, only a positive count_delta, and that is how far it moved. Only a failing
+		// sensor with no counts at all had no baseline.
+		if s.Status == "fail" && s.NewCount == nil {
+			switch {
+			case s.KnownCnt == nil && s.Delta == nil && c.Baseline == nil:
+				cs.Unbaselined = true
+			case cs.CountDelta > 0:
+				cs.New = cs.CountDelta
+			default:
+				cs.New = 1
+			}
+		}
 		out.Sensors = append(out.Sensors, cs)
 	}
 	if c.Baseline != nil {
@@ -165,9 +185,12 @@ func (c *Check) Lines(indent string) string {
 		if s.New == 0 && s.Known == 0 && s.Status != "fail" && s.Status != "known" && s.Status != "reported" && s.Status != "deferred" {
 			continue
 		}
-		if s.Unbaselined {
+		switch {
+		case s.Unbaselined:
 			fmt.Fprintf(&b, "%s  %s (%s): failed, no baseline, so every failure is new (exit %d)\n", indent, s.Name, s.Status, s.Exit)
-		} else {
+		case s.CountDelta != 0:
+			fmt.Fprintf(&b, "%s  %s (%s): count moved by %+d since the baseline, %d new, %d known\n", indent, s.Name, s.Status, s.CountDelta, s.New, s.Known)
+		default:
 			fmt.Fprintf(&b, "%s  %s (%s): %d new, %d known\n", indent, s.Name, s.Status, s.New, s.Known)
 		}
 		out := s.NewOutput

@@ -302,3 +302,27 @@ func TestExplainErrorIsNotACheckError(t *testing.T) {
 		t.Errorf("%s", text)
 	}
 }
+
+// ynh omits new_count when it is zero, so a count-ratchet sensor that regressed has status fail, a
+// known_count and a count_delta, and no new_count: that is a baseline that exists, not none
+// (ynw-2z0w0).
+func TestCheckCountRatchetRegression(t *testing.T) {
+	c, err := shadow.ParseCheck([]byte(`{"verdict":"blocked","sensors":[
+	 {"name":"todo","status":"fail","known_count":4,"count_delta":3}],
+	 "baseline":{"recorded_at":"x","known":4,"fixed":0}}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Sensors[0].Unbaselined || c.NewFindings() != 3 {
+		t.Fatalf("a regression is 3 new, not 'no baseline': %+v", c.Sensors[0])
+	}
+	text := c.Lines("")
+	if strings.Contains(text, "no baseline") || !strings.Contains(text, "count moved by +3 since the baseline, 3 new, 4 known") {
+		t.Errorf("%s", text)
+	}
+	// No baseline block, no counts: that is the no-baseline case.
+	c, _ = shadow.ParseCheck([]byte(`{"verdict":"blocked","sensors":[{"name":"v","status":"fail"}]}`), nil)
+	if !c.Sensors[0].Unbaselined {
+		t.Errorf("%+v", c.Sensors[0])
+	}
+}
