@@ -105,7 +105,7 @@ e2e: reset
 e2e-only: settings
 	cd e2e && go run . -root .. -repo $(SANDBOX_REPO) -factory $(SANDBOX_FACTORY_REPO) -lanes $(LANES) -hide-ynh=$(HIDE_YNH) -shadow=$(SHADOW) -gate=$(GATE)
 
-YNH_BASE ?= ghcr.io/eyelock/ynh:0.14.0
+YNH_BASE ?= ghcr.io/eyelock/ynh:0.17.2
 # The golangci-lint release the agent image installs: the repository's one pin.
 GOLANGCI_LINT_VERSION := $(shell cat ../.golangci-lint-version)
 YNH_SRC ?=

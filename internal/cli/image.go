@@ -48,7 +48,16 @@ func buildHarnessImage(ctx context.Context, wt string, cfg policy.Ynh) (string, 
 	if cfg.Base != "" {
 		baseID, _ = output(ctx, "", "docker", "image", "inspect", "--format", "{{.Id}}", cfg.Base)
 	}
-	sum := sha256.Sum256([]byte(strings.TrimSpace(tree) + "\x00" + cfg.Harness + "\x00" + cfg.Base + "\x00" + strings.TrimSpace(baseID)))
+	// A ynh with the trust gate refuses to bake a harness it was not told to accept: ynf's own
+	// repository is the operator's, so the build accepts what the harness executes (`--trust`)
+	// and the image carries the record (ynf #248). An older ynh does not know the flag.
+	trust := runner.DetectYnh(ctx).Trusts()
+	key := strings.TrimSpace(tree) + "\x00" + cfg.Harness + "\x00" + cfg.Base + "\x00" + strings.TrimSpace(baseID)
+	if trust {
+		// An image baked without the record must not be reused once ynh can bake it.
+		key += "\x00trust"
+	}
+	sum := sha256.Sum256([]byte(key))
 	tag := "ynf-harness:" + hex.EncodeToString(sum[:])[:16]
 	if _, err := output(ctx, "", "docker", "image", "inspect", tag); err == nil {
 		return tag, nil
@@ -56,6 +65,9 @@ func buildHarnessImage(ctx context.Context, wt string, cfg policy.Ynh) (string, 
 	args := []string{"image", "ynf-harness", "--from", dir, "--entrypoint", "agent", "--tag", tag}
 	if cfg.Base != "" {
 		args = append(args, "--base", cfg.Base)
+	}
+	if trust {
+		args = append(args, "--trust")
 	}
 	if out, err := output(ctx, "", runner.Ynh, args...); err != nil {
 		return "", fmt.Errorf("ynh image: %w\n%s", err, tailLines(out, 10))

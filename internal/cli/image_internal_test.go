@@ -23,6 +23,44 @@ func fakeTools(t *testing.T, ynhExit int) string {
 	return calls
 }
 
+// gatedYnh makes the fake ynh answer `version --format json` as one with the trust gate (or, with
+// capabilities "0.10.0", without), so a build is asked to accept the harness or not.
+func gatedYnh(t *testing.T, capabilities string) {
+	t.Helper()
+	dir := t.TempDir()
+	calls := filepath.Join(dir, "calls")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = version ]; then echo '{\"version\":\"9.9.9\",\"capabilities\":\"" + capabilities + "\"}'; exit 0; fi\n" +
+		"echo \"ynh $*\" >> " + calls + "\necho building\n"
+	_ = os.WriteFile(filepath.Join(dir, "ynh"), []byte(script), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "docker"), []byte("#!/bin/sh\nexit 1\n"), 0o755)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CALLS", calls)
+}
+
+// TestBuildHarnessImageTrustsOnAGatedYnh: a ynh with the trust gate is asked to accept the harness
+// it bakes (ynf #248), and a ynh without it is not, since it does not know the flag.
+func TestBuildHarnessImageTrustsOnAGatedYnh(t *testing.T) {
+	for _, c := range []struct {
+		caps string
+		want bool
+	}{{"0.11.0", true}, {"0.10.0", false}} {
+		wt := repoWithHarness(t)
+		gatedYnh(t, c.caps)
+		tag, err := buildHarnessImage(context.Background(), wt, policy.Ynh{Harness: "."})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := os.ReadFile(os.Getenv("CALLS"))
+		if got := strings.Contains(string(b), " --trust"); got != c.want {
+			t.Errorf("capabilities %s: --trust passed %v, want %v:\n%s", c.caps, got, c.want, b)
+		}
+		if tag == "" {
+			t.Error("no tag")
+		}
+	}
+}
+
 func repoWithHarness(t *testing.T) string {
 	t.Helper()
 	wt := t.TempDir()

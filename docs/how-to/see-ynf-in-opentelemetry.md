@@ -190,7 +190,7 @@ the collector on, and a receiver of its own as `ynr serve`'s upstream. HOME, `XD
 `YNH_HOME` are its own. It uses no model, no network and no docker.
 
 The lane runs on the `process` executor, which ynf allows with `--interactive`. Its harness is `.`,
-the one the repository carries in `.agents/harness/`. ynh 0.14.0 lists `agent-run-harness-path`,
+the one the repository carries in `.agents/harness/`. ynh 0.17.2 lists `agent-run-harness-path`,
 so ynf passes the folder to `ynh agent run --harness` as a path and installs nothing, with a ynh home
 of the run's own (never yours); the focus is read from the checkout. The check asserts the run
 converged, that the record shows an absolute `--harness` path and the ynh features, and that your

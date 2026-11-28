@@ -16,7 +16,7 @@ env:
   # The ynr release that `conformance` runs, without the leading v. The one place it is pinned.
   YNR_VERSION: 0.6.0
   # The ynh release the full-chain check runs, without the leading v.
-  YNH_VERSION: 0.14.0
+  YNH_VERSION: 0.17.2
 jobs:
   check:
     runs-on: ubuntu-latest
