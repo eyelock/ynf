@@ -347,3 +347,27 @@ func TestCountRatchetWithoutABaselineDoesNotNameOne(t *testing.T) {
 		t.Errorf("%s", c.Lines(""))
 	}
 }
+
+// ynh omits known_count when it is zero: a recorded count-ratchet sensor whose total fell to zero has
+// no known_count and a negative count_delta, and is not a sensor with no baseline (ynw-e0ozv).
+func TestRecordedCountRatchetThatFellToZero(t *testing.T) {
+	c, err := shadow.ParseCheck([]byte(`{"verdict":"pass","sensors":[{"name":"todo","status":"fail","count_delta":-2}],
+	 "baseline":{"recorded_at":"x","known":0,"fixed":0}}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := c.Lines(""); strings.Contains(text, "no baseline recorded") || !strings.Contains(text, "count moved by -2 since the baseline") {
+		t.Errorf("%s", text)
+	}
+	// The baseline's own word settles an ambiguous positive delta: recorded at zero, now 3.
+	c, _ = shadow.ParseCheck([]byte(`{"verdict":"blocked","sensors":[{"name":"todo","status":"fail","count_delta":3}],
+	 "baseline":{"recorded_at":"x","known":0,"fixed":0}}`), []byte(`{"sensors":[{"name":"todo","recorded":true}]}`))
+	if text := c.Lines(""); strings.Contains(text, "no baseline recorded") || !strings.Contains(text, "since the baseline") {
+		t.Errorf("recorded per ynh baseline: %s", text)
+	}
+	c, _ = shadow.ParseCheck([]byte(`{"verdict":"blocked","sensors":[{"name":"todo","status":"fail","count_delta":3}],
+	 "baseline":{"recorded_at":"x","known":0,"fixed":0}}`), []byte(`{"sensors":[{"name":"todo","recorded":false}]}`))
+	if text := c.Lines(""); !strings.Contains(text, "no baseline recorded") {
+		t.Errorf("unrecorded per ynh baseline: %s", text)
+	}
+}

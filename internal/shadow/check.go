@@ -22,7 +22,8 @@ type Check struct {
 	Forgiven []Forgiven `json:"forgiven,omitempty"`
 	// Error says why the check could not be read: ynh missing, a refusal, or output that was not
 	// JSON. The attempt is kept either way.
-	Error string `json:"error,omitempty"`
+	Error     string `json:"error,omitempty"`
+	baselined bool
 	// ExplainError says why the findings the baseline forgave were not read, when the check itself
 	// was: `ynh baseline --explain` failed or does not take this harness. The counts stand.
 	ExplainError string `json:"explain_error,omitempty"`
@@ -99,7 +100,10 @@ func ParseCheck(check, explain []byte) (*Check, error) {
 		if s.Delta != nil {
 			cs.CountDelta = *s.Delta
 		}
-		cs.Recorded = c.Baseline != nil && s.KnownCnt != nil
+		// ynh omits known_count when it is zero, so a recorded count-ratchet sensor whose total fell to
+		// zero has none: its count_delta is negative, which an unrecorded sensor (delta = its whole
+		// total) never has. ynh baseline's per-sensor "recorded" settles the rest, below.
+		cs.Recorded = c.Baseline != nil && (s.KnownCnt != nil || (s.Delta != nil && *s.Delta < 0))
 		// ynh omits new_count when it is zero, and sets no counts without a baseline. A failing sensor
 		// with a known count or a count delta has a baseline: a count-ratchet sensor that regressed has
 		// no new lines, only a positive count_delta, and that is how far it moved. Only a failing
@@ -118,11 +122,13 @@ func ParseCheck(check, explain []byte) (*Check, error) {
 	}
 	if c.Baseline != nil {
 		out.Known, out.Fixed = c.Baseline.Known, c.Baseline.Fixed
+		out.baselined = true
 	}
 	if len(explain) > 0 {
 		var b struct {
 			Sensors []struct {
 				Name     string   `json:"name"`
+				Recorded *bool    `json:"recorded"`
 				Findings []string `json:"findings"`
 			} `json:"sensors"`
 		}
@@ -130,6 +136,14 @@ func ParseCheck(check, explain []byte) (*Check, error) {
 			return out, fmt.Errorf("ynh baseline output: %w", err)
 		}
 		for _, s := range b.Sensors {
+			// The baseline's own word on whether it records this sensor beats the inference.
+			if s.Recorded != nil {
+				for i := range out.Sensors {
+					if out.Sensors[i].Name == s.Name && out.Baselined() {
+						out.Sensors[i].Recorded = *s.Recorded
+					}
+				}
+			}
 			if len(s.Findings) > 0 {
 				out.Forgiven = append(out.Forgiven, Forgiven{Sensor: s.Name, Findings: s.Findings})
 			}
@@ -137,6 +151,9 @@ func ParseCheck(check, explain []byte) (*Check, error) {
 	}
 	return out, nil
 }
+
+// Baselined reports whether the check had a baseline at all.
+func (c *Check) Baselined() bool { return c.baselined }
 
 // clip keeps the start of a sensor's output, enough to read what failed.
 func clip(s string) string {
