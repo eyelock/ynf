@@ -103,8 +103,13 @@ ynf shadow grade            # the latest run; or: ynf shadow grade 01K9Q3…
 ```
 
 At a terminal, for each attempt ynf shows the ticket, then two patches labelled A and B. One is the
-agent's and one the human's, in a random order that ynf records but does not show. Give each one of
-five grades, by name or number:
+agent's and one the human's, in a random order that ynf records but does not show. Under them is
+what `ynh check` found on the attempt: the new findings, the failures its baseline forgave to let
+it through, and the debt it paid off. It does not say which patch it was of, so the order stays
+hidden. A repository with no baseline shows each failing sensor as failed, with its output, since
+every failure is then new. A lane whose harness is a folder in the repository shows the check
+without the forgiven findings, because `ynh baseline` takes an installed harness id. Give each
+one of five grades, by name or number:
 
 | Grade | Meaning |
 |---|---|
@@ -150,6 +155,8 @@ ynf --format json shadow report --lane lint-paydown
 - **The pins**: lane, policy hash, harness and its commit, image, ynh version, model and effort.
   If anything differed between attempts, the report says so, because the sample is then more than
   one experiment.
+- **The ynh check**: how many attempts were checked, how many had a new finding, how many had a
+  finding the baseline forgave, and a line for each attempt that had either (`checks` in the JSON).
 - **The grader check**: how many human patches you graded `equivalent` or `different-valid`.
 
 Lanes do not yet declare the human time `h`, so the report does not compare `y` with

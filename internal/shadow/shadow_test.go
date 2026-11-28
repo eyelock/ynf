@@ -269,3 +269,36 @@ func TestCheckRecordsNewAndForgivenFindings(t *testing.T) {
 		t.Error("output that is not ynh check's must be an error")
 	}
 }
+
+// ynh counts new and known failures only when a baseline exists. With none, a failing sensor has a
+// status and no counts, and it must still be shown and counted (ynw-was8r).
+func TestCheckWithoutABaselineShowsTheFailure(t *testing.T) {
+	c, err := shadow.ParseCheck([]byte(`{"verdict":"blocked","sensors":[
+	 {"name":"vet","status":"fail","exit_code":2,"stdout":"main.go:3: unused x\n","stderr":""},
+	 {"name":"docs","status":"reported","note":"stale"}]}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.NewFindings() != 1 {
+		t.Fatalf("a failing sensor with no baseline is a new finding: %+v", c)
+	}
+	text := c.Lines("")
+	for _, want := range []string{"vet (fail): failed, no baseline, so every failure is new (exit 2)", "new: main.go:3: unused x", "docs (reported)", "note: stale"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q:\n%s", want, text)
+		}
+	}
+	rep := shadow.BuildReport("l", []shadow.Run{{ID: "R"}}, []shadow.Attempt{{ID: "1", Run: "R", Repo: "o/r", Ticket: "o/r#1", Check: c}}, nil)
+	if rep.Checks.WithNew != 1 {
+		t.Errorf("the report must count it: %+v", rep.Checks)
+	}
+}
+
+// A failed explain is not worded as the check being unreadable.
+func TestExplainErrorIsNotACheckError(t *testing.T) {
+	c := &shadow.Check{Verdict: "pass", ExplainError: "ynh baseline --explain: exit status 1"}
+	text := c.Lines("")
+	if strings.Contains(text, "could not be read") || !strings.Contains(text, "the findings the baseline forgave were not read") {
+		t.Errorf("%s", text)
+	}
+}

@@ -23,6 +23,9 @@ type Check struct {
 	// Error says why the check could not be read: ynh missing, a refusal, or output that was not
 	// JSON. The attempt is kept either way.
 	Error string `json:"error,omitempty"`
+	// ExplainError says why the findings the baseline forgave were not read, when the check itself
+	// was: `ynh baseline --explain` failed or does not take this harness. The counts stand.
+	ExplainError string `json:"explain_error,omitempty"`
 }
 
 // CheckSensor is one sensor's result: its status, the failures not in the baseline (new) and the
@@ -33,6 +36,14 @@ type CheckSensor struct {
 	New       int    `json:"new,omitempty"`
 	Known     int    `json:"known,omitempty"`
 	NewOutput string `json:"new_output,omitempty"`
+	// Unbaselined is true for a failing sensor ynh gave no counts for: ynh counts new and known
+	// failures only when a baseline exists, so with none the sensor failed and every failure is new.
+	Unbaselined bool `json:"unbaselined,omitempty"`
+	// Exit, Stdout, Stderr and Note say what the sensor did when ynh gave no new_output.
+	Exit   int    `json:"exit,omitempty"`
+	Stdout string `json:"stdout,omitempty"`
+	Stderr string `json:"stderr,omitempty"`
+	Note   string `json:"note,omitempty"`
 }
 
 // Forgiven is the findings one sensor's baseline forgave.
@@ -49,9 +60,13 @@ func ParseCheck(check, explain []byte) (*Check, error) {
 		Sensors []struct {
 			Name      string `json:"name"`
 			Status    string `json:"status"`
-			NewCount  int    `json:"new_count"`
-			KnownCnt  int    `json:"known_count"`
+			NewCount  *int   `json:"new_count"`
+			KnownCnt  *int   `json:"known_count"`
 			NewOutput string `json:"new_output"`
+			ExitCode  int    `json:"exit_code"`
+			Stdout    string `json:"stdout"`
+			Stderr    string `json:"stderr"`
+			Note      string `json:"note"`
 		} `json:"sensors"`
 		Baseline *struct {
 			Known int `json:"known"`
@@ -66,7 +81,16 @@ func ParseCheck(check, explain []byte) (*Check, error) {
 	}
 	out := &Check{Verdict: c.Verdict}
 	for _, s := range c.Sensors {
-		out.Sensors = append(out.Sensors, CheckSensor{Name: s.Name, Status: s.Status, New: s.NewCount, Known: s.KnownCnt, NewOutput: s.NewOutput})
+		cs := CheckSensor{Name: s.Name, Status: s.Status, NewOutput: s.NewOutput, Exit: s.ExitCode,
+			Stdout: clip(s.Stdout), Stderr: clip(s.Stderr), Note: s.Note}
+		if s.NewCount != nil {
+			cs.New = *s.NewCount
+		}
+		if s.KnownCnt != nil {
+			cs.Known = *s.KnownCnt
+		}
+		cs.Unbaselined = s.Status == "fail" && s.NewCount == nil
+		out.Sensors = append(out.Sensors, cs)
 	}
 	if c.Baseline != nil {
 		out.Known, out.Fixed = c.Baseline.Known, c.Baseline.Fixed
@@ -90,11 +114,24 @@ func ParseCheck(check, explain []byte) (*Check, error) {
 	return out, nil
 }
 
-// NewFindings is how many failures the check found that its baseline did not forgive.
+// clip keeps the start of a sensor's output, enough to read what failed.
+func clip(s string) string {
+	const max = 1500
+	if len(s) > max {
+		return s[:max] + "…"
+	}
+	return s
+}
+
+// NewFindings is how many failures the check found that its baseline did not forgive. A failing
+// sensor ynh gave no counts for (no baseline) counts as one: it failed, and nothing was forgiven.
 func (c *Check) NewFindings() int {
 	n := 0
 	for _, s := range c.Sensors {
 		n += s.New
+		if s.Unbaselined {
+			n++
+		}
 	}
 	return n
 }
@@ -118,18 +155,32 @@ func (c *Check) Lines(indent string) string {
 	if c.Error != "" {
 		fmt.Fprintf(&b, "%synh check could not be read: %s\n", indent, c.Error)
 	}
+	if c.ExplainError != "" {
+		fmt.Fprintf(&b, "%sthe findings the baseline forgave were not read: %s\n", indent, c.ExplainError)
+	}
 	if c.Verdict != "" {
 		fmt.Fprintf(&b, "%sverdict %s: %d new, %d known (forgiven by the baseline), %d fixed\n", indent, c.Verdict, c.NewFindings(), c.Known, c.Fixed)
 	}
 	for _, s := range c.Sensors {
-		if s.New == 0 && s.Known == 0 {
+		if s.New == 0 && s.Known == 0 && s.Status != "fail" && s.Status != "known" && s.Status != "reported" && s.Status != "deferred" {
 			continue
 		}
-		fmt.Fprintf(&b, "%s  %s (%s): %d new, %d known\n", indent, s.Name, s.Status, s.New, s.Known)
-		for _, l := range strings.Split(strings.TrimRight(s.NewOutput, "\n"), "\n") {
+		if s.Unbaselined {
+			fmt.Fprintf(&b, "%s  %s (%s): failed, no baseline, so every failure is new (exit %d)\n", indent, s.Name, s.Status, s.Exit)
+		} else {
+			fmt.Fprintf(&b, "%s  %s (%s): %d new, %d known\n", indent, s.Name, s.Status, s.New, s.Known)
+		}
+		out := s.NewOutput
+		if out == "" {
+			out = strings.TrimSpace(s.Stdout + "\n" + s.Stderr)
+		}
+		for _, l := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
 			if l != "" {
 				fmt.Fprintf(&b, "%s    new: %s\n", indent, l)
 			}
+		}
+		if s.Note != "" {
+			fmt.Fprintf(&b, "%s    note: %s\n", indent, s.Note)
 		}
 	}
 	for _, f := range c.Forgiven {

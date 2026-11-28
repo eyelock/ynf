@@ -523,30 +523,35 @@ var ynhOutput = func(ctx context.Context, dir string, args ...string) ([]byte, e
 // read from ynh's JSON (ynf #257). It never fails the attempt: a check that cannot be read is kept
 // as the error, so a grader knows nothing was shown rather than that nothing was found.
 func shadowCheck(ctx context.Context, wt, harness string) *shadow.Check {
-	ref := harness
+	ref, folder := harness, false
 	if p := filepath.Join(wt, harness); harness != "" && maybeFolder(harness) {
 		if st, err := os.Stat(p); err == nil && st.IsDir() {
-			ref = p
+			ref, folder = p, true
 		}
 	}
 	out, err := ynhOutput(ctx, wt, "check", ref, "--format", "json")
 	if err != nil {
 		return &shadow.Check{Error: err.Error()}
 	}
-	// What the baseline forgave, with the findings it stands for. A refusal of this half leaves the
-	// counts in place.
-	explain, eerr := ynhOutput(ctx, wt, "baseline", ref, "--explain", "--format", "json")
-	if eerr != nil {
-		explain = nil
+	// What the baseline forgave, with the findings it stands for. ynh baseline takes an installed
+	// id and not a folder, so a folder lane's forgiven findings are not read here (ynf #257); the
+	// counts from the check stand, and the check says so.
+	var explain []byte
+	var explainErr string
+	if folder {
+		explainErr = "ynh baseline takes an installed harness id, not a folder, so a folder lane's forgiven findings are not read"
+	} else if e, eerr := ynhOutput(ctx, wt, "baseline", ref, "--explain", "--format", "json"); eerr != nil {
+		explainErr = "ynh baseline --explain: " + eerr.Error()
+	} else {
+		explain = e
 	}
 	c, err := shadow.ParseCheck(out, explain)
 	if c == nil {
 		return &shadow.Check{Error: err.Error()}
 	}
+	c.ExplainError = explainErr
 	if err != nil {
-		c.Error = err.Error()
-	} else if eerr != nil {
-		c.Error = "ynh baseline --explain: " + eerr.Error()
+		c.ExplainError = err.Error()
 	}
 	return c
 }
