@@ -89,10 +89,22 @@ type Report struct {
 	CostPerRun   float64     `json:"cost_per_attempt,omitempty"`
 	Pins         []PinRecord `json:"pins"`
 	Grader       GraderCheck `json:"grader_check"`
+	// Checks sums ynh check's findings over the attempts that recorded one (ynf #257).
+	Checks CheckSummary `json:"checks"`
 	// BreakEven is y* = r ÷ h, when the lane declares the human time h and the review time r;
 	// lanes declare neither yet, so it is never set and yield is not compared with it.
 	BreakEven *float64 `json:"break_even,omitempty"`
 	Note      string   `json:"note,omitempty"`
+}
+
+// CheckSummary is what the attempts' ynh checks found, in all: how many attempts were checked, how
+// many had a finding the baseline did not forgive (new), and how many had one it forgave, with a
+// line for each attempt that had either.
+type CheckSummary struct {
+	Attempts     int      `json:"attempts"`
+	WithNew      int      `json:"with_new"`
+	WithForgiven int      `json:"with_forgiven"`
+	Lines        []string `json:"lines,omitempty"`
 }
 
 // PinRecord is one repository's pins in one shadow run.
@@ -128,6 +140,22 @@ func BuildReport(lane string, runs []Run, attempts []Attempt, grades map[string]
 	rep.Graded = rep.Pooled.Graded
 	for _, repo := range slices.Sorted(maps.Keys(repos)) {
 		rep.Repos = append(rep.Repos, group(repo, repos[repo], grades))
+	}
+	for _, a := range attempts {
+		if a.Check == nil {
+			continue
+		}
+		rep.Checks.Attempts++
+		n, f := a.Check.NewFindings(), a.Check.ForgivenFindings()
+		if n > 0 {
+			rep.Checks.WithNew++
+		}
+		if f > 0 {
+			rep.Checks.WithForgiven++
+		}
+		if n > 0 || f > 0 {
+			rep.Checks.Lines = append(rep.Checks.Lines, fmt.Sprintf("%s: %d new, %d forgiven", a.Ticket, n, f))
+		}
 	}
 	rep.Grader = GraderCheck{Grades: map[string]int{}}
 	ok := 0
@@ -210,6 +238,13 @@ func (r Report) Text() string {
 	}
 	if r.CostReported > 0 {
 		fmt.Fprintf(&b, "\ncost  $%.4f in all, $%.4f per attempt (%d of %d attempts reported one)\n", r.CostUSD, r.CostPerRun, r.CostReported, r.Attempted)
+	}
+	if r.Checks.Attempts > 0 {
+		fmt.Fprintf(&b, "\nynh check of the agent's changes: %d of %d attempts checked; %d with a new finding, %d with a finding the baseline forgave\n",
+			r.Checks.Attempts, r.Attempted, r.Checks.WithNew, r.Checks.WithForgiven)
+		for _, l := range r.Checks.Lines {
+			fmt.Fprintf(&b, "  %s\n", l)
+		}
 	}
 	b.WriteString("\ngrader check: the human patches, which were merged\n")
 	if r.Grader.Graded == 0 {

@@ -215,3 +215,57 @@ func TestPinsObserve(t *testing.T) {
 		t.Fatal("a pin that varied must be said")
 	}
 }
+
+const checkJSON = `{"verdict":"pass","summary":{"total":2},"sensors":[
+ {"name":"lint","status":"known","new_count":0,"known_count":2},
+ {"name":"vet","status":"fail","new_count":1,"known_count":0,"new_output":"main.go:3: unused x\n"}],
+ "baseline":{"recorded_at":"x","known":2,"fixed":1}}`
+
+const explainJSON = `{"sensors":[{"name":"lint","findings":["a.go:1: old debt","b.go:2: old debt"]},{"name":"vet"}]}`
+
+// ynf #257: an attempt keeps ynh check's new findings and what its baseline forgave, and the report
+// and the grader's view show them.
+func TestCheckRecordsNewAndForgivenFindings(t *testing.T) {
+	c, err := shadow.ParseCheck([]byte(checkJSON), []byte(explainJSON))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.NewFindings() != 1 || c.Known != 2 || c.Fixed != 1 || c.ForgivenFindings() != 2 {
+		t.Fatalf("%+v", c)
+	}
+	text := c.Lines("")
+	for _, want := range []string{"1 new, 2 known (forgiven by the baseline), 1 fixed", "new: main.go:3: unused x", "forgiven (lint): a.go:1: old debt"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q:\n%s", want, text)
+		}
+	}
+
+	// Kept with the attempt through the store.
+	ctx := context.Background()
+	st, err := sqlite.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	a := shadow.Attempt{ID: "1", Run: "R", Repo: "o/r", Ticket: "o/r#1", Outcome: runner.Converged, Check: c}
+	if err := shadow.SaveAttempt(ctx, st, a); err != nil {
+		t.Fatal(err)
+	}
+	got, err := shadow.Attempts(ctx, st, "R")
+	if err != nil || len(got) != 1 || got[0].Check == nil || got[0].Check.ForgivenFindings() != 2 || got[0].Check.NewFindings() != 1 {
+		t.Fatalf("%+v %v", got, err)
+	}
+
+	rep := shadow.BuildReport("fmt", []shadow.Run{{ID: "R"}}, got, nil)
+	if rep.Checks.Attempts != 1 || rep.Checks.WithNew != 1 || rep.Checks.WithForgiven != 1 {
+		t.Fatalf("%+v", rep.Checks)
+	}
+	if rt := rep.Text(); !strings.Contains(rt, "1 with a new finding, 1 with a finding the baseline forgave") || !strings.Contains(rt, "o/r#1: 1 new, 2 forgiven") {
+		t.Errorf("the report must show them:\n%s", rt)
+	}
+
+	// An unreadable check is kept as an error, never read as clean.
+	if _, err := shadow.ParseCheck([]byte("not json"), nil); err == nil {
+		t.Error("output that is not ynh check's must be an error")
+	}
+}

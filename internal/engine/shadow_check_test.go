@@ -1,0 +1,35 @@
+package engine
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+)
+
+// ynf #257: shadowCheck reads ynh check's JSON and the baseline's, and keeps an error rather than
+// a clean result when ynh cannot be read.
+func TestShadowCheckReadsYnh(t *testing.T) {
+	old := ynhOutput
+	t.Cleanup(func() { ynhOutput = old })
+	var calls []string
+	ynhOutput = func(_ context.Context, dir string, args ...string) ([]byte, error) {
+		calls = append(calls, strings.Join(args, " "))
+		if args[0] == "check" {
+			return []byte(`{"verdict":"blocked","sensors":[{"name":"vet","status":"fail","new_count":2,"known_count":1}],"baseline":{"known":1,"fixed":0}}`), nil
+		}
+		return []byte(`{"sensors":[{"name":"vet","findings":["x.go:1: old"]}]}`), nil
+	}
+	c := shadowCheck(context.Background(), t.TempDir(), "acme@1")
+	if c.Error != "" || c.Verdict != "blocked" || c.NewFindings() != 2 || c.ForgivenFindings() != 1 {
+		t.Fatalf("%+v", c)
+	}
+	if len(calls) != 2 || calls[0] != "check acme@1 --format json" || calls[1] != "baseline acme@1 --explain --format json" {
+		t.Errorf("calls %q", calls)
+	}
+
+	ynhOutput = func(context.Context, string, ...string) ([]byte, error) { return nil, errors.New("no ynh") }
+	if c := shadowCheck(context.Background(), t.TempDir(), "acme@1"); c.Error == "" || c.Verdict != "" {
+		t.Errorf("an unreadable check must be an error, not a pass: %+v", c)
+	}
+}

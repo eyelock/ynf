@@ -169,6 +169,10 @@ type Attempt struct {
 	GateAccepted bool   `json:"gate_accepted"`
 	GateDetail   string `json:"gate_detail,omitempty"`
 
+	// Check is what ynh check found on the change and what its baseline forgave to let it through,
+	// when the lane runs ynh (ynf #257). Nil when no check was run.
+	Check *Check `json:"check,omitempty"`
+
 	AgentPatch string `json:"agent_patch"`
 	HumanPatch string `json:"human_patch"`
 	RunDir     string `json:"run_dir,omitempty"` // the run's folder: task, stdout, stderr, trajectory

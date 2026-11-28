@@ -348,6 +348,9 @@ func (g grader) interactive(in io.Reader, attempts []shadow.Attempt) error {
 		pa, pb := at.Blind()
 		say(g.out, "\n=== attempt %d of %d: %s ===\n\n%s\n\n%s\n", i+1, len(todo), at.Ticket, strings.TrimSpace(at.Title), strings.TrimSpace(at.Body))
 		say(g.out, "\n--- patch A ---\n%s\n--- patch B ---\n%s\n", strings.TrimRight(pa, "\n"), strings.TrimRight(pb, "\n"))
+		if lines := at.Check.Lines("  "); lines != "" {
+			say(g.out, "\n--- ynh check: what the gate saw, and what its baseline forgave ---\n%s", lines)
+		}
 		ga, ok := ask("A")
 		if !ok {
 			return nil
