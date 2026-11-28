@@ -42,6 +42,9 @@ type CheckSensor struct {
 	// CountDelta is how far a count-ratchet sensor's total has moved since the baseline; positive is
 	// new findings. ynh sets it for such a sensor only.
 	CountDelta int `json:"count_delta,omitempty"`
+	// Recorded is true when the check had a baseline and ynh counted known failures for this sensor.
+	// Without it a count_delta is the sensor's whole total, not a move from a recorded one.
+	Recorded bool `json:"recorded,omitempty"`
 	// Exit, Stdout, Stderr and Note say what the sensor did when ynh gave no new_output.
 	Exit   int    `json:"exit,omitempty"`
 	Stdout string `json:"stdout,omitempty"`
@@ -96,6 +99,7 @@ func ParseCheck(check, explain []byte) (*Check, error) {
 		if s.Delta != nil {
 			cs.CountDelta = *s.Delta
 		}
+		cs.Recorded = c.Baseline != nil && s.KnownCnt != nil
 		// ynh omits new_count when it is zero, and sets no counts without a baseline. A failing sensor
 		// with a known count or a count delta has a baseline: a count-ratchet sensor that regressed has
 		// no new lines, only a positive count_delta, and that is how far it moved. Only a failing
@@ -188,8 +192,11 @@ func (c *Check) Lines(indent string) string {
 		switch {
 		case s.Unbaselined:
 			fmt.Fprintf(&b, "%s  %s (%s): failed, no baseline, so every failure is new (exit %d)\n", indent, s.Name, s.Status, s.Exit)
-		case s.CountDelta != 0:
+		case s.CountDelta != 0 && s.Recorded:
 			fmt.Fprintf(&b, "%s  %s (%s): count moved by %+d since the baseline, %d new, %d known\n", indent, s.Name, s.Status, s.CountDelta, s.New, s.Known)
+		case s.CountDelta != 0:
+			// ynh sets count_delta for a count-ratchet sensor with nothing recorded too: it is the whole total.
+			fmt.Fprintf(&b, "%s  %s (%s): count is %d, no baseline recorded for it, so all are new (exit %d)\n", indent, s.Name, s.Status, s.CountDelta, s.Exit)
 		default:
 			fmt.Fprintf(&b, "%s  %s (%s): %d new, %d known\n", indent, s.Name, s.Status, s.New, s.Known)
 		}

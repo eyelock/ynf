@@ -326,3 +326,24 @@ func TestCheckCountRatchetRegression(t *testing.T) {
 		t.Errorf("%+v", c.Sensors[0])
 	}
 }
+
+// ynh sets count_delta for a count-ratchet sensor with no baseline too, as its whole total, and writes
+// no baseline block: ynf must not say "since the baseline" for it (ynw-a94cu).
+func TestCountRatchetWithoutABaselineDoesNotNameOne(t *testing.T) {
+	c, err := shadow.ParseCheck([]byte(`{"verdict":"blocked","sensors":[{"name":"todo","status":"fail","count_delta":3,"exit_code":1}]}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := c.Lines("")
+	if strings.Contains(text, "since the baseline") || !strings.Contains(text, "todo (fail): count is 3, no baseline recorded for it, so all are new") {
+		t.Errorf("%s", text)
+	}
+	if c.NewFindings() != 3 {
+		t.Errorf("the count is still new: %d", c.NewFindings())
+	}
+	// A baseline exists but does not record this sensor: no known_count, so still no baseline for it.
+	c, _ = shadow.ParseCheck([]byte(`{"verdict":"blocked","sensors":[{"name":"todo","status":"fail","count_delta":2}],"baseline":{"recorded_at":"x","known":0,"fixed":0}}`), nil)
+	if strings.Contains(c.Lines(""), "since the baseline") {
+		t.Errorf("%s", c.Lines(""))
+	}
+}
