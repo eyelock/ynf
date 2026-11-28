@@ -126,3 +126,36 @@ func TestAutoGradeAnEmptyPatch(t *testing.T) {
 		t.Fatal("an attempt with no patch cannot be graded by hand")
 	}
 }
+
+// ynf #257: the grader sees what ynh check found and what its baseline forgave, without being told
+// whose patch it was.
+func TestInteractiveShowsTheCheck(t *testing.T) {
+	ctx := context.Background()
+	st, err := sqlite.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	e := &engine.Engine{Store: st, Now: func() time.Time { return time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC) }}
+	c := &shadow.Check{Verdict: "pass", Known: 1,
+		Sensors:  []shadow.CheckSensor{{Name: "vet", Status: "fail", New: 1, NewOutput: "main.go:3: unused x"}},
+		Forgiven: []shadow.Forgiven{{Sensor: "lint", Findings: []string{"a.go:1: old debt"}}}}
+	at := shadow.Attempt{ID: "1", Run: "R", Ticket: "o/r#1", Title: "T", FixPR: 4, Outcome: "converged", AgentPatch: "AP", HumanPatch: "HP", Check: c}
+	if err := shadow.SaveAttempt(ctx, st, at); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	g := grader{ctx: ctx, e: e, run: shadow.Run{ID: "R"}, out: &out, by: "tester"}
+	if err := g.interactive(strings.NewReader("q\n"), []shadow.Attempt{at}); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	for _, want := range []string{"new: main.go:3: unused x", "forgiven (lint): a.go:1: old debt"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the grader should see %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "agent's") {
+		t.Errorf("the check must not unblind the patches:\n%s", text)
+	}
+}

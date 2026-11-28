@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -495,9 +496,62 @@ func (e *Engine) shadowAttempt(ctx context.Context, run *shadow.Run, t *shadowTa
 			e.log().Warn("shadow patch", "ticket", a.Ticket, "err", err)
 		}
 	}
+	if s.wt != "" && t.lane.Run.Runner == "ynh" && t.lane.Run.Ynh != nil {
+		a.Check = shadowCheck(ctx, s.wt, t.lane.Run.Ynh.Harness)
+	}
 	if a.RunDir != "" {
 		_ = os.WriteFile(filepath.Join(a.RunDir, "shadow-agent.patch"), []byte(a.AgentPatch), 0o644)
 		_ = os.WriteFile(filepath.Join(a.RunDir, "shadow-human.patch"), []byte(a.HumanPatch), 0o644)
 	}
 	return a
+}
+
+// ynhOutput runs ynh in dir and returns its standard output. A variable so a test stands in for
+// ynh; ynh check exits 1 when it blocks, which is not a failure to read it.
+var ynhOutput = func(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "ynh", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && len(out) > 0 {
+		return out, nil
+	}
+	return out, err
+}
+
+// shadowCheck records what ynh check finds on the attempt's worktree and what its baseline forgave,
+// read from ynh's JSON (ynf #257). It never fails the attempt: a check that cannot be read is kept
+// as the error, so a grader knows nothing was shown rather than that nothing was found.
+func shadowCheck(ctx context.Context, wt, harness string) *shadow.Check {
+	ref, folder := harness, false
+	if p := filepath.Join(wt, harness); harness != "" && maybeFolder(harness) {
+		if st, err := os.Stat(p); err == nil && st.IsDir() {
+			ref, folder = p, true
+		}
+	}
+	out, err := ynhOutput(ctx, wt, "check", ref, "--format", "json")
+	if err != nil {
+		return &shadow.Check{Error: err.Error()}
+	}
+	// What the baseline forgave, with the findings it stands for. ynh baseline takes an installed
+	// id and not a folder, so a folder lane's forgiven findings are not read here (ynf #257); the
+	// counts from the check stand, and the check says so.
+	var explain []byte
+	var explainErr string
+	if folder {
+		explainErr = "ynh baseline takes an installed harness id, not a folder, so a folder lane's forgiven findings are not read"
+	} else if e, eerr := ynhOutput(ctx, wt, "baseline", ref, "--explain", "--format", "json"); eerr != nil {
+		explainErr = "ynh baseline --explain: " + eerr.Error()
+	} else {
+		explain = e
+	}
+	c, err := shadow.ParseCheck(out, explain)
+	if c == nil {
+		return &shadow.Check{Error: err.Error()}
+	}
+	c.ExplainError = explainErr
+	if err != nil {
+		c.ExplainError = err.Error()
+	}
+	return c
 }

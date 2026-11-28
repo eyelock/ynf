@@ -215,3 +215,159 @@ func TestPinsObserve(t *testing.T) {
 		t.Fatal("a pin that varied must be said")
 	}
 }
+
+const checkJSON = `{"verdict":"pass","summary":{"total":2},"sensors":[
+ {"name":"lint","status":"known","new_count":0,"known_count":2},
+ {"name":"vet","status":"fail","new_count":1,"known_count":0,"new_output":"main.go:3: unused x\n"}],
+ "baseline":{"recorded_at":"x","known":2,"fixed":1}}`
+
+const explainJSON = `{"sensors":[{"name":"lint","findings":["a.go:1: old debt","b.go:2: old debt"]},{"name":"vet"}]}`
+
+// ynf #257: an attempt keeps ynh check's new findings and what its baseline forgave, and the report
+// and the grader's view show them.
+func TestCheckRecordsNewAndForgivenFindings(t *testing.T) {
+	c, err := shadow.ParseCheck([]byte(checkJSON), []byte(explainJSON))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.NewFindings() != 1 || c.Known != 2 || c.Fixed != 1 || c.ForgivenFindings() != 2 {
+		t.Fatalf("%+v", c)
+	}
+	text := c.Lines("")
+	for _, want := range []string{"1 new, 2 known (forgiven by the baseline), 1 fixed", "new: main.go:3: unused x", "forgiven (lint): a.go:1: old debt"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q:\n%s", want, text)
+		}
+	}
+
+	// Kept with the attempt through the store.
+	ctx := context.Background()
+	st, err := sqlite.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	a := shadow.Attempt{ID: "1", Run: "R", Repo: "o/r", Ticket: "o/r#1", Outcome: runner.Converged, Check: c}
+	if err := shadow.SaveAttempt(ctx, st, a); err != nil {
+		t.Fatal(err)
+	}
+	got, err := shadow.Attempts(ctx, st, "R")
+	if err != nil || len(got) != 1 || got[0].Check == nil || got[0].Check.ForgivenFindings() != 2 || got[0].Check.NewFindings() != 1 {
+		t.Fatalf("%+v %v", got, err)
+	}
+
+	rep := shadow.BuildReport("fmt", []shadow.Run{{ID: "R"}}, got, nil)
+	if rep.Checks.Attempts != 1 || rep.Checks.WithNew != 1 || rep.Checks.WithForgiven != 1 {
+		t.Fatalf("%+v", rep.Checks)
+	}
+	if rt := rep.Text(); !strings.Contains(rt, "1 with a new finding, 1 with a finding the baseline forgave") || !strings.Contains(rt, "o/r#1: 1 new, 2 forgiven") {
+		t.Errorf("the report must show them:\n%s", rt)
+	}
+
+	// An unreadable check is kept as an error, never read as clean.
+	if _, err := shadow.ParseCheck([]byte("not json"), nil); err == nil {
+		t.Error("output that is not ynh check's must be an error")
+	}
+}
+
+// ynh counts new and known failures only when a baseline exists. With none, a failing sensor has a
+// status and no counts, and it must still be shown and counted (ynw-was8r).
+func TestCheckWithoutABaselineShowsTheFailure(t *testing.T) {
+	c, err := shadow.ParseCheck([]byte(`{"verdict":"blocked","sensors":[
+	 {"name":"vet","status":"fail","exit_code":2,"stdout":"main.go:3: unused x\n","stderr":""},
+	 {"name":"docs","status":"reported","note":"stale"}]}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.NewFindings() != 1 {
+		t.Fatalf("a failing sensor with no baseline is a new finding: %+v", c)
+	}
+	text := c.Lines("")
+	for _, want := range []string{"vet (fail): failed, no baseline, so every failure is new (exit 2)", "new: main.go:3: unused x", "docs (reported)", "note: stale"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q:\n%s", want, text)
+		}
+	}
+	rep := shadow.BuildReport("l", []shadow.Run{{ID: "R"}}, []shadow.Attempt{{ID: "1", Run: "R", Repo: "o/r", Ticket: "o/r#1", Check: c}}, nil)
+	if rep.Checks.WithNew != 1 {
+		t.Errorf("the report must count it: %+v", rep.Checks)
+	}
+}
+
+// A failed explain is not worded as the check being unreadable.
+func TestExplainErrorIsNotACheckError(t *testing.T) {
+	c := &shadow.Check{Verdict: "pass", ExplainError: "ynh baseline --explain: exit status 1"}
+	text := c.Lines("")
+	if strings.Contains(text, "could not be read") || !strings.Contains(text, "the findings the baseline forgave were not read") {
+		t.Errorf("%s", text)
+	}
+}
+
+// ynh omits new_count when it is zero, so a count-ratchet sensor that regressed has status fail, a
+// known_count and a count_delta, and no new_count: that is a baseline that exists, not none
+// (ynw-2z0w0).
+func TestCheckCountRatchetRegression(t *testing.T) {
+	c, err := shadow.ParseCheck([]byte(`{"verdict":"blocked","sensors":[
+	 {"name":"todo","status":"fail","known_count":4,"count_delta":3}],
+	 "baseline":{"recorded_at":"x","known":4,"fixed":0}}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Sensors[0].Unbaselined || c.NewFindings() != 3 {
+		t.Fatalf("a regression is 3 new, not 'no baseline': %+v", c.Sensors[0])
+	}
+	text := c.Lines("")
+	if strings.Contains(text, "no baseline") || !strings.Contains(text, "count moved by +3 since the baseline, 3 new, 4 known") {
+		t.Errorf("%s", text)
+	}
+	// No baseline block, no counts: that is the no-baseline case.
+	c, _ = shadow.ParseCheck([]byte(`{"verdict":"blocked","sensors":[{"name":"v","status":"fail"}]}`), nil)
+	if !c.Sensors[0].Unbaselined {
+		t.Errorf("%+v", c.Sensors[0])
+	}
+}
+
+// ynh sets count_delta for a count-ratchet sensor with no baseline too, as its whole total, and writes
+// no baseline block: ynf must not say "since the baseline" for it (ynw-a94cu).
+func TestCountRatchetWithoutABaselineDoesNotNameOne(t *testing.T) {
+	c, err := shadow.ParseCheck([]byte(`{"verdict":"blocked","sensors":[{"name":"todo","status":"fail","count_delta":3,"exit_code":1}]}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := c.Lines("")
+	if strings.Contains(text, "since the baseline") || !strings.Contains(text, "todo (fail): count is 3, no baseline recorded for it, so all are new") {
+		t.Errorf("%s", text)
+	}
+	if c.NewFindings() != 3 {
+		t.Errorf("the count is still new: %d", c.NewFindings())
+	}
+	// A baseline exists but does not record this sensor: no known_count, so still no baseline for it.
+	c, _ = shadow.ParseCheck([]byte(`{"verdict":"blocked","sensors":[{"name":"todo","status":"fail","count_delta":2}],"baseline":{"recorded_at":"x","known":0,"fixed":0}}`), nil)
+	if strings.Contains(c.Lines(""), "since the baseline") {
+		t.Errorf("%s", c.Lines(""))
+	}
+}
+
+// ynh omits known_count when it is zero: a recorded count-ratchet sensor whose total fell to zero has
+// no known_count and a negative count_delta, and is not a sensor with no baseline (ynw-e0ozv).
+func TestRecordedCountRatchetThatFellToZero(t *testing.T) {
+	c, err := shadow.ParseCheck([]byte(`{"verdict":"pass","sensors":[{"name":"todo","status":"fail","count_delta":-2}],
+	 "baseline":{"recorded_at":"x","known":0,"fixed":0}}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := c.Lines(""); strings.Contains(text, "no baseline recorded") || !strings.Contains(text, "count moved by -2 since the baseline") {
+		t.Errorf("%s", text)
+	}
+	// The baseline's own word settles an ambiguous positive delta: recorded at zero, now 3.
+	c, _ = shadow.ParseCheck([]byte(`{"verdict":"blocked","sensors":[{"name":"todo","status":"fail","count_delta":3}],
+	 "baseline":{"recorded_at":"x","known":0,"fixed":0}}`), []byte(`{"sensors":[{"name":"todo","recorded":true}]}`))
+	if text := c.Lines(""); strings.Contains(text, "no baseline recorded") || !strings.Contains(text, "since the baseline") {
+		t.Errorf("recorded per ynh baseline: %s", text)
+	}
+	c, _ = shadow.ParseCheck([]byte(`{"verdict":"blocked","sensors":[{"name":"todo","status":"fail","count_delta":3}],
+	 "baseline":{"recorded_at":"x","known":0,"fixed":0}}`), []byte(`{"sensors":[{"name":"todo","recorded":false}]}`))
+	if text := c.Lines(""); !strings.Contains(text, "no baseline recorded") {
+		t.Errorf("unrecorded per ynh baseline: %s", text)
+	}
+}
